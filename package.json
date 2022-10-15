@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "npx hardhat test",
+	"test-ft": "npx hardhat test test/FungibleTokenCreator.test.js",
+	"test-nft": "npx hardhat test test/MinterContract.test.js",
     "deploy": "npx hardhat run scripts/deploy.js",
     "interact": "npx hardhat run scripts/interact.js",
     "logs": "node scripts/getContractLogs.js",

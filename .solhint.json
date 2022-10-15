@@ -5,6 +5,7 @@
       "avoid-throw": "off",
       "avoid-suicide": "error",
       "avoid-sha3": "warn",
-	  "func-visibility": ["warn",{"ignoreConstructors":true}]
+	  "func-visibility": ["warn",{"ignoreConstructors":true}],
+	  "max-states-count": ["warn", 20]
     }
 }
