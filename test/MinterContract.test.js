@@ -14,6 +14,7 @@ const {
 	TokenId,
 	ContractId,
 	ContractCallQuery,
+	TokenAssociateTransaction,
 } = require('@hashgraph/sdk');
 const fs = require('fs');
 const Web3 = require('web3');
@@ -31,6 +32,7 @@ const env = process.env.ENVIRONMENT ?? null;
 const lazyContractId = ContractId.fromString(process.env.LAZY_CONTRACT);
 const lazyTokenId = TokenId.fromString(process.env.LAZY_TOKEN);
 const lazyBurnPerc = process.env.LAZY_BURN_PERC || 25;
+const MINT_PAYMENT = process.env.MINT_PAYMENT || 50;
 
 const addressRegex = /(\d+\.\d+\.[1-9]\d+)/i;
 
@@ -93,13 +95,13 @@ describe('Deployment: ', function() {
 		aliceId = await accountCreator(alicePK, 10);
 		console.log('Alice account ID:', aliceId.toString(), '\nkey:', alicePK.toString());
 
-		it('Ensure Alice is a little LAZY (send some to prime the pumps)', async function() {
-			// send 1 $LAZY
-			const result = await ftTansferFcn(operatorId, aliceId, 10, lazyTokenId);
-			expect(result).to.be.equal('SUCCESS');
-		});
-
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
+	});
+
+	it('Ensure Alice is a little LAZY (send some to prime the pumps)', async function() {
+		// send 1 $LAZY
+		const result = await ftTansferFcn(operatorId, aliceId, 10, lazyTokenId);
+		expect(result).to.be.equal('SUCCESS');
 	});
 });
 
@@ -111,6 +113,7 @@ describe('Check SC deployment...', function() {
 	});
 
 	it('Check linkage to Lazy token / LSCT is correct', async function() {
+		client.setOperator(operatorId, operatorKey);
 		const addressLSCT = await getSetting('getLSCT', 'lsct');
 		expect(ContractId.fromSolidityAddress(addressLSCT).toString() == lazyContractId.toString()).to.be.true;
 
@@ -119,6 +122,7 @@ describe('Check SC deployment...', function() {
 	});
 
 	it('Check default values are set in Constructor', async function() {
+		client.setOperator(operatorId, operatorKey);
 		const paused = await getSetting('getMintPaused', 'paused');
 		expect(paused).to.be.true;
 		const lazyFromSC = await getSetting('getPayLazyFromSC', 'payFromSC');
@@ -133,15 +137,79 @@ describe('Check SC deployment...', function() {
 		expect(Number(lastMint) == 0).to.be.true;
 		const mintStart = await getSetting('getMintStartTime', 'mintStartTime');
 		expect(Number(mintStart) == 0).to.be.true;
+		const refundWindow = await getSetting('getRefundWindow', 'refundWindow');
+		expect(Number(refundWindow) == 5).to.be.true;
 		const maxMint = await getSetting('getMaxMint', 'maxMint');
-		expect(Number(maxMint) == 0).to.be.true;
+		expect(Number(maxMint) == 20).to.be.true;
 		const cooldown = await getSetting('getCooldownPeriod', 'cooldownPeriod');
 		expect(Number(cooldown) == 0).to.be.true;
 		const lazyBurn = await getSetting('getLazyBurnPercentage', 'lazyBurn');
 		expect(Number(lazyBurn) == lazyBurnPerc).to.be.true;
+		const [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
+		expect(Number(hbarCost) == 0 && Number(lazyCost) == 0).to.be.true;
+		const mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
+		expect(!mintEconomics[0] &&
+			mintEconomics[1] == 0 &&
+			mintEconomics[2] == 0 &&
+			mintEconomics[3] == 0 &&
+			mintEconomics[4] == 20).to.be.true;
+		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
+		expect(mintTiming[0] == 0 &&
+			mintTiming[1] == 0 &&
+			mintTiming[2] &&
+			mintTiming[3] == 0 &&
+			mintTiming[4] == 5).to.be.true;
 	});
 
 	// initialize the minter!
+	it('Initialise the minter for a token with no Fees to check it works', async function() {
+		const metadataList = ['metadata.json'];
+
+		const royaltyList = [];
+
+		const [result, tokenAddressSolidity] = await initialiseNFTMint(
+			'MC-test',
+			'MCt',
+			'MC testing memo',
+			'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
+			metadataList,
+			royaltyList,
+		);
+
+		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
+		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
+		expect(result).to.be.equal('SUCCESS');
+	});
+
+	it('Re-initialise the minter for a token with **WITH FEES**', async function() {
+		// testing with one fallback and one without fallback for generalised case
+		client.setOperator(operatorId, operatorKey);
+		const metadataList = [];
+
+		for (let m = 1; m <= 25; m++) {
+			const num = '' + m;
+			metadataList.push(num.padStart(3, '0') + '_metadata.json');
+		}
+
+		const royalty1 = new NFTFeeObject(200, 10000, operatorId.toSolidityAddress(), 5);
+		const royalty2 = new NFTFeeObject(50, 10000, aliceId.toSolidityAddress());
+
+		const royaltyList = [royalty1, royalty2];
+
+		const [result, tokenAddressSolidity] = await initialiseNFTMint(
+			'MC-test',
+			'MCt',
+			'MC testing memo',
+			'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/',
+			metadataList,
+			royaltyList,
+		);
+		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
+		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
+		expect(result).to.be.equal('SUCCESS');
+	});
 
 });
 
@@ -310,32 +378,93 @@ describe('Check access control permission...', function() {
 });
 
 describe('Basic interaction with the Minter...', function() {
+	it('Associate the token to Operator', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const result = await associateTokenToAccount(operatorId, tokenId);
+		expect(result).to.be.equal('SUCCESS');
+		// Alice will use auto asociation
+	});
+
+	it('Check unable to mint if contract paused (then unpause)', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 1);
+		await useSetterBool('updatePauseStatus', true);
+
+		let errorCount = 0;
+		try {
+			await mintNFT(1, tinybarCost);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+
+		// unpause the contract
+		await useSetterBool('updatePauseStatus', false);
+	});
+
 	it('Mint a token from the SC for hbar', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 0);
+
+		// let Alice mint to test it works for a 3rd party
+		client.setOperator(aliceId, alicePK);
+		const [success, serials] = await mintNFT(1, tinybarCost);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
 	});
 
 	it('Mint a token from the SC for Lazy', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(operatorId, operatorKey);
+		await useSetterInts('updateCost', 0, 1);
+
+		// let Alice mint to test it works for a 3rd party
+		client.setOperator(aliceId, alicePK);
+		const [success, serials] = await mintNFT(1, 0);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
 	});
 
 	it('Mint a token from the SC for hbar + Lazy', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 1);
+
+		// let Alice mint to test it works for a 3rd party
+		client.setOperator(aliceId, alicePK);
+		const [success, serials] = await mintNFT(1, tinybarCost);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
 	});
 
 	it('Check unable to mint if not enough funds', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(10).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 2);
 
-	it('Check unable to mint if contract paused', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		// let Alice mint to test it works for a 3rd party
+		client.setOperator(aliceId, alicePK);
+		const [success, serials] = await mintNFT(1, tinybarCost);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
 	});
 
 	it('Check unable to mint if not yet at start time', async function() {
 		expect.fail(0, 1, 'Not implemented');
+		await useSetterInts('updateMintStartTime', (new Date().getTime() / 1000) + 5);
 	});
 
 	it('Check **ABLE** to mint once start time has passed', async function() {
 		expect.fail(0, 1, 'Not implemented');
+		// sleep to ensure past the start time
+		const mintStart = await getSetting('getMintStartTime', 'mintStartTime');
+		const mintStartAsDate = new Date(mintStart * 1000);
+		const now = new Date();
+		const sleepTime = (mintStartAsDate.getTime() - now.getTime());
+		console.log('Sleeping to wait for the mitn to start...', sleepTime, '(milliseconds)');
+		await sleep(sleepTime + 10);
 	});
 
 	it('Check concurrent mint...', async function() {
@@ -484,7 +613,7 @@ describe('Withdrawal tests...', function() {
  * Helper function to get the current settings of the contract
  * @param {string} fcnName the name of the getter to call
  * @param {string} expectedVar the variable to exeppect to get back
- * @return {[string , string]} The LSCT address & the Lazy Token address in soloidity format
+ * @return {*}
  */
 async function getSetting(fcnName, expectedVar) {
 	// check the Lazy Token and LSCT addresses
@@ -500,6 +629,32 @@ async function getSetting(fcnName, expectedVar) {
 		.execute(client);
 	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
 	return queryResult[expectedVar];
+}
+
+/**
+ * Helper function to get the current settings of the contract
+ * @param {string} fcnName the name of the getter to call
+ * @param {string} expectedVars the variable to exeppect to get back
+ * @return {*} array of results
+ */
+async function getSettings(fcnName, ...expectedVars) {
+	// check the Lazy Token and LSCT addresses
+	// generate function call with function name and parameters
+	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
+
+	// query the contract
+	const contractCall = await new ContractCallQuery()
+		.setContractId(contractId)
+		.setFunctionParameters(functionCallAsUint8Array)
+		.setMaxQueryPayment(new Hbar(2))
+		.setGas(100000)
+		.execute(client);
+	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
+	const results = [];
+	for (let v = 0 ; v < expectedVars.length; v++) {
+		results.push(queryResult[expectedVars[v]]);
+	}
+	return results;
 }
 
 /**
@@ -545,6 +700,56 @@ async function transferHbarFromContract(amount, units = HbarUnit.Hbar) {
 		.addUint256(new Hbar(amount, units).toTinybars());
 	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'transferHbar', params);
 	return callHbarRx.status.toString();
+}
+
+/**
+ *
+ * @param {number} quantity
+ * @param {number | Long} tinybarPmt
+ */
+async function mintNFT(quantity, tinybarPmt) {
+	const params = [quantity];
+
+	const gasLim = 800000;
+	const [mintRx, mintResults] =
+		await contractExecuteWithStructArgs(contractId, gasLim, 'mintNFT', params, new Hbar(tinybarPmt, HbarUnit.Tinybar));
+	return [mintRx.status.toString(), mintResults['serials']] ;
+}
+
+/**
+ *
+ * @param {string} name
+ * @param {string} symbol
+ * @param {string} memo
+ * @param {string} cid
+ * @param {string[]} metadataList
+ * @param {*} royaltyList
+ */
+async function initialiseNFTMint(name, symbol, memo, cid, metadataList, royaltyList) {
+	const params = [name, symbol, memo, cid, metadataList, royaltyList];
+
+	const gasLim = 1000000;
+	const [initialiseRx, initialiseResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'initialiseNFTMint', params, MINT_PAYMENT);
+	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress']] ;
+}
+
+async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar) {
+	// use web3.eth.abi to encode the struct for sending.
+	// console.log('pre-encode:', JSON.stringify(params, null, 4));
+	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, params);
+
+	const contractExecuteTx = await new ContractExecuteTransaction()
+		.setContractId(cId)
+		.setGas(gasLim)
+		.setFunctionParameters(functionCallAsUint8Array)
+		.setPayableAmount(amountHbar)
+		.execute(client);
+
+	// get the results of the function call;
+	const record = await contractExecuteTx.getRecord(client);
+	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
+	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
+	return [contractExecuteRx, contractResults, record];
 }
 
 /**
@@ -765,6 +970,28 @@ async function accountCreator(privateKey, initialBalance) {
 }
 
 /**
+ * Helper method for token association
+ * @param {AccountId} account
+ * @param {TokenId} tokenToAssociate
+ * @returns {any} expected to be a string 'SUCCESS' implies it worked
+ */
+async function associateTokenToAccount(account, tokenToAssociate) {
+	// now associate the token to the operator account
+	const associateToken = await new TokenAssociateTransaction()
+		.setAccountId(account)
+		.setTokenIds([tokenToAssociate])
+		.freezeWith(client);
+
+	const associateTokenTx = await associateToken.execute(client);
+	const associateTokenRx = await associateTokenTx.getReceipt(client);
+
+	const associateTokenStatus = associateTokenRx.status;
+
+	return associateTokenStatus.toString();
+}
+
+
+/**
  * Helper function to deploy the contract
  * @param {string} bytecode bytecode from compiled SOL file
  * @param {number} gasLim gas limit as a number
@@ -785,7 +1012,7 @@ async function contractDeployFcn(bytecode, gasLim) {
 	contractAddress = contractId.toSolidityAddress();
 }
 
-/**
+/*
  * basci sleep function
  * @param {number} ms milliseconds to sleep
  * @returns {Promise}
@@ -811,4 +1038,20 @@ async function transferFungibleWithHTS(receiver, amount) {
 	const tokenTransferStatus = tokenTransferRx.status;
 
 	return tokenTransferStatus.toString();
+}
+
+class NFTFeeObject {
+	/**
+	 *
+	 * @param {number} numerator
+	 * @param {number} denominator
+	 * @param {string} account address in solidity format
+	 * @param {number} fallbackfee left as 0 if no fallback
+	 */
+	constructor(numerator, denominator, account, fallbackfee = 0) {
+		this.numerator = numerator;
+		this.denominator = denominator;
+		this.fallbackfee = fallbackfee;
+		this.account = account;
+	}
 }

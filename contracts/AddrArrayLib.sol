@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity >=0.5.8 <0.9.0;
+pragma solidity >=0.8.12 <0.9.0;
 
 library AddrArrayLib {
     using AddrArrayLib for Addresses;
