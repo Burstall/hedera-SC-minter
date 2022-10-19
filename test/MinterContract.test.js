@@ -92,7 +92,7 @@ describe('Deployment: ', function() {
 
 		// create Alice account
 		alicePK = PrivateKey.generateED25519();
-		aliceId = await accountCreator(alicePK, 10);
+		aliceId = await accountCreator(alicePK, 20);
 		console.log('Alice account ID:', aliceId.toString(), '\nkey:', alicePK.toString());
 
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
@@ -158,7 +158,7 @@ describe('Check SC deployment...', function() {
 			mintTiming[1] == 0 &&
 			mintTiming[2] &&
 			mintTiming[3] == 0 &&
-			mintTiming[4] == 5).to.be.true;
+			mintTiming[4] == 0).to.be.true;
 	});
 
 	// initialize the minter!
@@ -416,9 +416,50 @@ describe('Basic interaction with the Minter...', function() {
 		expect(serials.length == 1).to.be.true;
 	});
 
+	it('Mint 3 tokens from the SC for hbar', async function() {
+		client.setOperator(operatorId, operatorKey);
+		// unpause the contract
+		await useSetterBool('updatePauseStatus', false);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 0);
+
+		// let Alice mint to test it works for a 3rd party
+		client.setOperator(aliceId, alicePK);
+		const [success, serials] = await mintNFT(3, tinybarCost * 3);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 3).to.be.true;
+	});
+
+	it('Attempt to mint 2 with max mint @ 1, then mint 1', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 0);
+		await useSetterInts('updateMaxMint', 1);
+
+		// let Alice mint to test it works for a 3rd party
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await mintNFT(2, tinybarCost * 2);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+
+		// now mint the singleton
+		const [success, serials] = await mintNFT(1, tinybarCost);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
+
+		client.setOperator(operatorId, operatorKey);
+		await useSetterInts('updateMaxMint', 20);
+	});
+
 	it('Mint a token from the SC for Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
-		await useSetterInts('updateCost', 0, 1);
+		// paying 0.5 $LAZY to check burn works.
+		await useSetterInts('updateCost', 0, 5);
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
@@ -439,32 +480,57 @@ describe('Basic interaction with the Minter...', function() {
 		expect(serials.length == 1).to.be.true;
 	});
 
+
 	it('Check unable to mint if not enough funds', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(10).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 2);
+		await useSetterInts('updateCost', tinybarCost, 1);
+		// unpause the contract
+		await useSetterBool('updatePauseStatus', false);
 
 		// let Alice mint to test it works for a 3rd party
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await mintNFT(1, new Hbar(1).toTinybars);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Check unable to mint if not yet at start time', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 1);
+		// set start time 4 seconds in future
+		await useSetterInts('updateMintStartTime', Math.floor(new Date().getTime() / 1000) + 4);
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await mintNFT(1, new Hbar(1).toTinybars);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Check **ABLE** to mint once start time has passed', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 1);
+		// sleep to ensure past the start time
+		const mintStart = await getSetting('getMintStartTime', 'mintStartTime');
+		const now = Math.floor(new Date().getTime() / 1000);
+		const sleepTime = (now - mintStart) * 1000;
+		// console.log('Sleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
+		await sleep(sleepTime + 10);
 		client.setOperator(aliceId, alicePK);
 		const [success, serials] = await mintNFT(1, tinybarCost);
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 1).to.be.true;
-	});
-
-	it('Check unable to mint if not yet at start time', async function() {
-		expect.fail(0, 1, 'Not implemented');
-		await useSetterInts('updateMintStartTime', (new Date().getTime() / 1000) + 5);
-	});
-
-	it('Check **ABLE** to mint once start time has passed', async function() {
-		expect.fail(0, 1, 'Not implemented');
-		// sleep to ensure past the start time
-		const mintStart = await getSetting('getMintStartTime', 'mintStartTime');
-		const mintStartAsDate = new Date(mintStart * 1000);
-		const now = new Date();
-		const sleepTime = (mintStartAsDate.getTime() - now.getTime());
-		console.log('Sleeping to wait for the mitn to start...', sleepTime, '(milliseconds)');
-		await sleep(sleepTime + 10);
 	});
 
 	it('Check concurrent mint...', async function() {
@@ -565,7 +631,7 @@ describe('Withdrawal tests...', function() {
 		let errorCount = 0;
 		try {
 			// try requesting a min lot
-			await transferFungibleWithHTS(aliceId, 1);
+			await retrieveLazyFromContract(aliceId, 1);
 		}
 		catch (err) {
 			errorCount++;
@@ -575,12 +641,36 @@ describe('Withdrawal tests...', function() {
 
 	it('Check Owner cannot pull funds before X time has elapsed from last mint', async function() {
 		client.setOperator(operatorId, operatorKey);
-		// set refund window timing & mint
-		expect.fail(0, 1, 'Not implemented');
-		// withdrawl of funds should be blocked
+		const lastMint = Number(await getSetting('getLastMint', 'lastMintTime'));
+		if (lastMint != 0) {
+			const clockTime = Math.floor(new Date().getTime() / 1000);
+			const delay = clockTime - lastMint + 8;
+			// set refund window timing -> 5 seconds on the clock
+			await useSetterInts('updateRefundWindow', delay);
+			// console.log('Delay', delay, 'last mint', lastMint, 'clock', clockTime);
+			// withdrawal of funds should be blocked
+			const [contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
+			let errorCount = 0;
+			try {
+				await transferHbarFromContract(Number(contractHbarBal.toTinybars()), HbarUnit.Tinybar);
+			}
+			catch {
+				errorCount++;
+			}
 
-		// sleep the required time to ensure next pull should work.
-		await sleep(10);
+			try {
+				if (contractLazyBal > 0) {
+					const pullLazy = await retrieveLazyFromContract(operatorId, contractLazyBal);
+					expect(pullLazy).to.be.equal('SUCCESS');
+				}
+			}
+			catch {
+				errorCount++;
+			}
+			expect(errorCount).to.be.equal(2);
+			// sleep the required time to ensure next pull should work.
+			await sleep(8);
+		}
 	});
 
 	it('Check Owner can pull hbar & Lazy', async function() {
@@ -588,6 +678,10 @@ describe('Withdrawal tests...', function() {
 		let [contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
 		const result = await transferHbarFromContract(Number(contractHbarBal.toTinybars()), HbarUnit.Tinybar);
 		console.log('Clean-up -> Retrieve hbar from Contract');
+		if (contractLazyBal > 0) {
+			const pullLazy = await retrieveLazyFromContract(operatorId, contractLazyBal);
+			expect(pullLazy).to.be.equal('SUCCESS');
+		}
 		[contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
 		console.log('Contract ending hbar balance:', contractHbarBal.toString());
 		console.log('Contract ending Lazy balance:', contractLazyBal.toString());
@@ -596,15 +690,21 @@ describe('Withdrawal tests...', function() {
 
 	it('Cleans up -> retrieve hbar/Lazy', async function() {
 		// get Alice balance
-		const [aliceLazyBal, aliceHbarBal] = await getAccountBalance(aliceId);
+		let [aliceLazyBal, aliceHbarBal, aliceNftBal] = await getAccountBalance(aliceId);
 		// SDK transfer back to operator
 		client.setOperator(aliceId, alicePK);
 		if (aliceLazyBal > 0) {
 			const lazyReceipt = await ftTansferFcn(aliceId, operatorId, aliceLazyBal, lazyTokenId);
 			expect(lazyReceipt == 'SUCCESS').to.be.true;
 		}
-		const receipt = await hbarTransferFcn(aliceId, operatorId, aliceHbarBal.toBigNumber().minus(0.01));
+		const receipt = await hbarTransferFcn(aliceId, operatorId, aliceHbarBal.toBigNumber().minus(0.05));
 		console.log('Clean-up -> Retrieve hbar/Lazy from Alice');
+		// reverting operator as Alice should be drained
+		client.setOperator(operatorId, operatorKey);
+		[aliceLazyBal, aliceHbarBal, aliceNftBal] = await getAccountBalance(aliceId);
+		console.log('Alice ending hbar balance:', aliceHbarBal.toString());
+		console.log('Alice ending Lazy balance:', aliceLazyBal.toString());
+		console.log('Alice ending NFT balance:', aliceNftBal.toString());
 		expect(receipt == 'SUCCESS').to.be.true;
 	});
 });
@@ -615,6 +715,7 @@ describe('Withdrawal tests...', function() {
  * @param {string} expectedVar the variable to exeppect to get back
  * @return {*}
  */
+// eslint-disable-next-line no-unused-vars
 async function getSetting(fcnName, expectedVar) {
 	// check the Lazy Token and LSCT addresses
 	// generate function call with function name and parameters
@@ -637,6 +738,7 @@ async function getSetting(fcnName, expectedVar) {
  * @param {string} expectedVars the variable to exeppect to get back
  * @return {*} array of results
  */
+// eslint-disable-next-line no-unused-vars
 async function getSettings(fcnName, ...expectedVars) {
 	// check the Lazy Token and LSCT addresses
 	// generate function call with function name and parameters
@@ -710,7 +812,7 @@ async function transferHbarFromContract(amount, units = HbarUnit.Hbar) {
 async function mintNFT(quantity, tinybarPmt) {
 	const params = [quantity];
 
-	const gasLim = 800000;
+	const gasLim = 1200000;
 	const [mintRx, mintResults] =
 		await contractExecuteWithStructArgs(contractId, gasLim, 'mintNFT', params, new Hbar(tinybarPmt, HbarUnit.Tinybar));
 	return [mintRx.status.toString(), mintResults['serials']] ;
@@ -795,6 +897,7 @@ function decodeFunctionResult(functionName, resultAsBytes) {
  * @param {boolean} value
  * @returns {string}
  */
+// eslint-disable-next-line no-unused-vars
 async function useSetterBool(fcnName, value) {
 	const gasLim = 200000;
 	const params = new ContractFunctionParameters()
@@ -809,6 +912,7 @@ async function useSetterBool(fcnName, value) {
  * @param {TokenId | AccountId | ContractId} value
  * @returns {string}
  */
+// eslint-disable-next-line no-unused-vars
 async function useSetterAddress(fcnName, value) {
 	const gasLim = 200000;
 	const params = new ContractFunctionParameters()
@@ -823,6 +927,7 @@ async function useSetterAddress(fcnName, value) {
  * @param {string} value
  * @returns {string}
  */
+// eslint-disable-next-line no-unused-vars
 async function useSetterString(fcnName, value) {
 	const gasLim = 200000;
 	const params = new ContractFunctionParameters()
@@ -837,6 +942,7 @@ async function useSetterString(fcnName, value) {
  * @param {string[]} value
  * @returns {string}
  */
+// eslint-disable-next-line no-unused-vars
 async function useSetterStringArray(fcnName, value) {
 	const gasLim = 200000;
 	const params = new ContractFunctionParameters()
@@ -1017,6 +1123,7 @@ async function contractDeployFcn(bytecode, gasLim) {
  * @param {number} ms milliseconds to sleep
  * @returns {Promise}
  */
+// eslint-disable-next-line no-unused-vars
 function sleep(ms) {
 	return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -1027,14 +1134,13 @@ function sleep(ms) {
  * @param {number} amount amount of the FT to transfer (adjusted for decimal)
  * @returns {any} expected to be a string 'SUCCESS' implies it worked
  */
-async function transferFungibleWithHTS(receiver, amount) {
+async function retrieveLazyFromContract(receiver, amount) {
 
 	const gasLim = 600000;
 	const params = new ContractFunctionParameters()
-		.addAddress(lazyTokenId.toSolidityAddress())
 		.addAddress(receiver.toSolidityAddress())
 		.addInt64(amount);
-	const [tokenTransferRx, , ] = await contractExecuteFcn(contractId, gasLim, 'transferHTS', params);
+	const [tokenTransferRx, , ] = await contractExecuteFcn(contractId, gasLim, 'retrieveLazy', params);
 	const tokenTransferStatus = tokenTransferRx.status;
 
 	return tokenTransferStatus.toString();

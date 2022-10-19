@@ -90,7 +90,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 		tokenAssociate(_lazyToken);
 
 		_mintEconomics = MintEconomics(false, 0, 0, 0, 20);
-		_mintTiming= MintTiming(0, 0, true, 0, 5);
+		_mintTiming= MintTiming(0, 0, true, 0, 0);
 		_lazyBurnPerc = lazyBurnPerc;
 	}
 
@@ -176,7 +176,9 @@ contract MinterContract is ExpiryHelper, Ownable {
 
 	/// @param numberToMint the number of serials to mint
 	function mintNFT(uint256 numberToMint) external payable returns (int64[] memory serials) {
-		require(numberToMint > 0, "Request +ve mint");
+		require(_mintTiming.mintStartTime == 0 ||
+			_mintTiming.mintStartTime <= block.timestamp, 
+			"Mint not started");
 		require(!_mintTiming.mintPaused, "Mint Paused");
 		require(numberToMint <= _metadata.length, "Minted out");
 		require(numberToMint <= _mintEconomics.maxMint, "Max Mint Exceeded");
@@ -202,8 +204,6 @@ contract MinterContract is ExpiryHelper, Ownable {
 			// pop discarding the elemnt used up
 			_metadata.pop();
 		}
-		emit MinterContractMessage(string(metadataForMint[0]), _token, numberToMint, "meta");
-
 		
 		(int responseCode, , int64[] memory serialNumbers) 
 			= mintToken(_token, 0, metadataForMint);
@@ -224,6 +224,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 
 			emit MinterContractMessage("Tfr Serial", msg.sender, SafeCast.toUint256(serialNumbers[s]), "Complete");
 		}
+		_mintTiming.lastMintTime = block.timestamp;
 
 		serials = serialNumbers;
 		
@@ -238,7 +239,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 		internal 
 	returns (int responseCode) {
 		require(amount > 0, "Positive transfers only");
-		require(IERC721(_token).balanceOf(msg.sender) >= amount, "Not LAZY enough");
+		require(IERC721(_lazyToken).balanceOf(msg.sender) >= amount, "Not LAZY enough");
 
         responseCode = transferToken(
             _lazyToken,
@@ -247,17 +248,18 @@ contract MinterContract is ExpiryHelper, Ownable {
             SafeCast.toInt64(int256(amount))
         );
 
-		uint256 burnAmt = SafeMath.div(amount, _lazyBurnPerc);
+		uint256 burnAmt = SafeMath.div(SafeMath.mul(amount, _lazyBurnPerc), 100);
 
 		// This is a safe cast to uint32 as max value is >> max supply of Lazy
-		responseCode = _lazySCT.burn(_lazyToken, SafeCast.toUint32(burnAmt));
-
+		
+		if (burnAmt > 0) {
+			responseCode = _lazySCT.burn(_lazyToken, SafeCast.toUint32(burnAmt));
+			if (responseCode != HederaResponseCodes.SUCCESS) {
+            	revert("taking Lazy payment - failed");
+        	}
+		}
         emit MinterContractMessage("LAZY Pmt", msg.sender, amount, "SUCCESS");
 		emit MinterContractMessage("LAZY Burn", msg.sender, burnAmt, "SUCCESS");
-
-        if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("taking LAzy payment - failed");
-        }
     }
 
 	// function to asses the cost to mint for a user
@@ -269,20 +271,21 @@ contract MinterContract is ExpiryHelper, Ownable {
 		lazyCost = _mintEconomics.mintPriceLazy;
     }
 
-	/// Use HTS to transfer FT
-    /// @param token The token to transfer to/from
+	/// Use HTS to retrieve LAZY
     /// @param receiver The receiver of the transaction
     /// @param amount Non-negative value to send. a negative value will result in a failure.
-    function transferHTS(
-        address token,
+    function retrieveLazy(
         address receiver,
         int64 amount
     )
 		external
 		onlyOwner 
 	returns (int responseCode) {
+		require(block.timestamp >= (_mintTiming.lastMintTime + _mintTiming.refundWindow), 
+			"Post-mint Cooldown");
+
         responseCode = HederaTokenService.transferToken(
-            token,
+            _lazyToken,
             address(this),
             receiver,
             amount
@@ -291,14 +294,14 @@ contract MinterContract is ExpiryHelper, Ownable {
 		require(amount > 0, "Positive transfers only");
 
         emit MinterContractMessage(
-            "Transfer Lazy",
+            "Retrieve Lazy",
             receiver,
             uint256(uint64(amount)),
             "completed"
         );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("transferHTS - failed");
+            revert("retrieveLazy - failed");
         }
     }
 
@@ -311,6 +314,8 @@ contract MinterContract is ExpiryHelper, Ownable {
         external
         onlyOwner
     {
+		require(block.timestamp >= (_mintTiming.lastMintTime + _mintTiming.refundWindow), 
+			"Post-mint Cooldown");
         // throws error on failure
         receiverAddress.transfer(amount);
 

@@ -139,7 +139,11 @@ async function main() {
 	console.log('');
 	// get the command line parameters
 	const args = process.argv.slice(2);
-	if (args.length == 2) {
+	if (args.length == 1) {
+		const error = await errorSignature(args[0]);
+		await processError(error, false, 0);
+	}
+	else if (args.length == 2) {
 		mirrorUrl = args[0];
 		contractId = args[1];
 
@@ -152,8 +156,12 @@ async function main() {
 		contractId = args[1];
 
 		// get the signature and data for the error
-		const error = await getErrorFromMirror(false, args[2]);
-		await processError(error, false, 0);
+		const depth = args[2];
+		for (let d = 1; d <= depth; d++) {
+			console.log('Depth:', d);
+			const error = await getErrorFromMirror(false, d);
+			await processError(error, false, 0);
+		}
 	}
 	else {
 		console.error('invalid command line arguments supplied, please consult README.md');
