@@ -6,8 +6,10 @@ const {
 	Hbar,
 	ContractExecuteTransaction,
 	HbarUnit,
+	ContractCallQuery,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
+const readlineSync = require('readline-sync');
 const fs = require('fs');
 const Web3 = require('web3');
 const web3 = new Web3();
@@ -54,12 +56,75 @@ const main = async () => {
 	abi = json.abi;
 	console.log('\n -Loading ABI...\n');
 
-	const tinybarPmt = new Hbar(5).toTinybars();
+	const [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
+	const remainingMint = await getSetting('getRemainingMint', 'remainingMint');
 
-	const [result, serial] = await mintNFT(1, tinybarPmt);
-	console.log('\nResult:', result, '\nserial(s)', serial);
+	console.log('Remaining to mint:', remainingMint);
+	console.log('Cost to mint:\nHbar:', new Hbar(hbarCost, HbarUnit.Tinybar).toString(),
+		'\nLazy:', lazyCost / 10);
+
+	const proceed = readlineSync.keyInYNStrict('Do you wish to mint? (1)');
+	if (proceed) {
+		const [result, serial, metadata] = await mintNFT(1, hbarCost);
+		console.log('\nResult:', result, '\nserial(s)', serial, '\nmetadata');
+		for (let m = 0; m < metadata.length; m++) {
+			console.log(hex_to_ascii(metadata[m]));
+		}
+	}
+	else {
+		console.log('User aborted.');
+	}
 };
 
+/**
+ * Helper function to get the current settings of the contract
+ * @param {string} fcnName the name of the getter to call
+ * @param {string} expectedVar the variable to exeppect to get back
+ * @return {*}
+ */
+// eslint-disable-next-line no-unused-vars
+async function getSetting(fcnName, expectedVar) {
+	// check the Lazy Token and LSCT addresses
+	// generate function call with function name and parameters
+	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
+
+	// query the contract
+	const contractCall = await new ContractCallQuery()
+		.setContractId(contractId)
+		.setFunctionParameters(functionCallAsUint8Array)
+		.setMaxQueryPayment(new Hbar(2))
+		.setGas(100000)
+		.execute(client);
+	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
+	return queryResult[expectedVar];
+}
+
+/**
+ * Helper function to get the current settings of the contract
+ * @param {string} fcnName the name of the getter to call
+ * @param {string} expectedVars the variable to exeppect to get back
+ * @return {*} array of results
+ */
+// eslint-disable-next-line no-unused-vars
+async function getSettings(fcnName, ...expectedVars) {
+	// check the Lazy Token and LSCT addresses
+	// generate function call with function name and parameters
+	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
+
+	// query the contract
+	const contractCall = await new ContractCallQuery()
+		.setContractId(contractId)
+		.setFunctionParameters(functionCallAsUint8Array)
+		.setMaxQueryPayment(new Hbar(2))
+		.setGas(100000)
+		.execute(client);
+	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
+	const results = [];
+	for (let v = 0 ; v < expectedVars.length; v++) {
+		results.push(queryResult[expectedVars[v]]);
+	}
+	return results;
+}
 
 /**
  *
@@ -69,10 +134,10 @@ const main = async () => {
 async function mintNFT(quantity, tinybarPmt) {
 	const params = [quantity];
 
-	const gasLim = 800000;
+	const gasLim = 1200000;
 	const [mintRx, mintResults] =
 		await contractExecuteWithStructArgs(contractId, gasLim, 'mintNFT', params, new Hbar(tinybarPmt, HbarUnit.Tinybar));
-	return [mintRx.status.toString(), mintResults['serials']] ;
+	return [mintRx.status.toString(), mintResults['serials'], mintResults['metadataForMint']] ;
 }
 
 async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar) {
@@ -102,11 +167,6 @@ async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amoun
 function decodeFunctionResult(functionName, resultAsBytes) {
 	const functionAbi = abi.find(func => func.name === functionName);
 	const functionParameters = functionAbi.outputs;
-	console.log(
-		'\n -Decoding:',
-		functionName,
-		'\n -outputs expected:',
-		JSON.stringify(functionParameters, null, 3));
 	const resultHex = '0x'.concat(Buffer.from(resultAsBytes).toString('hex'));
 	const result = web3.eth.abi.decodeParameters(functionParameters, resultHex);
 	return result;
@@ -116,6 +176,15 @@ function encodeFunctionCall(functionName, parameters) {
 	const functionAbi = abi.find((func) => func.name === functionName && func.type === 'function');
 	const encodedParametersHex = web3.eth.abi.encodeFunctionCall(functionAbi, parameters).slice(2);
 	return Buffer.from(encodedParametersHex, 'hex');
+}
+
+function hex_to_ascii(hex) {
+	let str = '';
+	for (let n = 0; n < hex.length; n += 2) {
+		const v = parseInt(hex.substr(n, 2), 16);
+		if (v) str += String.fromCharCode(v);
+	}
+	return str;
 }
 
 main()

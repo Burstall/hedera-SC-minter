@@ -90,7 +90,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 		tokenAssociate(_lazyToken);
 
 		_mintEconomics = MintEconomics(false, 0, 0, 0, 20);
-		_mintTiming= MintTiming(0, 0, true, 0, 0);
+		_mintTiming = MintTiming(0, 0, true, 0, 0);
 		_lazyBurnPerc = lazyBurnPerc;
 	}
 
@@ -175,7 +175,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 	}
 
 	/// @param numberToMint the number of serials to mint
-	function mintNFT(uint256 numberToMint) external payable returns (int64[] memory serials) {
+	function mintNFT(uint256 numberToMint) external payable returns (int64[] memory serials, bytes[] memory metadataForMint) {
 		require(_mintTiming.mintStartTime == 0 ||
 			_mintTiming.mintStartTime <= block.timestamp, 
 			"Mint not started");
@@ -197,7 +197,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 		}
 
 		// pop the metadata
-		bytes[] memory metadataForMint = new bytes[](numberToMint);
+		metadataForMint = new bytes[](numberToMint);
 		for (uint m = 0; m < numberToMint; m++) {
 			string memory fullPath = string.concat(_cid, _metadata[_metadata.length - 1]);
 			metadataForMint[m] = bytes(fullPath);
@@ -221,8 +221,6 @@ contract MinterContract is ExpiryHelper, Ownable {
 			if (responseCode != HederaResponseCodes.SUCCESS) {
 				revert ("Failed to send NFTs");
 			}
-
-			emit MinterContractMessage("Tfr Serial", msg.sender, SafeCast.toUint256(serialNumbers[s]), "Complete");
 		}
 		_mintTiming.lastMintTime = block.timestamp;
 
@@ -372,6 +370,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 	/// @return changed indicative of whether a change was made
 	function updatePauseStatus(bool mintPaused) external onlyOwner returns (bool changed) {
 		changed = _mintTiming.mintPaused == mintPaused ? false : true;
+		if (changed) emit MinterContractMessage("PAUSE UPDATED", msg.sender, mintPaused ? 1 : 0, mintPaused ? "PAUSED" : "UNPAUSED");
 		_mintTiming.mintPaused = mintPaused;
 	}
 
@@ -468,6 +467,16 @@ contract MinterContract is ExpiryHelper, Ownable {
 	/// @return refundWindow boolean indicating whether mint is paused
     function getRefundWindow() external view returns (uint256 refundWindow) {
     	refundWindow = _mintTiming.refundWindow;
+    }
+
+	/// @return remainingMint number of NFTs left to mint
+    function getRemainingMint() external view returns (uint256 remainingMint) {
+    	remainingMint = _metadata.length;
+    }
+
+	/// @return blockTime current network time (seconds)
+    function getBlockTime() external view returns (uint256 blockTime) {
+    	blockTime = block.timestamp;
     }
 
 	/// @return payFromSC boolean indicating whether any Lazy payment is expect to be prefunded

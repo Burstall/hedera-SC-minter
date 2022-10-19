@@ -138,7 +138,7 @@ describe('Check SC deployment...', function() {
 		const mintStart = await getSetting('getMintStartTime', 'mintStartTime');
 		expect(Number(mintStart) == 0).to.be.true;
 		const refundWindow = await getSetting('getRefundWindow', 'refundWindow');
-		expect(Number(refundWindow) == 5).to.be.true;
+		expect(Number(refundWindow) == 0).to.be.true;
 		const maxMint = await getSetting('getMaxMint', 'maxMint');
 		expect(Number(maxMint) == 20).to.be.true;
 		const cooldown = await getSetting('getCooldownPeriod', 'cooldownPeriod');
@@ -159,6 +159,8 @@ describe('Check SC deployment...', function() {
 			mintTiming[2] &&
 			mintTiming[3] == 0 &&
 			mintTiming[4] == 0).to.be.true;
+		const remainingMint = await getSetting('getRemainingMint', 'remainingMint');
+		expect(Number(remainingMint) == 0).to.be.true;
 	});
 
 	// initialize the minter!
@@ -330,7 +332,7 @@ describe('Check access control permission...', function() {
 		client.setOperator(aliceId, alicePK);
 		let errorCount = 0;
 		try {
-			await useSetterInts('updateCost', 1, 1);
+			await useSetterInts('updateCooldown', 4);
 		}
 		catch (err) {
 			errorCount++;
@@ -368,7 +370,7 @@ describe('Check access control permission...', function() {
 		let errorCount = 0;
 		try {
 			// using a dummy value [check onece testnet resets if still passes]
-			await useSetterBool('updatePauseStatus', false);
+			await useSetterBool('updateContractPaysLazy', false);
 		}
 		catch (err) {
 			errorCount++;
@@ -524,9 +526,9 @@ describe('Basic interaction with the Minter...', function() {
 		// sleep to ensure past the start time
 		const mintStart = await getSetting('getMintStartTime', 'mintStartTime');
 		const now = Math.floor(new Date().getTime() / 1000);
-		const sleepTime = (now - mintStart) * 1000;
-		// console.log('Sleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
-		await sleep(sleepTime + 10);
+		const sleepTime = Math.max((mintStart - now) * 1000, 0);
+		// console.log(mintStart, '\nSleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
+		await sleep(sleepTime + 25);
 		client.setOperator(aliceId, alicePK);
 		const [success, serials] = await mintNFT(1, tinybarCost);
 		expect(success == 'SUCCESS').to.be.true;
@@ -669,7 +671,7 @@ describe('Withdrawal tests...', function() {
 			}
 			expect(errorCount).to.be.equal(2);
 			// sleep the required time to ensure next pull should work.
-			await sleep(8);
+			await sleep(delay * 1000);
 		}
 	});
 

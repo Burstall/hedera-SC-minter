@@ -104,11 +104,6 @@ async function getContractBalance() {
 function decodeFunctionResult(functionName, resultAsBytes) {
 	const functionAbi = abi.find(func => func.name === functionName);
 	const functionParameters = functionAbi.outputs;
-	console.log(
-		'\n -Decoding:',
-		functionName,
-		'\n -outputs expected:',
-		JSON.stringify(functionParameters, null, 3));
 	const resultHex = '0x'.concat(Buffer.from(resultAsBytes).toString('hex'));
 	const result = web3.eth.abi.decodeParameters(functionParameters, resultHex);
 	return result;
