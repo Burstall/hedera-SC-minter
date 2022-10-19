@@ -92,7 +92,7 @@ describe('Deployment: ', function() {
 
 		// create Alice account
 		alicePK = PrivateKey.generateED25519();
-		aliceId = await accountCreator(alicePK, 20);
+		aliceId = await accountCreator(alicePK, 40);
 		console.log('Alice account ID:', aliceId.toString(), '\nkey:', alicePK.toString());
 
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
