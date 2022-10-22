@@ -125,6 +125,8 @@ describe('Check SC deployment...', function() {
 		client.setOperator(operatorId, operatorKey);
 		const paused = await getSetting('getMintPaused', 'paused');
 		expect(paused).to.be.true;
+		const wlOnly = await getSetting('getWLOnly', 'wlOnly');
+		expect(wlOnly).to.be.false;
 		const lazyFromSC = await getSetting('getPayLazyFromSC', 'payFromSC');
 		expect(lazyFromSC).to.be.false;
 		const priceHbar = await getSetting('getBasePriceHbar', 'priceHbar');
@@ -141,6 +143,10 @@ describe('Check SC deployment...', function() {
 		expect(Number(refundWindow) == 0).to.be.true;
 		const maxMint = await getSetting('getMaxMint', 'maxMint');
 		expect(Number(maxMint) == 20).to.be.true;
+		const lazyAmt = await getSetting('getBuyWlWithLazy', 'lazyAmt');
+		expect(Number(lazyAmt) == 0).to.be.true;
+		const maxWlAddressMint = await getSetting('getMaxWlAddressMint', 'maxMint');
+		expect(Number(maxWlAddressMint) == 0).to.be.true;
 		const cooldown = await getSetting('getCooldownPeriod', 'cooldownPeriod');
 		expect(Number(cooldown) == 0).to.be.true;
 		const lazyBurn = await getSetting('getLazyBurnPercentage', 'lazyBurn');
@@ -152,15 +158,23 @@ describe('Check SC deployment...', function() {
 			mintEconomics[1] == 0 &&
 			mintEconomics[2] == 0 &&
 			mintEconomics[3] == 0 &&
-			mintEconomics[4] == 20).to.be.true;
+			mintEconomics[4] == 20 &&
+			mintEconomics[5] == 0 &&
+			mintEconomics[6] == 0 &&
+			mintEconomics[7] == 0).to.be.true;
 		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
 		expect(mintTiming[0] == 0 &&
 			mintTiming[1] == 0 &&
 			mintTiming[2] &&
 			mintTiming[3] == 0 &&
-			mintTiming[4] == 0).to.be.true;
+			mintTiming[4] == 0 &&
+			mintTiming[5] == false).to.be.true;
 		const remainingMint = await getSetting('getRemainingMint', 'remainingMint');
 		expect(Number(remainingMint) == 0).to.be.true;
+		const numMinted = await getSetting('getNumberMintedByAddress', 'numMinted');
+		expect(Number(numMinted) == 0).to.be.true;
+		const wlNumMinted = await getSetting('getNumberMintedByWlAddress', 'wlNumMinted');
+		expect(Number(wlNumMinted) == 0).to.be.true;
 	});
 
 	// initialize the minter!
@@ -189,7 +203,7 @@ describe('Check SC deployment...', function() {
 		client.setOperator(operatorId, operatorKey);
 		const metadataList = [];
 
-		for (let m = 1; m <= 25; m++) {
+		for (let m = 1; m <= 50; m++) {
 			const num = '' + m;
 			metadataList.push(num.padStart(3, '0') + '_metadata.json');
 		}
@@ -206,10 +220,49 @@ describe('Check SC deployment...', function() {
 			'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/',
 			metadataList,
 			royaltyList,
+			1600000,
 		);
 		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
 		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
+		expect(result).to.be.equal('SUCCESS');
+	});
+
+	it('Owner can get metadata', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const [status, results] = await methodCallerNoArgs('getMetadataArray', 800000);
+		const metadataList = results['metadataList'];
+		expect(metadataList[0] == '001_metadata.json').to.be.true;
+		expect(status).to.be.equal('SUCCESS');
+	});
+
+	it('Fail to update metadata to wrong size', async function() {
+		client.setOperator(operatorId, operatorKey);
+		let errorCount = 0;
+		try {
+			await useSetterStringArray('updateMetadataArray', ['meta1', 'meta2']);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Successfully update metadata', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const metadataList = [];
+
+		for (let m = 51; m <= 100; m++) {
+			const num = '' + m;
+			metadataList.push(num.padStart(3, '0') + '_metadata.json');
+		}
+
+		await useSetterStringArray('updateMetadataArray', metadataList, 1000000);
+	});
+
+	it('Successfully update CID', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const result = await useSetterString('updateCID', 'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/');
 		expect(result).to.be.equal('SUCCESS');
 	});
 
@@ -377,6 +430,60 @@ describe('Check access control permission...', function() {
 		}
 		expect(errorCount).to.be.equal(1);
 	});
+
+	it('Check Alice cannot turn on WL', async function() {
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await useSetterBool('updateWlOnlyStatus', true);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Check Alice cannot adjust max mint for WL addresses', async function() {
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await useSetterInts('setMaxWlAddressMint', 2);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Check Alice cannot enable buying WL with $LAZY', async function() {
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await useSetterInts('setBuyWlWithLazy', 1);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Check Alice cannot get details of who minted', async function() {
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await methodCallerNoArgs('getNumberMintedByAllAddresses');
+		}
+		catch (err) {
+			errorCount++;
+		}
+		try {
+			await methodCallerNoArgs('getNumberMintedByAllWlAddresses');
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(2);
+	});
 });
 
 describe('Basic interaction with the Minter...', function() {
@@ -528,7 +635,7 @@ describe('Basic interaction with the Minter...', function() {
 		const now = Math.floor(new Date().getTime() / 1000);
 		const sleepTime = Math.max((mintStart - now) * 1000, 0);
 		// console.log(mintStart, '\nSleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
-		await sleep(sleepTime + 25);
+		await sleep(sleepTime + 1125);
 		client.setOperator(aliceId, alicePK);
 		const [success, serials] = await mintNFT(1, tinybarCost);
 		expect(success == 'SUCCESS').to.be.true;
@@ -541,40 +648,135 @@ describe('Basic interaction with the Minter...', function() {
 	});
 });
 
-describe('Update parameters for the Minter...', function() {
-	it('Owner can get metadata', async function() {
-		client.setOperator(operatorId, operatorKey);
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Fail to update metadata to wrong size', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Successfully update metadata', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Successfully update CID', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-});
-
 describe('Test out WL functions...', function() {
-	it('Enable WL, check WL empty', async function() {
-		expect.fail(0, 1, 'Not implemented');
+	it('Enable Adress Based WL, check WL empty', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 0);
+		// unpause the contract
+		await useSetterBool('updateWlOnlyStatus', true);
+
+		const wl = await getSetting('getWhitelist', 'wl');
+		expect(wl.length == 0).to.be.true;
 	});
 
 	it('Check Alice is unable to mint ', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await mintNFT(1, new Hbar(1).toTinybars);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
 	});
 
 	it('Add Alice to WL & can mint', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(operatorId, operatorKey);
+		const result = await useSetterAddress('addToWhitelist', aliceId);
+		expect(result == 'SUCCESS').to.be.true;
+		// now Alice should be able to mint
+		client.setOperator(aliceId, alicePK);
+		const tinybarCost = new Hbar(1).toTinybars();
+		const [success, serials] = await mintNFT(1, tinybarCost);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
 	});
 
 	it('Remove Alice from WL, let Alice buy in with Lazy', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(operatorId, operatorKey);
+		const result = await useSetterAddress('removeFromWhitelist', aliceId);
+		expect(result == 'SUCCESS').to.be.true;
+		let wl = await getSetting('getWhitelist', 'wl');
+		expect(wl.length == 0).to.be.true;
+
+		// by default unable to buy in with LAZY - check assumption
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await methodCallerNoArgs('buyWlWithLazy', 500000);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+
+		client.setOperator(operatorId, operatorKey);
+		let response = await useSetterInts('setBuyWlWithLazy', 1);
+		expect(response == 'SUCCESS').to.be.true;
+
+		// now Alice can buy that WL spot
+		client.setOperator(aliceId, alicePK);
+		[response] = await methodCallerNoArgs('buyWlWithLazy', 500000);
+		expect(response == 'SUCCESS').to.be.true;
+
+		wl = await getSetting('getWhitelist', 'wl');
+		expect(AccountId.fromSolidityAddress(wl[0]).toString() ==
+			aliceId.toString()).to.be.true;
+	});
+
+	it('Set max cap for WL address and check it blocks Alice', async function() {
+		client.setOperator(aliceId, alicePK);
+		const wlNumMinted = Number(await getSetting('getNumberMintedByWlAddress', 'wlNumMinted'));
+		// console.log('Alice has minted', wlNumMinted, 'WL mints');
+		// test to get the number Alice has minted to set the cap +1 higher
+		// set cap to allow 1 mint then block
+		// add/test logic to stop minting through the cap
+		client.setOperator(operatorId, operatorKey);
+		const result = await useSetterInts('setMaxWlAddressMint', wlNumMinted + 1);
+		expect(result == 'SUCCESS').to.be.true;
+		// setup mint costs
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 0);
+
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			// should fail as only space for a single mint
+			await mintNFT(2, tinybarCost);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		// should pass...
+		const [success, serials] = await mintNFT(1, tinybarCost);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
+		try {
+			// should fail as cap exhausted
+			await mintNFT(1, tinybarCost);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(2);
+	});
+
+	it('Check Owner can get WL / mint history', async function() {
+		client.setOperator(operatorId, operatorKey);
+		let [status, result] = await methodCallerNoArgs('getNumberMintedByAllAddresses', 600000);
+		expect(status == 'SUCCESS').to.be.true;
+		let walletList = result['walletList'];
+		let numMints = result['numMintedList'];
+		let totalMinted = 0;
+
+		for (let w = 0; w < walletList.length; w++) {
+			console.log('Regular mint:', AccountId.fromSolidityAddress(walletList[w]).toString(), Number(numMints[w]));
+			totalMinted += Number(numMints[w]);
+		}
+
+		[status, result] = await methodCallerNoArgs('getNumberMintedByAllWlAddresses', 600000);
+		expect(status == 'SUCCESS').to.be.true;
+		walletList = result['wlWalletList'];
+		numMints = result['wlNumMintedList'];
+		let totalWlMints = 0;
+
+		for (let w = 0; w < walletList.length; w++) {
+			console.log('WL mint:', AccountId.fromSolidityAddress(walletList[w]).toString(), Number(numMints[w]));
+			totalWlMints += Number(numMints[w]);
+		}
+		expect(totalMinted > totalWlMints).to.be.true;
 	});
 });
 
@@ -592,6 +794,10 @@ describe('Test out Discount mint functions...', function() {
 	});
 
 	it('Ensure non-WL has correct price for mint', async function() {
+		expect.fail(0, 1, 'Not implemented');
+	});
+
+	it('Test prefunding the contract for Lazy pmt', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 });
@@ -715,10 +921,11 @@ describe('Withdrawal tests...', function() {
  * Helper function to get the current settings of the contract
  * @param {string} fcnName the name of the getter to call
  * @param {string} expectedVar the variable to exeppect to get back
+ * @param {number=100000} gasLim allows gas veride
  * @return {*}
  */
 // eslint-disable-next-line no-unused-vars
-async function getSetting(fcnName, expectedVar) {
+async function getSetting(fcnName, expectedVar, gasLim = 100000) {
 	// check the Lazy Token and LSCT addresses
 	// generate function call with function name and parameters
 	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
@@ -728,7 +935,7 @@ async function getSetting(fcnName, expectedVar) {
 		.setContractId(contractId)
 		.setFunctionParameters(functionCallAsUint8Array)
 		.setMaxQueryPayment(new Hbar(2))
-		.setGas(100000)
+		.setGas(gasLim)
 		.execute(client);
 	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
 	return queryResult[expectedVar];
@@ -829,10 +1036,9 @@ async function mintNFT(quantity, tinybarPmt) {
  * @param {string[]} metadataList
  * @param {*} royaltyList
  */
-async function initialiseNFTMint(name, symbol, memo, cid, metadataList, royaltyList) {
+async function initialiseNFTMint(name, symbol, memo, cid, metadataList, royaltyList, gasLim = 1000000) {
 	const params = [name, symbol, memo, cid, metadataList, royaltyList];
 
-	const gasLim = 1000000;
 	const [initialiseRx, initialiseResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'initialiseNFTMint', params, MINT_PAYMENT);
 	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress']] ;
 }
@@ -945,12 +1151,24 @@ async function useSetterString(fcnName, value) {
  * @returns {string}
  */
 // eslint-disable-next-line no-unused-vars
-async function useSetterStringArray(fcnName, value) {
-	const gasLim = 200000;
+async function useSetterStringArray(fcnName, value, gasLim = 200000) {
 	const params = new ContractFunctionParameters()
 		.addStringArray(value);
 	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
 	return setterAddressRx.status.toString();
+}
+
+/**
+ * Call a methos with no arguments
+ * @param {string} fcnName
+ * @param {number=} gas
+ * @returns {string}
+ */
+// eslint-disable-next-line no-unused-vars
+async function methodCallerNoArgs(fcnName, gasLim = 500000) {
+	const params = new ContractFunctionParameters();
+	const [setterAddressRx, setterResults ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return [setterAddressRx.status.toString(), setterResults];
 }
 
 /**

@@ -33,11 +33,20 @@ contract MinterContract is ExpiryHelper, Ownable {
 	string private _cid;
 	string[] private _metadata;
 	// map address to timestamps
+	// for cooldown mechanic
 	EnumerableMap.AddressToUintMap private _walletMintTimeMap;
 	// map serials to timestamps
+	// for burn / refund mechanic
 	EnumerableMap.UintToUintMap private _serialMintTimeMap;
-	// map WL serials to tyhe numbers of mints used
+	// map WL serials to the numbers of mints used
+	// for WL mints based on ownership
 	EnumerableMap.UintToUintMap private _wlSerialsToNumMintedMap;
+	// map WL addresses to the numbers of mints used
+	// track WL mints per address for max cap
+	EnumerableMap.AddressToUintMap private _wlAddressToNumMintedMap;
+	// map ALL addreesses to the numbers of mints used
+	// track mints per wallet for max cap
+	EnumerableMap.AddressToUintMap private _addressToNumMintedMap;
 
 	struct MintTiming {
 		uint lastMintTime;
@@ -45,6 +54,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 		bool mintPaused;
 		uint cooldownPeriod;
 		uint refundWindow;
+		bool wlOnly;
 	}
 
 	struct MintEconomics {
@@ -55,6 +65,9 @@ contract MinterContract is ExpiryHelper, Ownable {
 		uint mintPriceLazy;
 		uint wlDiscount;
 		uint maxMint;
+		uint buyWlWithLazy;
+		uint maxWlAddressMint;
+		uint maxMintPerWallet;
 	}
 
 	// to avoid serialisation related default causing odd behaviour
@@ -89,8 +102,8 @@ contract MinterContract is ExpiryHelper, Ownable {
 
 		tokenAssociate(_lazyToken);
 
-		_mintEconomics = MintEconomics(false, 0, 0, 0, 20);
-		_mintTiming = MintTiming(0, 0, true, 0, 0);
+		_mintEconomics = MintEconomics(false, 0, 0, 0, 20, 0, 0, 0);
+		_mintTiming = MintTiming(0, 0, true, 0, 0, false);
 		_lazyBurnPerc = lazyBurnPerc;
 	}
 
@@ -183,6 +196,42 @@ contract MinterContract is ExpiryHelper, Ownable {
 		require(numberToMint <= _metadata.length, "Minted out");
 		require(numberToMint <= _mintEconomics.maxMint, "Max Mint Exceeded");
 
+		bool isWlMint = false;
+		bool found;
+		uint numPreviouslyMinted;
+		// Design decision: WL max mint per wallet takes priority 
+		// over max mint per wallet
+		if (_mintTiming.wlOnly) {
+			require(checkWhitelistConditions(), "Not valid WL");
+			if (_mintEconomics.maxWlAddressMint > 0) {
+				(found, numPreviouslyMinted) = _wlAddressToNumMintedMap.tryGet(msg.sender);
+				if (found) {
+					require((numPreviouslyMinted + numberToMint) <=
+						_mintEconomics.maxWlAddressMint,
+						"Can't Exceeded Max WL Mint");
+				}
+				else {
+					require(numberToMint <=
+						_mintEconomics.maxWlAddressMint,
+						"Can't Exceeded Max WL Mint");
+				}
+			}
+			isWlMint = true;
+		}
+		else if (_mintEconomics.maxMintPerWallet > 0) {
+			(found, numPreviouslyMinted) = _addressToNumMintedMap.tryGet(msg.sender);
+			if (found) {
+				require((numPreviouslyMinted + numberToMint) <=
+					_mintEconomics.maxMintPerWallet,
+					"> Max Mint Per Wallet");
+			}
+			else {
+				require(numberToMint <=
+					_mintEconomics.maxMintPerWallet,
+					"> Max Mint Per Wallet");
+			}
+		}
+
 		//calculate cost
 		uint totalHbarCost = SafeMath.mul(numberToMint, _mintEconomics.mintPriceHbar);
 		uint totalLazyCost = SafeMath.mul(numberToMint, _mintEconomics.mintPriceLazy);
@@ -212,6 +261,7 @@ contract MinterContract is ExpiryHelper, Ownable {
             revert ("Failed to mint Token");
         }
 
+		// TODO: test gas benefits of batch transfer
 		// transfer the token to the user
 		for (uint256 s = 0 ; s < serialNumbers.length; s++) {
 			emit MinterContractMessage("Mint Serial", msg.sender, SafeCast.toUint256(serialNumbers[s]), string(metadataForMint[s]));
@@ -221,11 +271,36 @@ contract MinterContract is ExpiryHelper, Ownable {
 			if (responseCode != HederaResponseCodes.SUCCESS) {
 				revert ("Failed to send NFTs");
 			}
+			_serialMintTimeMap.set(SafeCast.toUint256(serialNumbers[s]), block.timestamp);
 		}
 		_mintTiming.lastMintTime = block.timestamp;
+		_walletMintTimeMap.set(msg.sender, block.timestamp);
+
+		if (isWlMint) {
+			(found, numPreviouslyMinted) = _wlAddressToNumMintedMap.tryGet(msg.sender);
+			if (found) {
+				_wlAddressToNumMintedMap.set(msg.sender, numPreviouslyMinted + numberToMint);
+			}
+			else {
+				_wlAddressToNumMintedMap.set(msg.sender, numberToMint);
+			}
+		}
+
+		// track all minters in case max mint per wallet required
+		(found, numPreviouslyMinted) = _addressToNumMintedMap.tryGet(msg.sender);
+		if (found) {
+			_addressToNumMintedMap.set(msg.sender, numPreviouslyMinted + numberToMint);
+		}
+		else {
+			_addressToNumMintedMap.set(msg.sender, numberToMint);
+		}
 
 		serials = serialNumbers;
 		
+	}
+
+	function checkWhitelistConditions() internal view returns (bool allowedToMint) {
+		allowedToMint = _whitelistedAddresses.contains(msg.sender);
 	}
 
 
@@ -303,6 +378,24 @@ contract MinterContract is ExpiryHelper, Ownable {
         }
     }
 
+	/// @return purchaseStatus bool representing whether operation worked
+	function buyWlWithLazy() external returns (bool purchaseStatus) {
+		require(_mintEconomics.buyWlWithLazy > 0, "WL purchase Disabled");
+
+		if (_whitelistedAddresses.contains(msg.sender)) {
+			purchaseStatus = false;
+		}
+		else {
+			_whitelistedAddresses.add(msg.sender);
+
+			takeLazyPayment(_mintEconomics.buyWlWithLazy);
+
+			emit MinterContractMessage("WL Purchase", msg.sender, 
+				_mintEconomics.buyWlWithLazy, "SUCESS");
+			purchaseStatus = true;
+		}
+	}
+
 	// Transfer hbar oput of the contract - using secure ether transfer pattern
     // on top of onlyOwner as max gas of 2300 (not adjustable) will limit re-entrrant attacks
     // also throws error on failure causing contract to auutomatically revert
@@ -374,6 +467,27 @@ contract MinterContract is ExpiryHelper, Ownable {
 		_mintTiming.mintPaused = mintPaused;
 	}
 
+	/// @param wlOnly boolean to lock mint to WL only
+	/// @return changed indicative of whether a change was made
+	function updateWlOnlyStatus(bool wlOnly) external onlyOwner returns (bool changed) {
+		changed = _mintTiming.wlOnly == wlOnly ? false : true;
+		if (changed) emit MinterContractMessage("WL Usage", msg.sender, wlOnly ? 1 : 0, wlOnly ? "Only WL" : "Open Access");
+		_mintTiming.wlOnly = wlOnly;
+	}
+
+	/// @param lazyAmt int amount of Lazy (adjusted for decimals)
+	function setBuyWlWithLazy(uint lazyAmt) external onlyOwner returns (bool changed) {
+		changed = _mintEconomics.buyWlWithLazy == lazyAmt ? false : true;
+		if (changed) emit MinterContractMessage("Buy WL w/ LAZY", msg.sender, lazyAmt, "Updated");
+		_mintEconomics.buyWlWithLazy = lazyAmt;
+	}
+
+	/// @param maxMint int of how many a WL address can mint
+	function setMaxWlAddressMint(uint maxMint) external onlyOwner returns (bool changed) {
+		changed = _mintEconomics.maxWlAddressMint == maxMint ? false : true;
+		if (changed) emit MinterContractMessage("Set Max Mint", msg.sender, maxMint, "For WL Addresses");
+		_mintEconomics.maxWlAddressMint = maxMint;
+	}
 	
 	/// @param lazyFromContract boolean to pay (true) or release (false)
 	/// @return changed indicative of whether a change was made
@@ -464,6 +578,62 @@ contract MinterContract is ExpiryHelper, Ownable {
     	paused = _mintTiming.mintPaused;
     }
 
+	/// @return wlOnly boolean indicating whether mint is only for WL
+    function getWLOnly() external view returns (bool wlOnly) {
+    	wlOnly = _mintTiming.wlOnly;
+    }
+
+	/// @return lazyAmt amount fof Lazy to buy WL (0 = not possible)
+    function getBuyWlWithLazy() external view returns (uint lazyAmt) {
+    	lazyAmt = _mintEconomics.buyWlWithLazy;
+    }
+
+	/// @return numMinted helper function to check how many a wallet has minted
+	function getNumberMintedByAddress() external view returns(uint numMinted) {
+		bool found;
+		uint numPreviouslyMinted;
+		(found, numPreviouslyMinted) = _addressToNumMintedMap.tryGet(msg.sender);
+		if (found) {
+			numMinted = numPreviouslyMinted;
+		}
+		else {
+			numMinted = 0;
+		}
+	}
+
+	/// @return walletList list of wallets who minted
+	/// @return numMintedList lst of number minted
+	function getNumberMintedByAllAddresses() external view onlyOwner returns(address[] memory walletList, uint[] memory numMintedList) {
+		walletList = new address[](_addressToNumMintedMap.length());
+		numMintedList = new uint[](_addressToNumMintedMap.length());
+		for (uint a = 0; a < _addressToNumMintedMap.length(); a++) {
+			(walletList[a], numMintedList[a]) = _addressToNumMintedMap.at(a);
+		}
+	}
+
+	/// @return wlNumMinted helper function to check how many a wallet has minted
+	function getNumberMintedByWlAddress() external view returns(uint wlNumMinted) {
+		bool found;
+		uint numPreviouslyMinted;
+		(found, numPreviouslyMinted) = _wlAddressToNumMintedMap.tryGet(msg.sender);
+		if (found) {
+			wlNumMinted = numPreviouslyMinted;
+		}
+		else {
+			wlNumMinted = 0;
+		}
+	}
+
+	/// @return wlWalletList list of wallets who minted
+	/// @return wlNumMintedList lst of number minted
+	function getNumberMintedByAllWlAddresses() external view onlyOwner returns(address[] memory wlWalletList, uint[] memory wlNumMintedList) {
+		wlWalletList = new address[](_wlAddressToNumMintedMap.length());
+		wlNumMintedList = new uint[](_wlAddressToNumMintedMap.length());
+		for (uint a = 0; a < _wlAddressToNumMintedMap.length(); a++) {
+			(wlWalletList[a], wlNumMintedList[a]) = _wlAddressToNumMintedMap.at(a);
+		}
+	}
+
 	/// @return refundWindow boolean indicating whether mint is paused
     function getRefundWindow() external view returns (uint256 refundWindow) {
     	refundWindow = _mintTiming.refundWindow;
@@ -524,9 +694,14 @@ contract MinterContract is ExpiryHelper, Ownable {
     	lazyBurn = _lazyBurnPerc;
     }
 
+	/// @return maxMint percentage of lazy to brun each interaction
+    function getMaxWlAddressMint() external view returns (uint maxMint) {
+    	maxMint = _mintEconomics.maxWlAddressMint;
+    }
+
 	/// Check the current Whitelist for minting
     /// @return wl an array of addresses currently enabled for allownace approval
-    function getAllowanceWhitelist()
+    function getWhitelist()
         external
         view
         returns (address[] memory wl)
