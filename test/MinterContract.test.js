@@ -467,7 +467,7 @@ describe('Check access control permission...', function() {
 		client.setOperator(aliceId, alicePK);
 		let errorCount = 0;
 		try {
-			await useSetterInts('updateMintStartDate', (new Date().getTime() / 1000) + 30);
+			await useSetterInts('updateMintStartTime', (new Date().getTime() / 1000) + 30);
 		}
 		catch (err) {
 			errorCount++;
