@@ -32,6 +32,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 	uint private _lazyBurnPerc;
 	string private _cid;
 	string[] private _metadata;
+	uint private _batchSize;
 	// map address to timestamps
 	// for cooldown mechanic
 	EnumerableMap.AddressToUintMap private _walletMintTimeMap;
@@ -105,6 +106,8 @@ contract MinterContract is ExpiryHelper, Ownable {
 		_mintEconomics = MintEconomics(false, 0, 0, 0, 20, 0, 0, 0);
 		_mintTiming = MintTiming(0, 0, true, 0, 0, false);
 		_lazyBurnPerc = lazyBurnPerc;
+		_token = address(0);
+		_batchSize = 10;
 	}
 
 	// Supply the contract with token details and metadata
@@ -113,26 +116,23 @@ contract MinterContract is ExpiryHelper, Ownable {
     /// @param symbol token symbol
     /// @param memo token longer form description as a string
 	/// @param cid root cid for the metadata files
-	/// @param metadata string array of the metadata files (in randomised order!)
     /// @return createdTokenAddress the address of the new token
 	function initialiseNFTMint (
 		string memory name,
         string memory symbol,
         string memory memo,
 		string memory cid,
-		string[] memory metadata,
 		NFTFeeObject[] memory royalties
 	)
 		external
 		payable
 		onlyOwner
-	returns (address createdTokenAddress) {
+	returns (address createdTokenAddress, uint maxSupply) {
 		require(bytes(memo).length <= 100, "Memo max 100 bytes");
-		require(metadata.length > 0, "supply metadata");
+		require(_metadata.length > 0, "supply metadata");
 		require(royalties.length <= 10, "Max 10 royalties");
 
 		_cid = cid;
-		_metadata = metadata;
 
 		// instantiate the list of keys we'll use for token create
         IHederaTokenService.TokenKey[]
@@ -147,7 +147,7 @@ contract MinterContract is ExpiryHelper, Ownable {
         token.treasury = address(this);
         token.tokenKeys = keys;
 		token.tokenSupplyType = true;
-        token.maxSupply = SafeCast.toInt64(SafeCast.toInt256(metadata.length));
+        token.maxSupply = SafeCast.toInt64(SafeCast.toInt256(_metadata.length));
 		// create the expiry schedule for the token using ExpiryHelper
         token.expiry = createAutoRenewExpiry(
             address(this),
@@ -181,8 +181,9 @@ contract MinterContract is ExpiryHelper, Ownable {
         }
 
 		_token = tokenAddress;
+		maxSupply = _metadata.length;
 
-		emit MinterContractMessage("Token Create", _token, 0, "SUCCESS");
+		emit MinterContractMessage("Token Create", _token, maxSupply, "SUCCESS");
 
 		createdTokenAddress = _token;
 	}
@@ -253,26 +254,41 @@ contract MinterContract is ExpiryHelper, Ownable {
 			// pop discarding the elemnt used up
 			_metadata.pop();
 		}
-		
-		(int responseCode, , int64[] memory serialNumbers) 
-			= mintToken(_token, 0, metadataForMint);
 
-		if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert ("Failed to mint Token");
-        }
+		int64[] memory mintedSerials = new int64[](numberToMint);
+		for (uint outer = 0; outer < numberToMint; outer += _batchSize) {
+			uint batchSize = (numberToMint - outer) >= _batchSize ? _batchSize : numberToMint;
+			bytes[] memory batchMetadataForMint = new bytes[](batchSize);
+			for (uint inner = 0; ((outer + inner) < numberToMint) && (inner < _batchSize); inner++) {
+				batchMetadataForMint[inner] = metadataForMint[inner + outer];
+			}
 
-		// TODO: test gas benefits of batch transfer
-		// transfer the token to the user
-		for (uint256 s = 0 ; s < serialNumbers.length; s++) {
-			emit MinterContractMessage("Mint Serial", msg.sender, SafeCast.toUint256(serialNumbers[s]), string(metadataForMint[s]));
+			(int responseCode, , int64[] memory serialNumbers) 
+				= mintToken(_token, 0, batchMetadataForMint);
 
-			responseCode = transferNFT(_token, address(this), msg.sender, serialNumbers[s]);
+			if (responseCode != HederaResponseCodes.SUCCESS) {
+				revert ("Failed to mint Token");
+			}
+
+			
+			// transfer the token to the user
+			address[] memory senderList = new address[](serialNumbers.length);
+			address[] memory receiverList = new address[](serialNumbers.length);
+			for (uint256 s = 0 ; s < serialNumbers.length; s++) {
+				emit MinterContractMessage("Mint Serial", msg.sender, SafeCast.toUint256(serialNumbers[s]), string(batchMetadataForMint[s]));
+				senderList[s] = address(this);
+				receiverList[s] = msg.sender;
+				mintedSerials[s + outer] = serialNumbers[s];
+				_serialMintTimeMap.set(SafeCast.toUint256(serialNumbers[s]), block.timestamp);
+			}
+
+			responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
 
 			if (responseCode != HederaResponseCodes.SUCCESS) {
 				revert ("Failed to send NFTs");
 			}
-			_serialMintTimeMap.set(SafeCast.toUint256(serialNumbers[s]), block.timestamp);
 		}
+		
 		_mintTiming.lastMintTime = block.timestamp;
 		_walletMintTimeMap.set(msg.sender, block.timestamp);
 
@@ -295,7 +311,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 			_addressToNumMintedMap.set(msg.sender, numberToMint);
 		}
 
-		serials = serialNumbers;
+		serials = mintedSerials;
 		
 	}
 
@@ -499,19 +515,27 @@ contract MinterContract is ExpiryHelper, Ownable {
 	/// @param startTime new start time in seconds
     function updateMintStartTime(uint256 startTime) external onlyOwner {
         _mintTiming.mintStartTime = startTime;
-       emit MinterContractMessage("Mint Start", msg.sender, _mintTiming.mintStartTime, "Updated");
+    	emit MinterContractMessage("Mint Start", msg.sender, _mintTiming.mintStartTime, "Updated");
+    }
+
+	/// @param batchSize updated minting batch just in case
+    function updateBatchSize(uint256 batchSize) external onlyOwner returns (bool changed) {
+		require((batchSize > 0) && (batchSize <= 10), "Check Batch Size");
+		changed = _batchSize == batchSize ? false : true;
+    	_batchSize = batchSize;
+    	emit MinterContractMessage("Batching", msg.sender, _batchSize, "Updated");
     }
 
 	/// @param lbp new Lazy SC Treasury address
     function updateLazyBurnPercentage(uint256 lbp) external onlyOwner {
         _lazyBurnPerc = lbp;
-       emit MinterContractMessage("Lazy Burn %", msg.sender, _lazyBurnPerc, "Updated");
+    	emit MinterContractMessage("Lazy Burn %", msg.sender, _lazyBurnPerc, "Updated");
     }
 
 	/// @param maxMint new max mint (0 = uncapped)
     function updateMaxMint(uint256 maxMint) external onlyOwner {
         _mintEconomics.maxMint = maxMint;
-       emit MinterContractMessage("Max Mint", msg.sender, _mintEconomics.maxMint, "Updated");
+    	emit MinterContractMessage("Max Mint", msg.sender, _mintEconomics.maxMint, "Updated");
     }
 
 	/// @param cooldownPeriod cooldown period as seconds
@@ -550,17 +574,68 @@ contract MinterContract is ExpiryHelper, Ownable {
     }
 
 	/// @param metadata new metadata array
-    function updateMetadataArray(string[] memory metadata) external onlyOwner {
+    function updateMetadataArray(string[] memory metadata, uint startIndex) external onlyOwner {
 		// enforce consistency of the metadata list
-		require(metadata.length == _metadata.length, "New metadata wrong shape");
-        _metadata = metadata;
-       emit MinterContractMessage("Metadata", msg.sender, _metadata.length, "Updated");
+		require((startIndex + metadata.length) <= _metadata.length, "Bad offset");
+		uint index = 0;
+		for (uint i = startIndex; i < (startIndex + metadata.length); i++) {
+			_metadata[i] = metadata[index];
+			index++;
+		}
+       emit MinterContractMessage("Metadata", msg.sender, metadata.length, "Updated");
     }
 
+	// method to push metadata end points up
+	function addMetadata(string[] memory metadata) external onlyOwner returns (uint totalLoaded) {
+		require(_token == address(0), "Reset to load new metadata");
+		for (uint i = 0; i < metadata.length; i++) {
+			_metadata.push(metadata[i]);
+		}
+		totalLoaded = _metadata.length;
+	}
+
+	function resetToken() external onlyOwner {
+		_token = address(0);
+		for (uint i = 0; i < _metadata.length; i++) {
+			_metadata.pop();
+		}
+		address wallet;
+		for(uint i = 0; i < _addressToNumMintedMap.length(); i++) {
+			(wallet, ) = _addressToNumMintedMap.at(i);
+			_addressToNumMintedMap.remove(wallet);
+		}
+		for(uint i = 0; i < _walletMintTimeMap.length(); i++) {
+			(wallet, ) = _walletMintTimeMap.at(i);
+			_walletMintTimeMap.remove(wallet);
+		}
+		for(uint i = 0; i < _wlAddressToNumMintedMap.length(); i++) {
+			(wallet, ) = _wlAddressToNumMintedMap.at(i);
+			_wlAddressToNumMintedMap.remove(wallet);
+		}
+		uint serial;
+		for(uint i = 0; i < _serialMintTimeMap.length(); i++) {
+			(serial, ) = _serialMintTimeMap.at(i);
+			_serialMintTimeMap.remove(serial);
+		}
+		for(uint i = 0; i < _wlSerialsToNumMintedMap.length(); i++) {
+			(serial, ) = _wlSerialsToNumMintedMap.at(i);
+			_wlSerialsToNumMintedMap.remove(serial);
+		}
+
+		emit MinterContractMessage("Clear Token", msg.sender, 0, "Reset");
+	}
+
 	/// @return metadataList of metadata unminted -> only owner
-    function getMetadataArray() external view onlyOwner 
+    function getMetadataArray(uint startIndex, uint endIndex) external view onlyOwner 
 		returns (string[] memory metadataList) {
-        metadataList = _metadata;
+			require(endIndex > startIndex, "valid length please");
+			require(endIndex <= _metadata.length, "out of bounds end");
+		metadataList = new string[](endIndex - startIndex);
+		uint index = 0;
+        for (uint i = startIndex; i < endIndex; i++) {
+			metadataList[index] = _metadata[i];
+			index++;
+		}
     }
 
 	/// @return token the address for the NFT to be minted
@@ -657,6 +732,11 @@ contract MinterContract is ExpiryHelper, Ownable {
 	/// @return priceHbar base Hbar price for mint
     function getBasePriceHbar() external view returns (uint priceHbar) {
     	priceHbar = _mintEconomics.mintPriceHbar;
+    }
+
+	/// @return batchSize the size for mint/transfer
+    function getBatchSize() external view returns (uint batchSize) {
+    	batchSize = _batchSize;
     }
 	
 	/// @return priceLazy base Lazy price for mint

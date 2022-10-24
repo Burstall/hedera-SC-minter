@@ -40,7 +40,7 @@ const addressRegex = /(\d+\.\d+\.[1-9]\d+)/i;
 let contractId;
 let contractAddress;
 let abi;
-let client;
+let client, clientAlice;
 let alicePK, aliceId;
 let tokenId;
 
@@ -59,10 +59,12 @@ describe('Deployment: ', function() {
 
 		if (env.toUpperCase() == 'TEST') {
 			client = Client.forTestnet();
+			clientAlice = Client.forTestnet();
 			console.log('testing in *TESTNET*');
 		}
 		else if (env.toUpperCase() == 'MAIN') {
 			client = Client.forMainnet();
+			clientAlice = Client.forMainnet();
 			console.log('testing in *MAINNET*');
 		}
 		else {
@@ -92,8 +94,9 @@ describe('Deployment: ', function() {
 
 		// create Alice account
 		alicePK = PrivateKey.generateED25519();
-		aliceId = await accountCreator(alicePK, 40);
+		aliceId = await accountCreator(alicePK, 100);
 		console.log('Alice account ID:', aliceId.toString(), '\nkey:', alicePK.toString());
+		clientAlice.setOperator(aliceId, alicePK);
 
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
 	});
@@ -149,6 +152,8 @@ describe('Check SC deployment...', function() {
 		expect(Number(maxWlAddressMint) == 0).to.be.true;
 		const cooldown = await getSetting('getCooldownPeriod', 'cooldownPeriod');
 		expect(Number(cooldown) == 0).to.be.true;
+		const batchSize = await getSetting('getBatchSize', 'batchSize');
+		expect(Number(batchSize) == 10).to.be.true;
 		const lazyBurn = await getSetting('getLazyBurnPercentage', 'lazyBurn');
 		expect(Number(lazyBurn) == lazyBurnPerc).to.be.true;
 		const [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
@@ -181,6 +186,11 @@ describe('Check SC deployment...', function() {
 	it('Initialise the minter for a token with no Fees to check it works', async function() {
 		const metadataList = ['metadata.json'];
 
+		// set metadata seperately
+		const [success, totalLoaded] = await uploadMetadata(metadataList);
+		expect(success).to.be.equal('SUCCESS');
+		expect(totalLoaded == 1).to.be.true;
+
 		const royaltyList = [];
 
 		const [result, tokenAddressSolidity] = await initialiseNFTMint(
@@ -188,7 +198,6 @@ describe('Check SC deployment...', function() {
 			'MCt',
 			'MC testing memo',
 			'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
-			metadataList,
 			royaltyList,
 		);
 
@@ -198,49 +207,98 @@ describe('Check SC deployment...', function() {
 		expect(result).to.be.equal('SUCCESS');
 	});
 
+	it('Cannot add more metadata now token is intialised', async function() {
+		client.setOperator(operatorId, operatorKey);
+		let errorCount = 0;
+		try {
+			await useSetterStringArray('addMetadata', ['meta1', 'meta2']);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
 	it('Re-initialise the minter for a token with **WITH FEES**', async function() {
 		// testing with one fallback and one without fallback for generalised case
 		client.setOperator(operatorId, operatorKey);
+
+		// reset metadata
+		const [outcome] = await methodCallerNoArgs('resetToken', 500000);
+		expect(outcome).to.be.equal('SUCCESS');
+
 		const metadataList = [];
 
-		for (let m = 1; m <= 50; m++) {
+		const maxMetadata = 180;
+		for (let m = 1; m <= maxMetadata; m++) {
 			const num = '' + m;
 			metadataList.push(num.padStart(3, '0') + '_metadata.json');
 		}
+
+		// upload metadata
+		const [success, totalLoaded] = await uploadMetadata(metadataList);
+		expect(success).to.be.equal('SUCCESS');
+		expect(totalLoaded == maxMetadata).to.be.true;
 
 		const royalty1 = new NFTFeeObject(200, 10000, operatorId.toSolidityAddress(), 5);
 		const royalty2 = new NFTFeeObject(50, 10000, aliceId.toSolidityAddress());
 
 		const royaltyList = [royalty1, royalty2];
 
-		const [result, tokenAddressSolidity] = await initialiseNFTMint(
+		const [result, tokenAddressSolidity, maxSupply] = await initialiseNFTMint(
 			'MC-test',
 			'MCt',
 			'MC testing memo',
 			'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/',
-			metadataList,
 			royaltyList,
 			1600000,
 		);
 		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
 		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
+		expect(Number(maxSupply) == metadataList.length).to.be.true;
 		expect(result).to.be.equal('SUCCESS');
+	});
+
+	it('Owner cannot set batch size to bad values', async function() {
+		client.setOperator(operatorId, operatorKey);
+		let errorCount = 0;
+		try {
+			await useSetterInts('updateBatchSize', 0);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		try {
+			await useSetterInts('updateBatchSize', 11);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(2);
+	});
+
+	it('Owner can update batch value if needed', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const [status, resultObj] = await useSetterInts('updateBatchSize', 10);
+		expect(status).to.be.equal('SUCCESS');
+		expect(Boolean(resultObj['changed'])).to.be.false;
+
 	});
 
 	it('Owner can get metadata', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const [status, results] = await methodCallerNoArgs('getMetadataArray', 800000);
+		const [status, results] = await useSetterInts('getMetadataArray', 0, 10);
 		const metadataList = results['metadataList'];
 		expect(metadataList[0] == '001_metadata.json').to.be.true;
 		expect(status).to.be.equal('SUCCESS');
 	});
 
-	it('Fail to update metadata to wrong size', async function() {
+	it('Fail to update metadata with bad offset', async function() {
 		client.setOperator(operatorId, operatorKey);
 		let errorCount = 0;
 		try {
-			await useSetterStringArray('updateMetadataArray', ['meta1', 'meta2']);
+			await updateMetadataAtOffset('updateMetadataArray', ['meta1', 'meta2'], 500);
 		}
 		catch (err) {
 			errorCount++;
@@ -252,12 +310,12 @@ describe('Check SC deployment...', function() {
 		client.setOperator(operatorId, operatorKey);
 		const metadataList = [];
 
-		for (let m = 51; m <= 100; m++) {
+		for (let m = 66; m <= 78; m++) {
 			const num = '' + m;
 			metadataList.push(num.padStart(3, '0') + '_metadata.json');
 		}
 
-		await useSetterStringArray('updateMetadataArray', metadataList, 1000000);
+		await updateMetadataAtOffset('updateMetadataArray', metadataList, 66, 2000000);
 	});
 
 	it('Successfully update CID', async function() {
@@ -325,7 +383,7 @@ describe('Check access control permission...', function() {
 		}
 
 		try {
-			await useSetterStringArray('updateMetadataArray', ['meta1', 'meta2']);
+			await updateMetadataAtOffset('updateMetadataArray', ['meta1', 'meta2'], 0);
 		}
 		catch (err) {
 			errorCount++;
@@ -350,6 +408,18 @@ describe('Check access control permission...', function() {
 		let errorCount = 0;
 		try {
 			await useSetterInts('updateCost', 1, 1);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Check Alice cannot modify the batch sizinf', async function() {
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await useSetterInts('updateBatchSize', 5);
 		}
 		catch (err) {
 			errorCount++;
@@ -525,18 +595,46 @@ describe('Basic interaction with the Minter...', function() {
 		expect(serials.length == 1).to.be.true;
 	});
 
-	it('Mint 3 tokens from the SC for hbar', async function() {
+	it('Mint 20 tokens from the SC for hbar', async function() {
 		client.setOperator(operatorId, operatorKey);
 		// unpause the contract
 		await useSetterBool('updatePauseStatus', false);
 		const tinybarCost = new Hbar(1).toTinybars();
 		await useSetterInts('updateCost', tinybarCost, 0);
 
+		const toMint = 20;
+
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(3, tinybarCost * 3);
+		const [success, serials] = await mintNFT(toMint, tinybarCost * toMint, client, 4000000);
 		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 3).to.be.true;
+		expect(serials.length == toMint).to.be.true;
+	});
+
+	it('Check concurrent mint...', async function() {
+		client.setOperator(operatorId, operatorKey);
+		// unpause the contract
+		await useSetterBool('updatePauseStatus', false);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 0);
+		let loop = 10;
+		const promiseList = [];
+		while (loop > 0) {
+			promiseList.push(mintNFT(1, tinybarCost, client));
+			await sleep(125);
+			promiseList.push(mintNFT(1, tinybarCost, clientAlice));
+			await sleep(125);
+			loop--;
+		}
+
+		let sumSerials = 0;
+		await Promise.all(promiseList). then((results) => {
+			for (let i = 0; i < results.length; i++) {
+				const [, serialList] = results[i];
+				sumSerials += serialList.length;
+			}
+		});
+		expect(sumSerials == 20).to.be.true;
 	});
 
 	it('Attempt to mint 2 with max mint @ 1, then mint 1', async function() {
@@ -641,11 +739,6 @@ describe('Basic interaction with the Minter...', function() {
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 1).to.be.true;
 	});
-
-	it('Check concurrent mint...', async function() {
-		// Operator & Alice mint 10 in 1 per tx loop
-		expect.fail(0, 1, 'Not implemented');
-	});
 });
 
 describe('Test out WL functions...', function() {
@@ -703,7 +796,7 @@ describe('Test out WL functions...', function() {
 		expect(errorCount).to.be.equal(1);
 
 		client.setOperator(operatorId, operatorKey);
-		let response = await useSetterInts('setBuyWlWithLazy', 1);
+		let [response] = await useSetterInts('setBuyWlWithLazy', 1);
 		expect(response == 'SUCCESS').to.be.true;
 
 		// now Alice can buy that WL spot
@@ -724,7 +817,7 @@ describe('Test out WL functions...', function() {
 		// set cap to allow 1 mint then block
 		// add/test logic to stop minting through the cap
 		client.setOperator(operatorId, operatorKey);
-		const result = await useSetterInts('setMaxWlAddressMint', wlNumMinted + 1);
+		const [result] = await useSetterInts('setMaxWlAddressMint', wlNumMinted + 1);
 		expect(result == 'SUCCESS').to.be.true;
 		// setup mint costs
 		const tinybarCost = new Hbar(1).toTinybars();
@@ -1015,16 +1108,40 @@ async function transferHbarFromContract(amount, units = HbarUnit.Hbar) {
 
 /**
  *
- * @param {number} quantity
- * @param {number | Long} tinybarPmt
+ * @param {Number} quantity
+ * @param {Number | Long} tinybarPmt
+ * @param {Client=} clientToUse
+ * @param {Number=} gasLim
  */
-async function mintNFT(quantity, tinybarPmt) {
+async function mintNFT(quantity, tinybarPmt, clientToUse = client, gasLim = 1500000) {
 	const params = [quantity];
 
-	const gasLim = 1200000;
 	const [mintRx, mintResults] =
-		await contractExecuteWithStructArgs(contractId, gasLim, 'mintNFT', params, new Hbar(tinybarPmt, HbarUnit.Tinybar));
+		await contractExecuteWithStructArgs(contractId, gasLim, 'mintNFT', params, new Hbar(tinybarPmt, HbarUnit.Tinybar), clientToUse);
 	return [mintRx.status.toString(), mintResults['serials']] ;
+}
+
+/**
+ * Method top upload the metadata using chunking
+ * @param {string[]} metadata
+ * @return {[string, Number]}
+ */
+async function uploadMetadata(metadata) {
+	const uploadBatchSize = 60;
+	let totalLoaded = 0;
+	let result;
+	let status = '';
+	for (let outer = 0; outer < metadata.length; outer += uploadBatchSize) {
+		const dataToSend = [];
+		for (let inner = 0; (inner < uploadBatchSize) && ((inner + outer) < metadata.length); inner++) {
+			dataToSend.push(metadata[inner + outer]);
+		}
+		[status, result] = await useSetterStringArray('addMetadata', dataToSend, 1500000);
+		totalLoaded = Number(result['totalLoaded']);
+		// console.log('Uploaded metadata:', totalLoaded);
+	}
+
+	return [status, totalLoaded];
 }
 
 /**
@@ -1033,17 +1150,16 @@ async function mintNFT(quantity, tinybarPmt) {
  * @param {string} symbol
  * @param {string} memo
  * @param {string} cid
- * @param {string[]} metadataList
  * @param {*} royaltyList
  */
-async function initialiseNFTMint(name, symbol, memo, cid, metadataList, royaltyList, gasLim = 1000000) {
-	const params = [name, symbol, memo, cid, metadataList, royaltyList];
+async function initialiseNFTMint(name, symbol, memo, cid, royaltyList, gasLim = 1000000) {
+	const params = [name, symbol, memo, cid, royaltyList];
 
 	const [initialiseRx, initialiseResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'initialiseNFTMint', params, MINT_PAYMENT);
-	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress']] ;
+	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress'], initialiseResults['maxSupply']] ;
 }
 
-async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar) {
+async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar, clientToUse = client) {
 	// use web3.eth.abi to encode the struct for sending.
 	// console.log('pre-encode:', JSON.stringify(params, null, 4));
 	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, params);
@@ -1053,12 +1169,13 @@ async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amoun
 		.setGas(gasLim)
 		.setFunctionParameters(functionCallAsUint8Array)
 		.setPayableAmount(amountHbar)
-		.execute(client);
+		.freezeWith(clientToUse)
+		.execute(clientToUse);
 
 	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
+	const record = await contractExecuteTx.getRecord(clientToUse);
 	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
+	const contractExecuteRx = await contractExecuteTx.getReceipt(clientToUse);
 	return [contractExecuteRx, contractResults, record];
 }
 
@@ -1151,11 +1268,27 @@ async function useSetterString(fcnName, value) {
  * @returns {string}
  */
 // eslint-disable-next-line no-unused-vars
-async function useSetterStringArray(fcnName, value, gasLim = 200000) {
+async function useSetterStringArray(fcnName, value, gasLim = 500000) {
 	const params = new ContractFunctionParameters()
 		.addStringArray(value);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
+	const [setterAddressRx, setterResults] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return [setterAddressRx.status.toString(), setterResults];
+}
+
+/**
+ * Generic setter caller
+ * @param {string} fcnName
+ * @param {string[]} value
+ * @param {Number} offset starting point to update the array
+ * @returns {string}
+ */
+// eslint-disable-next-line no-unused-vars
+async function updateMetadataAtOffset(fcnName, value, offset = 0, gasLim = 800000) {
+	const params = new ContractFunctionParameters()
+		.addStringArray(value)
+		.addUint256(offset);
+	const [setterAddressRx, setterResults] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return [setterAddressRx.status.toString(), setterResults];
 }
 
 /**
@@ -1178,14 +1311,14 @@ async function methodCallerNoArgs(fcnName, gasLim = 500000) {
  * @returns {string}
  */
 async function useSetterInts(fcnName, ...values) {
-	const gasLim = 200000;
+	const gasLim = 800000;
 	const params = new ContractFunctionParameters();
 
 	for (let i = 0 ; i < values.length; i++) {
 		params.addUint256(values[i]);
 	}
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
+	const [setterAddressRx, setterResult] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return [setterAddressRx.status.toString(), setterResult];
 }
 
 /**
