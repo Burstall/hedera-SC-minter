@@ -5,9 +5,11 @@ const {
 	ContractId,
 	Hbar,
 	ContractExecuteTransaction,
+	HbarUnit,
 	ContractCallQuery,
 	TokenId,
-	ContractFunctionParameters,
+	AccountInfoQuery,
+	TokenAssociateTransaction,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const readlineSync = require('readline-sync');
@@ -20,12 +22,17 @@ let abi;
 const operatorKey = PrivateKey.fromString(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = process.env.CONTRACT_NAME ?? null;
-const MINT_PAYMENT = process.env.MINT_PAYMENT || 50;
+
+const aliceKey = PrivateKey.fromString(process.env.ALICE_PRIVATE_KEY);
+const aliceId = AccountId.fromString(process.env.ALICE_ACCOUNT_ID);
+const bobKey = PrivateKey.fromString(process.env.BOB_PRIVATE_KEY);
+const bobId = AccountId.fromString(process.env.BOB_ACCOUNT_ID);
+const tokenId = TokenId.fromString(process.env.TOKEN_ID);
 
 const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
 const env = process.env.ENVIRONMENT ?? null;
-let client;
+let client, aliceClient, bobClient;
 
 // check-out the deployed script - test read-only method
 const main = async () => {
@@ -37,13 +44,19 @@ const main = async () => {
 
 	console.log('\n-Using ENIVRONMENT:', env);
 	console.log('\n-Using Operator:', operatorId.toString());
+	console.log('\n-Using Alice:', aliceId.toString());
+	console.log('\n-Using Bob:', bobId.toString());
 
 	if (env.toUpperCase() == 'TEST') {
 		client = Client.forTestnet();
+		aliceClient = Client.forTestnet();
+		bobClient = Client.forTestnet();
 		console.log('interacting in *TESTNET*');
 	}
 	else if (env.toUpperCase() == 'MAIN') {
 		client = Client.forMainnet();
+		aliceClient = Client.forMainnet();
+		bobClient = Client.forMainnet();
 		console.log('interacting in *MAINNET*');
 	}
 	else {
@@ -52,43 +65,58 @@ const main = async () => {
 	}
 
 	client.setOperator(operatorId, operatorKey);
+	aliceClient.setOperator(aliceId, aliceKey);
+	bobClient.setOperator(bobId, bobKey);
+
+	let [, nftBal] = await getAccountBalance(operatorId);
+	console.log('Found NFT balance:', nftBal.toString());
+	if (nftBal < 0) await associateTokenToAccount(operatorId, operatorKey);
+	[, nftBal] = await getAccountBalance(aliceId);
+	console.log('Found NFT balance:', nftBal.toString());
+	if (nftBal < 0) await associateTokenToAccount(aliceId, aliceKey);
+	[, nftBal] = await getAccountBalance(bobId);
+	console.log('Found NFT balance:', nftBal.toString());
+	if (nftBal < 0) await associateTokenToAccount(bobId, bobKey);
 
 	// import ABI
 	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`, 'utf8'));
 	abi = json.abi;
 	console.log('\n -Loading ABI...\n');
 
-	console.log('Using contract:', contractId.toString());
+	const [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
+	const remainingMint = await getSetting('getRemainingMint', 'remainingMint');
 
-	const proceed = readlineSync.keyInYNStrict('Do you wish to reset contract, upload new metadata and create a new token?');
+	console.log('Remaining to mint:', remainingMint);
+	console.log('Cost to mint:\nHbar:', new Hbar(hbarCost, HbarUnit.Tinybar).toString(),
+		'\nLazy:', lazyCost / 10);
+
+	const proceed = readlineSync.keyInYNStrict('Do you wish to test 3 accounts minting 10 each concurrently?');
 	if (proceed) {
-
-		await methodCallerNoArgs('resetToken', 500000);
-		const metadataList = [];
-
-		// 23 * 444 = 10,212 for testing!
-		for (let outer = 0; outer < 23; outer++) {
-			for (let m = 1; m <= 444; m++) {
-				const num = '' + m;
-				metadataList.push(num.padStart(3, '0') + '_metadata.json');
-			}
+		let loop = 10;
+		const promiseList = [];
+		while (loop > 0) {
+			promiseList.push(mintNFT(1, hbarCost, client, 'operator'));
+			await sleep(125);
+			promiseList.push(mintNFT(1, hbarCost, aliceClient, 'alice'));
+			await sleep(125);
+			promiseList.push(mintNFT(1, hbarCost, bobClient, 'bob'));
+			await sleep(125);
+			loop--;
 		}
 
-		await uploadMetadata(metadataList);
+		const userSerialMap = new Map();
+		await Promise.all(promiseList). then((results) => {
+			for (let i = 0; i < results.length; i++) {
+				const [user, serialList] = results[i];
+				const serials = userSerialMap.get(user) ?? [];
+				serials.push(serialList[0]);
+				userSerialMap.set(user, serials);
+			}
+		});
 
-		const royalty1 = new NFTFeeObject(200, 10000, operatorId.toSolidityAddress(), 5);
-
-		const royaltyList = [royalty1];
-
-		const [, tokenAddressSolidity] = await initialiseNFTMint(
-			'MC-test',
-			'MCt',
-			'MC testing memo',
-			'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/',
-			royaltyList,
-		);
-		const tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
-		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+		console.log('Operator minted:', userSerialMap.get('operator').length, userSerialMap.get('operator'));
+		console.log('Alice minted:', userSerialMap.get('alice').length, userSerialMap.get('alice'));
+		console.log('Bob minted:', userSerialMap.get('bob').length, userSerialMap.get('bob'));
 
 	}
 	else {
@@ -96,33 +124,26 @@ const main = async () => {
 	}
 };
 
-/**
- * Call a methos with no arguments
- * @param {string} fcnName
- * @param {number=} gas
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function methodCallerNoArgs(fcnName, gasLim = 500000) {
-	const params = new ContractFunctionParameters();
-	const [setterAddressRx, setterResults ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterAddressRx.status.toString(), setterResults];
+function sleep(ms) {
+	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- *
- * @param {string} name
- * @param {string} symbol
- * @param {string} memo
- * @param {string} cid
- * @param {*} royaltyList
- */
-async function initialiseNFTMint(name, symbol, memo, cid, royaltyList, gasLim = 1000000) {
-	const params = [name, symbol, memo, cid, royaltyList];
+async function associateTokenToAccount(account, key) {
+	// now associate the token to the operator account
+	const associateToken = await new TokenAssociateTransaction()
+		.setAccountId(account)
+		.setTokenIds([tokenId])
+		.freezeWith(client)
+		.sign(key);
 
-	const [initialiseRx, initialiseResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'initialiseNFTMint', params, MINT_PAYMENT);
-	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress'], initialiseResults['maxSupply']] ;
+	const associateTokenTx = await associateToken.execute(client);
+	const associateTokenRx = await associateTokenTx.getReceipt(client);
+
+	const associateTokenStatus = associateTokenRx.status;
+
+	return associateTokenStatus.toString();
 }
+
 
 /**
  * Helper function to get the current settings of the contract
@@ -174,7 +195,21 @@ async function getSettings(fcnName, ...expectedVars) {
 	return results;
 }
 
-async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar) {
+/**
+ *
+ * @param {number} quantity
+ * @param {number | Long} tinybarPmt
+ */
+async function mintNFT(quantity, tinybarPmt, specificClient, user) {
+	const params = [quantity];
+
+	const gasLim = 1200000;
+	const [, mintResults] =
+		await contractExecuteWithStructArgs(contractId, gasLim, 'mintNFT', params, new Hbar(tinybarPmt, HbarUnit.Tinybar), specificClient);
+	return [user, mintResults['serials']] ;
+}
+
+async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar, specificClient) {
 	// use web3.eth.abi to encode the struct for sending.
 	// console.log('pre-encode:', JSON.stringify(params, null, 4));
 	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, params);
@@ -184,12 +219,12 @@ async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amoun
 		.setGas(gasLim)
 		.setFunctionParameters(functionCallAsUint8Array)
 		.setPayableAmount(amountHbar)
-		.execute(client);
+		.execute(specificClient);
 
 	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
+	const record = await contractExecuteTx.getRecord(specificClient);
 	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
+	const contractExecuteRx = await contractExecuteTx.getReceipt(specificClient);
 	return [contractExecuteRx, contractResults, record];
 }
 
@@ -212,79 +247,27 @@ function encodeFunctionCall(functionName, parameters) {
 	return Buffer.from(encodedParametersHex, 'hex');
 }
 
-/**
- * Method top upload the metadata using chunking
- * @param {string[]} metadata
- * @return {[string, Number]}
- */
-async function uploadMetadata(metadata) {
-	const uploadBatchSize = 60;
-	const gasLim = 1500000;
-	let totalLoaded = 0;
-	let result;
-	for (let outer = 0; outer < metadata.length; outer += uploadBatchSize) {
-		const dataToSend = [];
-		for (let inner = 0; (inner < uploadBatchSize) && ((inner + outer) < metadata.length); inner++) {
-			dataToSend.push(metadata[inner + outer]);
+async function getAccountBalance(acctId) {
+
+	const query = new AccountInfoQuery()
+		.setAccountId(acctId);
+
+	const info = await query.execute(client);
+
+	const tokenMap = info.tokenRelationships;
+
+	let nftBal = 0;
+	if (tokenId) {
+		const nftTokenBal = tokenMap.get(tokenId.toString());
+		if (nftTokenBal) {
+			nftBal = nftTokenBal.balance;
 		}
-		[, result] = await useSetterStringArray('addMetadata', dataToSend, gasLim);
-		totalLoaded = Number(result['totalLoaded']);
-		console.log('Uploaded metadata:', totalLoaded);
+		else {
+			nftBal = -1;
+		}
 	}
-}
 
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {string[]} value
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterStringArray(fcnName, value, gasLim = 200000) {
-	const params = new ContractFunctionParameters()
-		.addStringArray(value);
-	const [setterAddressRx, setterResults] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterAddressRx.status.toString(), setterResults];
-}
-
-/**
- * Helper function for calling the contract methods
- * @param {ContractId} cId the contract to call
- * @param {number | Long.Long} gasLim the max gas
- * @param {string} fcnName name of the function to call
- * @param {ContractFunctionParameters} params the function arguments
- * @param {string | number | Hbar | Long.Long | BigNumber} amountHbar the amount of hbar to send in the methos call
- * @returns {[TransactionReceipt, any, TransactionRecord]} the transaction receipt and any decoded results
- */
-async function contractExecuteFcn(cId, gasLim, fcnName, params, amountHbar) {
-	const contractExecuteTx = await new ContractExecuteTransaction()
-		.setContractId(cId)
-		.setGas(gasLim)
-		.setFunction(fcnName, params)
-		.setPayableAmount(amountHbar)
-		.execute(client);
-
-	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
-	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
-	return [contractExecuteRx, contractResults, record];
-}
-
-class NFTFeeObject {
-	/**
-	 *
-	 * @param {number} numerator
-	 * @param {number} denominator
-	 * @param {string} account address in solidity format
-	 * @param {number} fallbackfee left as 0 if no fallback
-	 */
-	constructor(numerator, denominator, account, fallbackfee = 0) {
-		this.numerator = numerator;
-		this.denominator = denominator;
-		this.fallbackfee = fallbackfee;
-		this.account = account;
-	}
+	return [info.balance, nftBal];
 }
 
 main()
