@@ -15,12 +15,14 @@ import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
 
 contract LAZYTokenCreator {
 	function burn(address token, uint32 amount) external returns (int responseCode) {}
 }
 
-contract MinterContract is ExpiryHelper, Ownable {
+contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	using EnumerableSet for EnumerableSet.AddressSet;
 	using EnumerableMap for EnumerableMap.AddressToUintMap;
 	using EnumerableMap for EnumerableMap.UintToUintMap;
@@ -189,7 +191,7 @@ contract MinterContract is ExpiryHelper, Ownable {
 	}
 
 	/// @param numberToMint the number of serials to mint
-	function mintNFT(uint256 numberToMint) external payable returns (int64[] memory serials, bytes[] memory metadataForMint) {
+	function mintNFT(uint256 numberToMint) external payable nonReentrant returns (int64[] memory serials, bytes[] memory metadataForMint) {
 		require(_mintTiming.mintStartTime == 0 ||
 			_mintTiming.mintStartTime <= block.timestamp, 
 			"Mint not started");
@@ -412,9 +414,8 @@ contract MinterContract is ExpiryHelper, Ownable {
 		}
 	}
 
-	// Transfer hbar oput of the contract - using secure ether transfer pattern
-    // on top of onlyOwner as max gas of 2300 (not adjustable) will limit re-entrrant attacks
-    // also throws error on failure causing contract to auutomatically revert
+	// Transfer hbar out of the contract
+	// using OZ sendValue()
     /// @param receiverAddress address in EVM format of the reciever of the hbar
     /// @param amount number of tokens to send (in long form adjusted for decimal)
     function transferHbar(address payable receiverAddress, uint amount)
@@ -424,7 +425,8 @@ contract MinterContract is ExpiryHelper, Ownable {
 		require(block.timestamp >= (_mintTiming.lastMintTime + _mintTiming.refundWindow), 
 			"Post-mint Cooldown");
         // throws error on failure
-        receiverAddress.transfer(amount);
+        //receiverAddress.transfer(amount);
+		Address.sendValue(receiverAddress, amount);
 
         emit MinterContractMessage(
             "Hbar Transfer",
