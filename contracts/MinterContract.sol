@@ -235,13 +235,26 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			}
 		}
 
+		//check if wallet has minted before - if not try and associate
+		//SWALLOW ERROR as user may have already associated
+		//Ideally we would just check association beofre the brute force method
+		(found, ) = _walletMintTimeMap.tryGet(msg.sender);
+		if (!found) {
+			//let's associate
+			int responseCode = associateToken(msg.sender, _token);
+			// no need to capture result as failure simply means account already had it associated
+			// if user in the mint DB then will not be tried anyway
+			emit MinterContractMessage("Associated", msg.sender, SafeCast.toUint256(responseCode), "Ressponse Code");
+		}
+
 		//calculate cost
 		uint totalHbarCost = SafeMath.mul(numberToMint, _mintEconomics.mintPriceHbar);
 		uint totalLazyCost = SafeMath.mul(numberToMint, _mintEconomics.mintPriceLazy);
 
 		// take the payment
 		if (totalLazyCost > 0) {
-			takeLazyPayment(totalLazyCost);
+			takeLazyPayment(totalLazyCost, 
+				_mintEconomics.lazyFromContract ? address(this) : msg.sender);
 		}
 
 		if (totalHbarCost > 0) {
@@ -325,19 +338,21 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	/// Use HTS to transfer FT - add the burn
     /// @param amount Non-negative value to take as pmt. a negative value will result in a failure.
     function takeLazyPayment(
-        uint amount
+        uint amount,
+		address payer
     )
 		internal 
 	returns (int responseCode) {
-		require(amount > 0, "Positive transfers only");
-		require(IERC721(_lazyToken).balanceOf(msg.sender) >= amount, "Not LAZY enough");
+		require(IERC721(_lazyToken).balanceOf(payer) >= amount, "Not LAZY enough");
 
-        responseCode = transferToken(
-            _lazyToken,
-            msg.sender,
-            address(this),
-            SafeCast.toInt64(int256(amount))
-        );
+		if (payer != address(this)) {
+			responseCode = transferToken(
+				_lazyToken,
+				msg.sender,
+				address(this),
+				SafeCast.toInt64(int256(amount))
+			);
+		}
 
 		uint256 burnAmt = SafeMath.div(SafeMath.mul(amount, _lazyBurnPerc), 100);
 
@@ -349,8 +364,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             	revert("taking Lazy payment - failed");
         	}
 		}
-        emit MinterContractMessage("LAZY Pmt", msg.sender, amount, "SUCCESS");
-		emit MinterContractMessage("LAZY Burn", msg.sender, burnAmt, "SUCCESS");
+        emit MinterContractMessage("LAZY Pmt", payer, amount, "SUCCESS");
+		emit MinterContractMessage("LAZY Burn", payer, burnAmt, "SUCCESS");
     }
 
 	// function to asses the cost to mint for a user
@@ -358,8 +373,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	/// @return hbarCost
 	/// @return lazyCost
     function getCost() external view returns (uint hbarCost, uint lazyCost) {
-    	hbarCost = _mintEconomics.mintPriceHbar;
-		lazyCost = _mintEconomics.mintPriceLazy;
+		if (checkWhitelistConditions()) {
+			hbarCost = SafeMath.mul(_mintEconomics.mintPriceHbar, (1 - _mintEconomics.wlDiscount));
+			lazyCost = SafeMath.mul(_mintEconomics.mintPriceLazy, (1 - _mintEconomics.wlDiscount));
+		}
+		else {
+			hbarCost = _mintEconomics.mintPriceHbar;
+			lazyCost = _mintEconomics.mintPriceLazy;
+		}
     }
 
 	/// Use HTS to retrieve LAZY
@@ -406,7 +427,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		else {
 			_whitelistedAddresses.add(msg.sender);
 
-			takeLazyPayment(_mintEconomics.buyWlWithLazy);
+			takeLazyPayment(_mintEconomics.buyWlWithLazy, msg.sender);
 
 			emit MinterContractMessage("WL Purchase", msg.sender, 
 				_mintEconomics.buyWlWithLazy, "SUCESS");
@@ -437,29 +458,33 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     }
 
 	// Add an address to the allowance WL
-    /// @param newAddress the newss address to add
+    /// @param newAddresses array of addresses to add
 	/// @return result a boolean showing if the address was added (or was already present)
-    function addToWhitelist(address newAddress) external onlyOwner returns(bool result) {
-        result = _whitelistedAddresses.add(newAddress);
-        emit MinterContractMessage(
-			"ADD WL", 
-            newAddress,
-            result ? 1 : 0,
-            "WL updated"
-        );
+    function addToWhitelist(address[] memory newAddresses) external onlyOwner returns(bool result) {
+        for (uint a = 0 ; a < newAddresses.length; a++ ){
+			result = _whitelistedAddresses.add(newAddresses[a]);
+			emit MinterContractMessage(
+				"ADD WL", 
+				newAddresses[a],
+				result ? 1 : 0,
+				"WL updated"
+			);
+		}
     }
 
 	// Remove an address to the allowance WL
-    /// @param oldAddress the address to remove
+    /// @param oldAddresses the address to remove
 	/// @return result if the address was removed or it was not present
-    function removeFromWhitelist(address oldAddress) external onlyOwner returns(bool result) {
-        result = _whitelistedAddresses.remove(oldAddress);
-        emit MinterContractMessage(
-			"REMOVE WL", 
-            oldAddress,
-            result ? 1 : 0,
-            "WL updated"
-        );
+    function removeFromWhitelist(address[] memory oldAddresses) external onlyOwner returns(bool result) {
+        for (uint a = 0 ; a < oldAddresses.length; a++ ){
+			result = _whitelistedAddresses.remove(oldAddresses[a]);
+			emit MinterContractMessage(
+				"REMOVE WL", 
+				oldAddresses[a],
+				result ? 1 : 0,
+				"WL updated"
+			);
+		}
     }
 
 	// unsigned ints so no ability to set a negative cost.

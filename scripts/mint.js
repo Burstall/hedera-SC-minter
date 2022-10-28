@@ -134,7 +134,7 @@ async function getSettings(fcnName, ...expectedVars) {
 async function mintNFT(quantity, tinybarPmt) {
 	const params = [quantity];
 
-	const gasLim = 1200000;
+	const gasLim = 1850000;
 	const [mintRx, mintResults] =
 		await contractExecuteWithStructArgs(contractId, gasLim, 'mintNFT', params, new Hbar(tinybarPmt, HbarUnit.Tinybar));
 	return [mintRx.status.toString(), mintResults['serials'], mintResults['metadataForMint']] ;

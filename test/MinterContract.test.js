@@ -94,16 +94,18 @@ describe('Deployment: ', function() {
 
 		// create Alice account
 		alicePK = PrivateKey.generateED25519();
-		aliceId = await accountCreator(alicePK, 100);
+		aliceId = await accountCreator(alicePK, 150);
 		console.log('Alice account ID:', aliceId.toString(), '\nkey:', alicePK.toString());
 		clientAlice.setOperator(aliceId, alicePK);
 
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
 	});
 
-	it('Ensure Alice is a little LAZY (send some to prime the pumps)', async function() {
+	it('Ensure Alice & Contract are a little LAZY (send some to prime the pumps)', async function() {
 		// send 1 $LAZY
-		const result = await ftTansferFcn(operatorId, aliceId, 10, lazyTokenId);
+		let result = await ftTansferFcn(operatorId, aliceId, 10, lazyTokenId);
+		expect(result).to.be.equal('SUCCESS');
+		result = await ftTansferFcn(operatorId, contractId, 10, lazyTokenId);
 		expect(result).to.be.equal('SUCCESS');
 	});
 });
@@ -112,7 +114,7 @@ describe('Check SC deployment...', function() {
 	it('Check Lazy token was associated by constructor', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const [contractLazyBal] = await getContractBalance(contractId);
-		expect(contractLazyBal == 0).to.be.true;
+		expect(contractLazyBal == 10).to.be.true;
 	});
 
 	it('Check linkage to Lazy token / LSCT is correct', async function() {
@@ -323,7 +325,6 @@ describe('Check SC deployment...', function() {
 		const result = await useSetterString('updateCID', 'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/');
 		expect(result).to.be.equal('SUCCESS');
 	});
-
 });
 
 describe('Check access control permission...', function() {
@@ -357,14 +358,14 @@ describe('Check access control permission...', function() {
 		client.setOperator(aliceId, alicePK);
 		let errorCount = 0;
 		try {
-			await useSetterAddress('addToWhitelist', aliceId);
+			await useSetterAddresses('addToWhitelist', [aliceId]);
 		}
 		catch (err) {
 			errorCount++;
 		}
 
 		try {
-			await useSetterAddress('removeFromWhitelist', aliceId);
+			await useSetterAddresses('removeFromWhitelist', [aliceId]);
 		}
 		catch (err) {
 			errorCount++;
@@ -687,6 +688,23 @@ describe('Basic interaction with the Minter...', function() {
 		expect(serials.length == 1).to.be.true;
 	});
 
+	it('Allow contract to pay the $LAZY fee', async function() {
+		client.setOperator(operatorId, operatorKey);
+		await useSetterBool('updateContractPaysLazy', true);
+		const tinybarCost = new Hbar(1).toTinybars();
+		await useSetterInts('updateCost', tinybarCost, 5);
+
+		// let Alice mint to test it works for a 3rd party
+		client.setOperator(aliceId, alicePK);
+		const [success, serials] = await mintNFT(1, tinybarCost);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
+
+		// reset state
+		client.setOperator(operatorId, operatorKey);
+		await useSetterBool('updateContractPaysLazy', false);
+	});
+
 
 	it('Check unable to mint if not enough funds', async function() {
 		client.setOperator(operatorId, operatorKey);
@@ -767,7 +785,7 @@ describe('Test out WL functions...', function() {
 
 	it('Add Alice to WL & can mint', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const result = await useSetterAddress('addToWhitelist', aliceId);
+		const result = await useSetterAddresses('addToWhitelist', [aliceId.toSolidityAddress()]);
 		expect(result == 'SUCCESS').to.be.true;
 		// now Alice should be able to mint
 		client.setOperator(aliceId, alicePK);
@@ -779,7 +797,7 @@ describe('Test out WL functions...', function() {
 
 	it('Remove Alice from WL, let Alice buy in with Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const result = await useSetterAddress('removeFromWhitelist', aliceId);
+		const result = await useSetterAddresses('removeFromWhitelist', [aliceId.toSolidityAddress()]);
 		expect(result == 'SUCCESS').to.be.true;
 		let wl = await getSetting('getWhitelist', 'wl');
 		expect(wl.length == 0).to.be.true;
@@ -878,19 +896,15 @@ describe('Test out Discount mint functions...', function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 
-	it('Set discounts at token level, mint at discount price', async function() {
+	it('Use address for WL mint, at discount', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 
-	it('Set discount for WL mint, mint with WL', async function() {
+	it('Use token for WL, mint at discount price', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 
 	it('Ensure non-WL has correct price for mint', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Test prefunding the contract for Lazy pmt', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 });
@@ -1113,7 +1127,8 @@ async function transferHbarFromContract(amount, units = HbarUnit.Hbar) {
  * @param {Client=} clientToUse
  * @param {Number=} gasLim
  */
-async function mintNFT(quantity, tinybarPmt, clientToUse = client, gasLim = 1500000) {
+// eslint-disable-next-line no-unused-vars
+async function mintNFT(quantity, tinybarPmt, clientToUse = client, gasLim = 2000000) {
 	const params = [quantity];
 
 	const [mintRx, mintResults] =
@@ -1249,6 +1264,21 @@ async function useSetterAddress(fcnName, value) {
 /**
  * Generic setter caller
  * @param {string} fcnName
+ * @param {TokenId[] | AccountId[] | ContractId[]} value
+ * @returns {string}
+ */
+// eslint-disable-next-line no-unused-vars
+async function useSetterAddresses(fcnName, value) {
+	const gasLim = 500000;
+	const params = new ContractFunctionParameters()
+		.addAddressArray(value);
+	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return setterAddressRx.status.toString();
+}
+
+/**
+ * Generic setter caller
+ * @param {string} fcnName
  * @param {string} value
  * @returns {string}
  */
@@ -1310,6 +1340,7 @@ async function methodCallerNoArgs(fcnName, gasLim = 500000) {
  * @param {...number} values
  * @returns {string}
  */
+// eslint-disable-next-line no-unused-vars
 async function useSetterInts(fcnName, ...values) {
 	const gasLim = 800000;
 	const params = new ContractFunctionParameters();
@@ -1434,6 +1465,7 @@ async function accountCreator(privateKey, initialBalance) {
  * @param {TokenId} tokenToAssociate
  * @returns {any} expected to be a string 'SUCCESS' implies it worked
  */
+// eslint-disable-next-line no-unused-vars
 async function associateTokenToAccount(account, tokenToAssociate) {
 	// now associate the token to the operator account
 	const associateToken = await new TokenAssociateTransaction()
