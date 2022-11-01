@@ -5,8 +5,6 @@ import "./HederaResponseCodes.sol";
 import "./HederaTokenService.sol";
 import "./ExpiryHelper.sol";
 
-import "./AddrArrayLib.sol";
-
 // Import OpenZeppelin Contracts libraries where needed
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -28,7 +26,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	using EnumerableMap for EnumerableMap.UintToUintMap;
 
 	// list of WL addresses
-    EnumerableSet.AddressSet private _whitelistedAddresses;
+    EnumerableMap.AddressToUintMap private _whitelistedAddressQtyMap;
 	LAZYTokenCreator private _lazySCT;
 	address private _lazyToken;
 	uint private _lazyBurnPerc;
@@ -331,7 +329,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	}
 
 	function checkWhitelistConditions() internal view returns (bool allowedToMint) {
-		allowedToMint = _whitelistedAddresses.contains(msg.sender);
+		allowedToMint = _whitelistedAddressQtyMap.contains(msg.sender);
 	}
 
 
@@ -417,22 +415,18 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         }
     }
 
-	/// @return purchaseStatus bool representing whether operation worked
-	function buyWlWithLazy() external returns (bool purchaseStatus) {
+	/// @return wlSpotsPurchased bool representing whether operation worked
+	function buyWlWithLazy() external returns (uint wlSpotsPurchased) {
 		require(_mintEconomics.buyWlWithLazy > 0, "WL purchase Disabled");
 
-		if (_whitelistedAddresses.contains(msg.sender)) {
-			purchaseStatus = false;
-		}
-		else {
-			_whitelistedAddresses.add(msg.sender);
+		wlSpotsPurchased = _whitelistedAddressQtyMap.contains(msg.sender) ?
+			_whitelistedAddressQtyMap.get(msg.sender) + _mintEconomics.maxWlAddressMint :
+				_mintEconomics.maxWlAddressMint;
 
-			takeLazyPayment(_mintEconomics.buyWlWithLazy, msg.sender);
-
-			emit MinterContractMessage("WL Purchase", msg.sender, 
-				_mintEconomics.buyWlWithLazy, "SUCESS");
-			purchaseStatus = true;
-		}
+		_whitelistedAddressQtyMap.set(msg.sender, wlSpotsPurchased);
+		takeLazyPayment(_mintEconomics.buyWlWithLazy, msg.sender);
+		emit MinterContractMessage("WL Purchase", msg.sender, 
+				wlSpotsPurchased, "SUCESS");
 	}
 
 	// Transfer hbar out of the contract
@@ -459,14 +453,16 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	// Add an address to the allowance WL
     /// @param newAddresses array of addresses to add
-	/// @return result a boolean showing if the address was added (or was already present)
-    function addToWhitelist(address[] memory newAddresses) external onlyOwner returns(bool result) {
-        for (uint a = 0 ; a < newAddresses.length; a++ ){
-			result = _whitelistedAddresses.add(newAddresses[a]);
+	/// @return results a boolean showing if the address was added (or was already present)
+    function addToWhitelist(address[] memory newAddresses) external onlyOwner returns(bool[] memory results) {
+        results = new bool[](newAddresses.length);
+
+		for (uint a = 0 ; a < newAddresses.length; a++ ){
+			results[a] = _whitelistedAddressQtyMap.set(newAddresses[a], _mintEconomics.maxWlAddressMint);
 			emit MinterContractMessage(
 				"ADD WL", 
 				newAddresses[a],
-				result ? 1 : 0,
+				results[a] ? 1 : 0,
 				"WL updated"
 			);
 		}
@@ -474,14 +470,15 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	// Remove an address to the allowance WL
     /// @param oldAddresses the address to remove
-	/// @return result if the address was removed or it was not present
-    function removeFromWhitelist(address[] memory oldAddresses) external onlyOwner returns(bool result) {
-        for (uint a = 0 ; a < oldAddresses.length; a++ ){
-			result = _whitelistedAddresses.remove(oldAddresses[a]);
+	/// @return results if the address was removed or it was not present
+    function removeFromWhitelist(address[] memory oldAddresses) external onlyOwner returns(bool[] memory results) {
+        results = new bool[](oldAddresses.length);
+		for (uint a = 0 ; a < oldAddresses.length; a++ ){
+			results[a] = _whitelistedAddressQtyMap.remove(oldAddresses[a]);
 			emit MinterContractMessage(
 				"REMOVE WL", 
 				oldAddresses[a],
-				result ? 1 : 0,
+				results[a] ? 1 : 0,
 				"WL updated"
 			);
 		}
@@ -811,9 +808,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     function getWhitelist()
         external
         view
-        returns (address[] memory wl)
+        returns (address[] memory wl, uint[] memory wlQty)
     {
-        return _whitelistedAddresses.values();
+        wl = new address[](_whitelistedAddressQtyMap.length());
+		wlQty = new uint[](_whitelistedAddressQtyMap.length());
+		
+		for (uint a = 0; a < _whitelistedAddressQtyMap.length(); a++) {
+			(wl[a], wlQty[a]) = _whitelistedAddressQtyMap.at(a);
+		}
     }
 
 	/// @return mintEconomics basic struct with mint economics details
@@ -828,9 +830,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
     // Check if the address is in the WL
     /// @param addressToCheck the address to check in WL
-    /// @return bool if in the WL
-    function isAddressWL(address addressToCheck) external view returns (bool) {
-        return _whitelistedAddresses.contains(addressToCheck);
+    /// @return inWl if in the WL
+	/// @return qty the number of WL mints (0 = unbounded)
+    function isAddressWL(address addressToCheck) external view returns (bool inWl, uint qty) {
+		(inWl, qty) = _whitelistedAddressQtyMap.tryGet(addressToCheck);
     }
 
 	 // Call to associate a new token to the contract
