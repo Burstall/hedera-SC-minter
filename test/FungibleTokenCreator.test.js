@@ -121,7 +121,29 @@ describe('Mint the fungible token', function() {
 		client.setOperator(operatorId, operatorKey);
 		tokenDecimal = 2;
 		await mintFungible('TestToken', 'TT', 'Test Token', contractFTSupply, tokenDecimal, 0, 30);
-		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
+		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
+	});
+
+	it('Owner mints a FT with fixed fees', async function() {
+		contractFTSupply = 100000;
+		client.setOperator(operatorId, operatorKey);
+		tokenDecimal = 2;
+		const fxdFee = new FTFixedFeeObject(5, new TokenId(0).toSolidityAddress(), false, true, operatorId.toSolidityAddress());
+		const [result, tokenIdAsSolidityAddress] = await mintFungibleWithFees('TestTokenFixedFees', 'TTFF', 'Test Token with Fixed Fees', contractFTSupply, tokenDecimal, 0, 50, [fxdFee], []);
+		console.log('FT with fixed Fee', TokenId.fromSolidityAddress(tokenIdAsSolidityAddress).toString(), tokenIdAsSolidityAddress);
+		expect(result == 'SUCCESS').to.be.true;
+		expect(TokenId.fromSolidityAddress(tokenIdAsSolidityAddress).toString().match(addressRegex).length == 2).to.be.true;
+	});
+
+	it('Owner mints a FT with Fractional fees', async function() {
+		contractFTSupply = 100000;
+		client.setOperator(operatorId, operatorKey);
+		tokenDecimal = 2;
+		const fracFee = new FTFractionalFeeObject(6, 100, operatorId.toSolidityAddress(), true, 2);
+		const [result, tokenIdAsSolidityAddress] = await mintFungibleWithFees('TestTokenFractionalFees', 'TTFracF', 'Test Token with Fractional Fees', contractFTSupply, tokenDecimal, 0, 50, [], [fracFee]);
+		console.log('FT with Fractional Fee', TokenId.fromSolidityAddress(tokenIdAsSolidityAddress).toString(), tokenIdAsSolidityAddress);
+		expect(result == 'SUCCESS').to.be.true;
+		expect(TokenId.fromSolidityAddress(tokenIdAsSolidityAddress).toString().match(addressRegex).length == 2).to.be.true;
 	});
 
 	it('Ensure the balance of FT is correct', async function() {
@@ -491,6 +513,26 @@ async function contractExecuteFcn(cId, gasLim, fcnName, params, amountHbar) {
 	return [contractExecuteRx, contractResults, record];
 }
 
+async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar, clientToUse = client) {
+	// use web3.eth.abi to encode the struct for sending.
+	// console.log('pre-encode:', JSON.stringify(params, null, 4));
+	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, params);
+
+	const contractExecuteTx = await new ContractExecuteTransaction()
+		.setContractId(cId)
+		.setGas(gasLim)
+		.setFunctionParameters(functionCallAsUint8Array)
+		.setPayableAmount(amountHbar)
+		.freezeWith(clientToUse)
+		.execute(clientToUse);
+
+	// get the results of the function call;
+	const record = await contractExecuteTx.getRecord(clientToUse);
+	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
+	const contractExecuteRx = await contractExecuteTx.getReceipt(clientToUse);
+	return [contractExecuteRx, contractResults, record];
+}
+
 /**
  * Decodes the result of a contract's function execution
  * @param functionName the name of the function within the ABI
@@ -631,6 +673,27 @@ async function mintFungible(tokenName, tokenSymbol, tokenMemo, tokenInitalSupply
 
 	tokenIdSolidityAddr = createTokenRecord.contractFunctionResult.getAddress(0);
 	tokenId = TokenId.fromSolidityAddress(tokenIdSolidityAddr);
+}
+
+/**
+ * Helper function to encpapsualte minting an FT with fees
+ * @param {string} tokenName
+ * @param {string} tokenSymbol
+ * @param {string} tokenMemo
+ * @param {number} tokenInitalSupply
+ * @param {number} tokenDecimal
+ * @param {number} tokenMaxSupply
+ * @param {number} payment
+ * @param {FTFixedFeeObject[]} fxdFees
+ * @param {FTFractionalFeeObject[]} fracFees
+ */
+async function mintFungibleWithFees(tokenName, tokenSymbol, tokenMemo, tokenInitalSupply, decimal, tokenMaxSupply, payment, fxdFees, fracFees) {
+	const gasLim = 800000;
+
+	const params = [tokenName, tokenSymbol, tokenMemo, tokenInitalSupply, decimal, tokenMaxSupply, fxdFees, fracFees];
+
+	const [mintRx, mintResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'createTokenWithCustomFees', params, payment);
+	return [mintRx.status.toString(), mintResults['createdTokenAddress']];
 }
 
 /**
@@ -834,4 +897,43 @@ async function removeAddressFromWL(address) {
 		.addAddress(address.toSolidityAddress());
 	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'removeAllowanceWhitelist', params);
 	return callHbarRx.status.toString();
+}
+
+class FTFixedFeeObject {
+	/**
+	 * Fixed fee objects for FTs if applicable. note can onlyy set *ONE* of
+	 * token / useHbar / use own token per fee object
+	 * @param {number} amount
+	 * @param {string} tokenAddress - the token ID (solidity address!) to use for payment
+	 * @param {boolean} useHbarsForPayment - true if to use hbar for payment instead
+	 * @param {boolean} useCurrentTokenForPayment - true if to denominate the payment in the token itself
+	 * @param {string} feeCollector - the account to send the royalty to
+	 */
+	constructor(amount, tokenAddress, useHbarsForPayment, useCurrentTokenForPayment, feeCollector) {
+		this.amount = amount;
+		this.tokenAddress = tokenAddress;
+		this.useHbar = useHbarsForPayment;
+		this.useCurrentTokenForPayment = useCurrentTokenForPayment;
+		this.feeCollector = feeCollector;
+	}
+}
+
+class FTFractionalFeeObject {
+	/**
+	 *
+	 * @param {number} numerator
+	 * @param {number} denominator
+	 * @param {string} feeCollector address in solidity format
+	 * @param {boolean} netOfTransfers take the fee net of the amount transfered
+	 * @param {number} minimumAmount - min fee to take
+	 * @param {number} maximumAmount - max fee to take, 0 implies uncapped.
+	 */
+	constructor(numerator, denominator, feeCollector, netOfTransfers, minimumAmount, maximumAmount = 0) {
+		this.numerator = numerator;
+		this.denominator = denominator;
+		this.minimumAmount = minimumAmount;
+		this.maximumAmount = maximumAmount;
+		this.netOfTransfers = netOfTransfers;
+		this.feeCollector = feeCollector;
+	}
 }

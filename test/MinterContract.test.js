@@ -130,7 +130,7 @@ describe('Check SC deployment...', function() {
 		client.setOperator(operatorId, operatorKey);
 		const paused = await getSetting('getMintPaused', 'paused');
 		expect(paused).to.be.true;
-		const wlOnly = await getSetting('getWLOnly', 'wlOnly');
+		const wlOnly = await getSetting('getWlOnly', 'wlOnly');
 		expect(wlOnly).to.be.false;
 		const lazyFromSC = await getSetting('getPayLazyFromSC', 'payFromSC');
 		expect(lazyFromSC).to.be.false;
@@ -138,7 +138,7 @@ describe('Check SC deployment...', function() {
 		expect(Number(priceHbar) == 0).to.be.true;
 		const priceLazy = await getSetting('getBasePriceLazy', 'priceLazy');
 		expect(Number(priceLazy) == 0).to.be.true;
-		const wlDisc = await getSetting('getWLDiscount', 'wlDiscount');
+		const wlDisc = await getSetting('getWlDiscount', 'wlDiscount');
 		expect(Number(wlDisc) == 0).to.be.true;
 		const lastMint = await getSetting('getLastMint', 'lastMintTime');
 		expect(Number(lastMint) == 0).to.be.true;
@@ -226,7 +226,7 @@ describe('Check SC deployment...', function() {
 		client.setOperator(operatorId, operatorKey);
 
 		// reset metadata
-		const [outcome] = await methodCallerNoArgs('resetToken', 500000);
+		const outcome = await useSetterBool('resetContract', true, 500000);
 		expect(outcome).to.be.equal('SUCCESS');
 
 		const metadataList = [];
@@ -827,25 +827,23 @@ describe('Test out WL functions...', function() {
 			aliceId.toString()).to.be.true;
 	});
 
-	it('Set max cap for WL address and check it blocks Alice', async function() {
-		client.setOperator(aliceId, alicePK);
-		const wlNumMinted = Number(await getSetting('getNumberMintedByWlAddress', 'wlNumMinted'));
-		// console.log('Alice has minted', wlNumMinted, 'WL mints');
-		// test to get the number Alice has minted to set the cap +1 higher
-		// set cap to allow 1 mint then block
-		// add/test logic to stop minting through the cap
+	it('Set max cap for WL address, buy in, mint and then check it blocks Alice', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const [result] = await useSetterInts('setMaxWlAddressMint', wlNumMinted + 1);
+		const [result] = await useSetterInts('setMaxWlAddressMint', 1);
 		expect(result == 'SUCCESS').to.be.true;
 		// setup mint costs
 		const tinybarCost = new Hbar(1).toTinybars();
 		await useSetterInts('updateCost', tinybarCost, 0);
 
 		client.setOperator(aliceId, alicePK);
+		// Alice buys into WL again it should give her one slot
+		const [response] = await methodCallerNoArgs('buyWlWithLazy', 500000);
+		expect(response == 'SUCCESS').to.be.true;
+
 		let errorCount = 0;
 		try {
 			// should fail as only space for a single mint
-			await mintNFT(2, tinybarCost);
+			await mintNFT(2, tinybarCost * 2);
 		}
 		catch (err) {
 			errorCount++;
@@ -889,23 +887,72 @@ describe('Test out WL functions...', function() {
 		}
 		expect(totalMinted > totalWlMints).to.be.true;
 	});
+
+	it('Enables buying WL based on serial', async function() {
+		expect.fail(0, 1, 'Not implemented');
+	});
+
+	it('Enables ensure no double spend on the serial', async function() {
+		expect.fail(0, 1, 'Not implemented');
+	});
 });
 
 describe('Test out Discount mint functions...', function() {
 	it('getCost method to check discount / non-discount cost', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		let [status, result] = await useSetterInts('updateCost', tinybarCost, 1);
+		expect(status == 'SUCCESS').to.be.true;
+
+		[status, result] = await useSetterInts('updateWlDiscount', 20);
+		expect(status == 'SUCCESS').to.be.true;
+
+		[status, result] = await methodCallerNoArgs('clearWhitelist', 300000);
+		// console.log('WL entries removed:', Number(result['numAddressesRemoved']));
+		expect(status == 'SUCCESS').to.be.true;
+
+		client.setOperator(aliceId, alicePK);
+		[status, result] = await methodCallerNoArgs('getCost', 300000);
+		expect(status == 'SUCCESS').to.be.true;
+		expect(Number(result['hbarCost']) == tinybarCost).to.be.true;
+		expect(Number(result['lazyCost']) == 1).to.be.true;
+
+		// could allow Alice to buy in for Lazy instead
+		client.setOperator(operatorId, operatorKey);
+		result = await useSetterAddresses('addToWhitelist', [aliceId.toSolidityAddress()]);
+		expect(result == 'SUCCESS').to.be.true;
+
+		client.setOperator(aliceId, alicePK);
+		[status, result] = await methodCallerNoArgs('getCost', 300000);
+		expect(status == 'SUCCESS').to.be.true;
+		expect(Number(result['hbarCost']) == new Hbar(0.8).toTinybars()).to.be.true;
+		expect(Number(result['lazyCost']) == 0).to.be.true;
 	});
 
-	it('Use address for WL mint, at discount', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Use token for WL, mint at discount price', async function() {
-		expect.fail(0, 1, 'Not implemented');
+	it('WL mint, at discount', async function() {
+		client.setOperator(aliceId, alicePK);
+		const [success, serials] = await mintNFT(1, new Hbar(0.8).toTinybars());
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
 	});
 
 	it('Ensure non-WL has correct price for mint', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(operatorId, operatorKey);
+		await useSetterBool('updateWlOnlyStatus', false);
+		let errorCount = 0;
+		try {
+			// should fail as only space for a single mint
+			const tinybarCost = new Hbar(0.8).toTinybars();
+			await mintNFT(1, tinybarCost);
+		}
+		catch (err) {
+			errorCount++;
+		}
+
+		const [success, serials] = await mintNFT(1, new Hbar(1).toTinybars());
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
+		expect(errorCount).to.be.equal(1);
 	});
 });
 
@@ -1235,11 +1282,11 @@ function decodeFunctionResult(functionName, resultAsBytes) {
  * Generic setter caller
  * @param {string} fcnName
  * @param {boolean} value
+ * @param {number=} gasLim
  * @returns {string}
  */
 // eslint-disable-next-line no-unused-vars
-async function useSetterBool(fcnName, value) {
-	const gasLim = 200000;
+async function useSetterBool(fcnName, value, gasLim = 200000) {
 	const params = new ContractFunctionParameters()
 		.addBool(value);
 	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);

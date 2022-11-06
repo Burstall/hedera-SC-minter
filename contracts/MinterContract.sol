@@ -10,8 +10,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
@@ -21,7 +19,6 @@ contract LAZYTokenCreator {
 }
 
 contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
-	using EnumerableSet for EnumerableSet.AddressSet;
 	using EnumerableMap for EnumerableMap.AddressToUintMap;
 	using EnumerableMap for EnumerableMap.UintToUintMap;
 
@@ -128,9 +125,9 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		payable
 		onlyOwner
 	returns (address createdTokenAddress, uint maxSupply) {
-		require(bytes(memo).length <= 100, "Memo max 100 bytes");
-		require(_metadata.length > 0, "supply metadata");
-		require(royalties.length <= 10, "Max 10 royalties");
+		require(bytes(memo).length <= 100, "Memo<100b");
+		require(_metadata.length > 0, "add meta");
+		require(royalties.length <= 10, "<=10Fees");
 
 		_cid = cid;
 
@@ -177,7 +174,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			fees);
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert ("Failed to mint Token");
+            revert ("FM");
         }
 
 		_token = tokenAddress;
@@ -190,12 +187,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	/// @param numberToMint the number of serials to mint
 	function mintNFT(uint256 numberToMint) external payable nonReentrant returns (int64[] memory serials, bytes[] memory metadataForMint) {
+		require(numberToMint > 0, ">0");
 		require(_mintTiming.mintStartTime == 0 ||
 			_mintTiming.mintStartTime <= block.timestamp, 
-			"Mint not started");
-		require(!_mintTiming.mintPaused, "Mint Paused");
-		require(numberToMint <= _metadata.length, "Minted out");
-		require(numberToMint <= _mintEconomics.maxMint, "Max Mint Exceeded");
+			"NotOpen");
+		require(!_mintTiming.mintPaused, "Paused");
+		require(numberToMint <= _metadata.length, "MOut");
+		require(numberToMint <= _mintEconomics.maxMint, "MaxMint");
 
 		bool isWlMint = false;
 		bool found;
@@ -203,19 +201,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		// Design decision: WL max mint per wallet takes priority 
 		// over max mint per wallet
 		if (_mintTiming.wlOnly) {
-			require(checkWhitelistConditions(), "Not valid WL");
+			require(checkWhitelistConditions(), "NotWL");
+			// only check the qty if there is a limit at contract level
 			if (_mintEconomics.maxWlAddressMint > 0) {
-				(found, numPreviouslyMinted) = _wlAddressToNumMintedMap.tryGet(msg.sender);
-				if (found) {
-					require((numPreviouslyMinted + numberToMint) <=
-						_mintEconomics.maxWlAddressMint,
-						"Can't Exceeded Max WL Mint");
-				}
-				else {
-					require(numberToMint <=
-						_mintEconomics.maxWlAddressMint,
-						"Can't Exceeded Max WL Mint");
-				}
+				// we know the address is in the list to get here.
+				uint wlMintsRemaining = _whitelistedAddressQtyMap.get(msg.sender);
+				require(wlMintsRemaining >= numberToMint, "WLSlots");
+				_whitelistedAddressQtyMap.set(msg.sender, wlMintsRemaining -= numberToMint);
 			}
 			isWlMint = true;
 		}
@@ -224,18 +216,18 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			if (found) {
 				require((numPreviouslyMinted + numberToMint) <=
 					_mintEconomics.maxMintPerWallet,
-					"> Max Mint Per Wallet");
+					">WMax");
 			}
 			else {
 				require(numberToMint <=
 					_mintEconomics.maxMintPerWallet,
-					"> Max Mint Per Wallet");
+					">WMax");
 			}
 		}
 
 		//check if wallet has minted before - if not try and associate
 		//SWALLOW ERROR as user may have already associated
-		//Ideally we would just check association beofre the brute force method
+		//Ideally we would just check association before the brute force method
 		(found, ) = _walletMintTimeMap.tryGet(msg.sender);
 		if (!found) {
 			//let's associate
@@ -246,8 +238,9 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 
 		//calculate cost
-		uint totalHbarCost = SafeMath.mul(numberToMint, _mintEconomics.mintPriceHbar);
-		uint totalLazyCost = SafeMath.mul(numberToMint, _mintEconomics.mintPriceLazy);
+		(uint hbarCost, uint lazyCost) = getCostInternal(isWlMint);
+		uint totalHbarCost = SafeMath.mul(numberToMint, hbarCost);
+		uint totalLazyCost = SafeMath.mul(numberToMint, lazyCost);
 
 		// take the payment
 		if (totalLazyCost > 0) {
@@ -256,7 +249,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 
 		if (totalHbarCost > 0) {
-			require(msg.value >= totalHbarCost, "Too little Hbar");
+			require(msg.value >= totalHbarCost, "+Hbar");
 		}
 
 		// pop the metadata
@@ -280,7 +273,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 				= mintToken(_token, 0, batchMetadataForMint);
 
 			if (responseCode != HederaResponseCodes.SUCCESS) {
-				revert ("Failed to mint Token");
+				revert ("FSMint");
 			}
 
 			
@@ -298,7 +291,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
 
 			if (responseCode != HederaResponseCodes.SUCCESS) {
-				revert ("Failed to send NFTs");
+				revert ("FSNFT");
 			}
 		}
 		
@@ -329,7 +322,18 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	}
 
 	function checkWhitelistConditions() internal view returns (bool allowedToMint) {
-		allowedToMint = _whitelistedAddressQtyMap.contains(msg.sender);
+		(bool found, uint qty) = _whitelistedAddressQtyMap.tryGet(msg.sender);
+		if (found) {
+			if (_mintEconomics.maxWlAddressMint > 0) {
+				allowedToMint = qty > 0 ? true : false;
+			}
+			else {
+				allowedToMint = true;
+			}
+		}
+		else {
+			allowedToMint = false;
+		}
 	}
 
 
@@ -341,7 +345,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     )
 		internal 
 	returns (int responseCode) {
-		require(IERC721(_lazyToken).balanceOf(payer) >= amount, "Not LAZY enough");
+		require(IERC721(_lazyToken).balanceOf(payer) >= amount, "LAZYpmt");
 
 		if (payer != address(this)) {
 			responseCode = transferToken(
@@ -359,26 +363,30 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		if (burnAmt > 0) {
 			responseCode = _lazySCT.burn(_lazyToken, SafeCast.toUint32(burnAmt));
 			if (responseCode != HederaResponseCodes.SUCCESS) {
-            	revert("taking Lazy payment - failed");
+            	revert("BF");
         	}
 		}
         emit MinterContractMessage("LAZY Pmt", payer, amount, "SUCCESS");
 		emit MinterContractMessage("LAZY Burn", payer, burnAmt, "SUCCESS");
     }
 
-	// function to asses the cost to mint for a user
-	// currently flat cost, eventually dynamic on holdings
-	/// @return hbarCost
-	/// @return lazyCost
-    function getCost() external view returns (uint hbarCost, uint lazyCost) {
-		if (checkWhitelistConditions()) {
-			hbarCost = SafeMath.mul(_mintEconomics.mintPriceHbar, (1 - _mintEconomics.wlDiscount));
-			lazyCost = SafeMath.mul(_mintEconomics.mintPriceLazy, (1 - _mintEconomics.wlDiscount));
+	function getCostInternal(bool wl) internal view returns (uint hbarCost, uint lazyCost) {
+		if (wl) {
+			hbarCost = SafeMath.div(SafeMath.mul(_mintEconomics.mintPriceHbar, (100 - _mintEconomics.wlDiscount)), 100);
+			lazyCost = SafeMath.div(SafeMath.mul(_mintEconomics.mintPriceLazy, (100 - _mintEconomics.wlDiscount)), 100);
 		}
 		else {
 			hbarCost = _mintEconomics.mintPriceHbar;
 			lazyCost = _mintEconomics.mintPriceLazy;
 		}
+	}
+
+	// function to asses the cost to mint for a user
+	// currently flat cost, eventually dynamic on holdings
+	/// @return hbarCost
+	/// @return lazyCost
+    function getCost() public view returns (uint hbarCost, uint lazyCost) {
+		(hbarCost, lazyCost) = getCostInternal(checkWhitelistConditions());
     }
 
 	/// Use HTS to retrieve LAZY
@@ -392,7 +400,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		onlyOwner 
 	returns (int responseCode) {
 		require(block.timestamp >= (_mintTiming.lastMintTime + _mintTiming.refundWindow), 
-			"Post-mint Cooldown");
+			"lazyCooldown");
 
         responseCode = HederaTokenService.transferToken(
             _lazyToken,
@@ -401,23 +409,23 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             amount
         );
 
-		require(amount > 0, "Positive transfers only");
+		require(amount > 0, "+ve");
 
         emit MinterContractMessage(
             "Retrieve Lazy",
             receiver,
             uint256(uint64(amount)),
-            "completed"
+            ""
         );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("retrieveLazy - failed");
+            revert("retrieveLazy");
         }
     }
 
 	/// @return wlSpotsPurchased bool representing whether operation worked
 	function buyWlWithLazy() external returns (uint wlSpotsPurchased) {
-		require(_mintEconomics.buyWlWithLazy > 0, "WL purchase Disabled");
+		require(_mintEconomics.buyWlWithLazy > 0, "WL0");
 
 		wlSpotsPurchased = _whitelistedAddressQtyMap.contains(msg.sender) ?
 			_whitelistedAddressQtyMap.get(msg.sender) + _mintEconomics.maxWlAddressMint :
@@ -426,7 +434,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		_whitelistedAddressQtyMap.set(msg.sender, wlSpotsPurchased);
 		takeLazyPayment(_mintEconomics.buyWlWithLazy, msg.sender);
 		emit MinterContractMessage("WL Purchase", msg.sender, 
-				wlSpotsPurchased, "SUCESS");
+				wlSpotsPurchased, "");
 	}
 
 	// Transfer hbar out of the contract
@@ -438,7 +446,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         onlyOwner
     {
 		require(block.timestamp >= (_mintTiming.lastMintTime + _mintTiming.refundWindow), 
-			"Post-mint Cooldown");
+			"HbarCooldown");
         // throws error on failure
         //receiverAddress.transfer(amount);
 		Address.sendValue(receiverAddress, amount);
@@ -447,7 +455,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             "Hbar Transfer",
             receiverAddress,
             amount,
-            "complete"
+            ""
         );
     }
 
@@ -463,7 +471,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 				"ADD WL", 
 				newAddresses[a],
 				results[a] ? 1 : 0,
-				"WL updated"
+				""
 			);
 		}
     }
@@ -479,10 +487,23 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 				"REMOVE WL", 
 				oldAddresses[a],
 				results[a] ? 1 : 0,
-				"WL updated"
+				""
 			);
 		}
     }
+
+	// clear the whole WL
+	/// @return numAddressesRemoved how many WL entries were removed. 
+	function clearWhitelist() external onlyOwner returns(uint numAddressesRemoved) {
+		numAddressesRemoved = _whitelistedAddressQtyMap.length();
+		delete _whitelistedAddressQtyMap;
+		emit MinterContractMessage(
+				"Clear WL", 
+				msg.sender,
+				numAddressesRemoved,
+				""
+			);
+	}
 
 	// unsigned ints so no ability to set a negative cost.
 	/// @param hbarCost in *tinybar*
@@ -490,12 +511,12 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	function updateCost(uint256 hbarCost, uint256 lazyCost) external onlyOwner {
 		if (_mintEconomics.mintPriceHbar != hbarCost) {
 			_mintEconomics.mintPriceHbar = hbarCost;
-			emit MinterContractMessage("Hbar mint px", msg.sender, _mintEconomics.mintPriceHbar, "Updated");
+			emit MinterContractMessage("Hbar mint px", msg.sender, _mintEconomics.mintPriceHbar, "");
 		}
 
 		if (_mintEconomics.mintPriceLazy != lazyCost) {
 			_mintEconomics.mintPriceLazy = lazyCost;
-			emit MinterContractMessage("Lazy mint px", msg.sender, _mintEconomics.mintPriceLazy, "Updated");
+			emit MinterContractMessage("Lazy mint px", msg.sender, _mintEconomics.mintPriceLazy, "");
 		}
 	}
 
@@ -518,14 +539,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	/// @param lazyAmt int amount of Lazy (adjusted for decimals)
 	function setBuyWlWithLazy(uint lazyAmt) external onlyOwner returns (bool changed) {
 		changed = _mintEconomics.buyWlWithLazy == lazyAmt ? false : true;
-		if (changed) emit MinterContractMessage("Buy WL w/ LAZY", msg.sender, lazyAmt, "Updated");
+		if (changed) emit MinterContractMessage("Buy WL w/ LAZY", msg.sender, lazyAmt, "");
 		_mintEconomics.buyWlWithLazy = lazyAmt;
 	}
 
 	/// @param maxMint int of how many a WL address can mint
 	function setMaxWlAddressMint(uint maxMint) external onlyOwner returns (bool changed) {
 		changed = _mintEconomics.maxWlAddressMint == maxMint ? false : true;
-		if (changed) emit MinterContractMessage("Set Max Mint", msg.sender, maxMint, "For WL Addresses");
+		if (changed) emit MinterContractMessage("Set Max Mint", msg.sender, maxMint, "");
 		_mintEconomics.maxWlAddressMint = maxMint;
 	}
 	
@@ -539,45 +560,51 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	/// @param startTime new start time in seconds
     function updateMintStartTime(uint256 startTime) external onlyOwner {
         _mintTiming.mintStartTime = startTime;
-    	emit MinterContractMessage("Mint Start", msg.sender, _mintTiming.mintStartTime, "Updated");
+    	emit MinterContractMessage("SetMintStart", msg.sender, _mintTiming.mintStartTime, "");
     }
 
 	/// @param batchSize updated minting batch just in case
     function updateBatchSize(uint256 batchSize) external onlyOwner returns (bool changed) {
-		require((batchSize > 0) && (batchSize <= 10), "Check Batch Size");
+		require((batchSize > 0) && (batchSize <= 10), "Batch Size");
 		changed = _batchSize == batchSize ? false : true;
     	_batchSize = batchSize;
-    	emit MinterContractMessage("Batching", msg.sender, _batchSize, "Updated");
+    	emit MinterContractMessage("SetBatch", msg.sender, _batchSize, "");
     }
 
 	/// @param lbp new Lazy SC Treasury address
     function updateLazyBurnPercentage(uint256 lbp) external onlyOwner {
         _lazyBurnPerc = lbp;
-    	emit MinterContractMessage("Lazy Burn %", msg.sender, _lazyBurnPerc, "Updated");
+    	emit MinterContractMessage("SetLazyBurn%", msg.sender, _lazyBurnPerc, "");
     }
 
 	/// @param maxMint new max mint (0 = uncapped)
     function updateMaxMint(uint256 maxMint) external onlyOwner {
         _mintEconomics.maxMint = maxMint;
-    	emit MinterContractMessage("Max Mint", msg.sender, _mintEconomics.maxMint, "Updated");
+    	emit MinterContractMessage("SetMaxMint", msg.sender, _mintEconomics.maxMint, "");
+    }
+
+	/// @param wlDiscount as percentage
+    function updateWlDiscount(uint256 wlDiscount) external onlyOwner {
+        _mintEconomics.wlDiscount = wlDiscount;
+    	emit MinterContractMessage("SetWLDisc", msg.sender, _mintEconomics.wlDiscount, "");
     }
 
 	/// @param cooldownPeriod cooldown period as seconds
     function updateCooldown(uint256 cooldownPeriod) external onlyOwner {
         _mintTiming.cooldownPeriod = cooldownPeriod;
-       emit MinterContractMessage("Cooldown", msg.sender, _mintTiming.cooldownPeriod, "Updated");
+       emit MinterContractMessage("SetCooldown", msg.sender, _mintTiming.cooldownPeriod, "");
     }
 
 	/// @param refundWindow refund period in seconds / cap on withdrawals
     function updateRefundWindow(uint256 refundWindow) external onlyOwner {
         _mintTiming.refundWindow = refundWindow;
-       emit MinterContractMessage("Refund Windows", msg.sender, _mintTiming.refundWindow, "Updated");
+       emit MinterContractMessage("SetRefundWindow", msg.sender, _mintTiming.refundWindow, "");
     }
 
 	/// @param lsct new Lazy SC Treasury address
     function updateLSCT(address lsct) external onlyOwner {
         _lazySCT = LAZYTokenCreator(lsct);
-       emit MinterContractMessage("Lazy SCT", address(_lazySCT), 0, "Updated");
+       emit MinterContractMessage("SDetLazySCT", address(_lazySCT), 0, "");
     }
 
 	/// @return lsct the address set for the current lazy SC Treasury
@@ -588,72 +615,58 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	/// @param lazy new Lazy FT address
     function updateLazyToken(address lazy) external onlyOwner {
         _lazyToken = lazy;
-       emit MinterContractMessage("Lazy Token", _lazyToken, 0, "Updated");
+       emit MinterContractMessage("SetLazyToken", _lazyToken, 0, "");
     }
 
 	/// @param cid new cid
     function updateCID(string memory cid) external onlyOwner {
         _cid = cid;
-       emit MinterContractMessage("CID", msg.sender, 0, "Updated");
+       emit MinterContractMessage("SetCID", msg.sender, 0, "");
     }
 
 	/// @param metadata new metadata array
     function updateMetadataArray(string[] memory metadata, uint startIndex) external onlyOwner {
 		// enforce consistency of the metadata list
-		require((startIndex + metadata.length) <= _metadata.length, "Bad offset");
+		require((startIndex + metadata.length) <= _metadata.length, "offset");
 		uint index = 0;
 		for (uint i = startIndex; i < (startIndex + metadata.length); i++) {
 			_metadata[i] = metadata[index];
 			index++;
 		}
-       emit MinterContractMessage("Metadata", msg.sender, metadata.length, "Updated");
+       emit MinterContractMessage("Metadata Update", msg.sender, metadata.length, "");
     }
 
 	// method to push metadata end points up
 	function addMetadata(string[] memory metadata) external onlyOwner returns (uint totalLoaded) {
-		require(_token == address(0), "Reset to load new metadata");
+		require(_token == address(0), "Need Reset");
 		for (uint i = 0; i < metadata.length; i++) {
 			_metadata.push(metadata[i]);
 		}
 		totalLoaded = _metadata.length;
 	}
 
-	function resetToken() external onlyOwner {
-		_token = address(0);
-		for (uint i = 0; i < _metadata.length; i++) {
-			_metadata.pop();
+	// Helper method to strip storage requirements
+	// boolean toggle to remove the token ID if full reset
+	/// @param removeToken reset token to zero address
+	function resetContract(bool removeToken) external onlyOwner {
+		if (removeToken) {
+			_token = address(0);
 		}
-		address wallet;
-		for(uint i = 0; i < _addressToNumMintedMap.length(); i++) {
-			(wallet, ) = _addressToNumMintedMap.at(i);
-			_addressToNumMintedMap.remove(wallet);
-		}
-		for(uint i = 0; i < _walletMintTimeMap.length(); i++) {
-			(wallet, ) = _walletMintTimeMap.at(i);
-			_walletMintTimeMap.remove(wallet);
-		}
-		for(uint i = 0; i < _wlAddressToNumMintedMap.length(); i++) {
-			(wallet, ) = _wlAddressToNumMintedMap.at(i);
-			_wlAddressToNumMintedMap.remove(wallet);
-		}
-		uint serial;
-		for(uint i = 0; i < _serialMintTimeMap.length(); i++) {
-			(serial, ) = _serialMintTimeMap.at(i);
-			_serialMintTimeMap.remove(serial);
-		}
-		for(uint i = 0; i < _wlSerialsToNumMintedMap.length(); i++) {
-			(serial, ) = _wlSerialsToNumMintedMap.at(i);
-			_wlSerialsToNumMintedMap.remove(serial);
-		}
+		delete _addressToNumMintedMap;
+		delete _metadata;
+		delete _walletMintTimeMap;
+		delete _wlAddressToNumMintedMap;
+		delete _serialMintTimeMap;
+		delete _wlSerialsToNumMintedMap;
 
-		emit MinterContractMessage("Clear Token", msg.sender, 0, "Reset");
+		emit MinterContractMessage(removeToken ? "Clear Token" : "Reset Contract", msg.sender, 0, "Reset");
 	}
 
 	/// @return metadataList of metadata unminted -> only owner
     function getMetadataArray(uint startIndex, uint endIndex) external view onlyOwner 
 		returns (string[] memory metadataList) {
-			require(endIndex > startIndex, "valid length please");
-			require(endIndex <= _metadata.length, "out of bounds end");
+			require(endIndex > startIndex, "args");
+			require(endIndex <= _metadata.length, "past end");
 		metadataList = new string[](endIndex - startIndex);
 		uint index = 0;
         for (uint i = startIndex; i < endIndex; i++) {
@@ -678,7 +691,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     }
 
 	/// @return wlOnly boolean indicating whether mint is only for WL
-    function getWLOnly() external view returns (bool wlOnly) {
+    function getWlOnly() external view returns (bool wlOnly) {
     	wlOnly = _mintTiming.wlOnly;
     }
 
@@ -700,6 +713,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 	}
 
+	// Likely only viable with smaller mints
 	/// @return walletList list of wallets who minted
 	/// @return numMintedList lst of number minted
 	function getNumberMintedByAllAddresses() external view onlyOwner returns(address[] memory walletList, uint[] memory numMintedList) {
@@ -723,6 +737,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 	}
 
+	// Likely only viable with smaller mints
 	/// @return wlWalletList list of wallets who minted
 	/// @return wlNumMintedList lst of number minted
 	function getNumberMintedByAllWlAddresses() external view onlyOwner returns(address[] memory wlWalletList, uint[] memory wlNumMintedList) {
@@ -769,7 +784,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     }
 	
 	/// @return wlDiscount the address set for Lazy FT token
-    function getWLDiscount() external view returns (uint wlDiscount) {
+    function getWlDiscount() external view returns (uint wlDiscount) {
     	wlDiscount = _mintEconomics.wlDiscount;
     }
 	
@@ -844,24 +859,24 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             tokenId
         );
 
-        emit MinterContractMessage("TokenAssociate", tokenId, 0, "Associated");
+        emit MinterContractMessage("TokenAssociate", tokenId, 0, "");
 
         if (response != HederaResponseCodes.SUCCESS) {
-            revert("Associate Failed");
+            revert("AF");
         }
     }
 
 	receive() external payable {
         emit MinterContractMessage(
-            "Receive",
+            "Receive Hbar",
             msg.sender,
 			msg.value,
-            "Hbar Received by Contract"
+            ""
         );
     }
 
     fallback() external payable {
-        emit MinterContractMessage("Fallback", msg.sender, msg.value, "Fallback Called");
+        emit MinterContractMessage("Fallback Call", msg.sender, msg.value, "");
     }
 
 }
