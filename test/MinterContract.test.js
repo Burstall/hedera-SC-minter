@@ -15,6 +15,13 @@ const {
 	ContractId,
 	ContractCallQuery,
 	TokenAssociateTransaction,
+	CustomRoyaltyFee,
+	CustomFixedFee,
+	TokenCreateTransaction,
+	TokenType,
+	TokenSupplyType,
+	TokenMintTransaction,
+	NftId,
 } = require('@hashgraph/sdk');
 const fs = require('fs');
 const Web3 = require('web3');
@@ -42,7 +49,9 @@ let contractAddress;
 let abi;
 let client, clientAlice;
 let alicePK, aliceId;
-let tokenId;
+let tokenId, wlTokenId;
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 describe('Deployment: ', function() {
 	it('Should deploy the contract and setup conditions', async function() {
@@ -99,6 +108,14 @@ describe('Deployment: ', function() {
 		clientAlice.setOperator(aliceId, alicePK);
 
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
+	});
+
+	it('should mint an NFT to use as the WL token', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const [rewardMintResult, rewardMintedTokenId] = await mintNFTBySDK('MinterContractWL ');
+		wlTokenId = rewardMintedTokenId;
+		expect(rewardMintResult == 'SUCCESS').to.be.true;
+
 	});
 
 	it('Ensure Alice & Contract are a little LAZY (send some to prime the pumps)', async function() {
@@ -160,6 +177,8 @@ describe('Check SC deployment...', function() {
 		expect(Number(lazyBurn) == lazyBurnPerc).to.be.true;
 		const [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
 		expect(Number(hbarCost) == 0 && Number(lazyCost) == 0).to.be.true;
+		const wlToken = await getSetting('getWlToken', 'wlToken');
+		expect(wlToken == ZERO_ADDRESS).to.be.true;
 		const mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
 		expect(!mintEconomics[0] &&
 			mintEconomics[1] == 0 &&
@@ -168,7 +187,8 @@ describe('Check SC deployment...', function() {
 			mintEconomics[4] == 20 &&
 			mintEconomics[5] == 0 &&
 			mintEconomics[6] == 0 &&
-			mintEconomics[7] == 0).to.be.true;
+			mintEconomics[7] == 0 &&
+			mintEconomics[8] == ZERO_ADDRESS).to.be.true;
 		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
 		expect(mintTiming[0] == 0 &&
 			mintTiming[1] == 0 &&
@@ -416,7 +436,19 @@ describe('Check access control permission...', function() {
 		expect(errorCount).to.be.equal(1);
 	});
 
-	it('Check Alice cannot modify the batch sizinf', async function() {
+	it('Check Alice cannot update the wlToken', async function() {
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await useSetterAddress('updateWlToken', wlTokenId.toSolidityAddress());
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Check Alice cannot modify the batch sizing', async function() {
 		client.setOperator(aliceId, alicePK);
 		let errorCount = 0;
 		try {
@@ -889,11 +921,63 @@ describe('Test out WL functions...', function() {
 	});
 
 	it('Enables buying WL based on serial', async function() {
-		expect.fail(0, 1, 'Not implemented');
+		client.setOperator(operatorId, operatorKey);
+		await useSetterAddress('updateWlToken', wlTokenId);
+		let [status, result] = await methodCallerNoArgs('clearWhitelist', 300000);
+		// console.log('WL entries removed:', Number(result['numAddressesRemoved']));
+		expect(status == 'SUCCESS').to.be.true;
+		[status] = await useSetterInts('setMaxWlAddressMint', 1);
+		expect(status == 'SUCCESS').to.be.true;
+		// setup mint costs
+		const tinybarCost = new Hbar(1).toTinybars();
+		[status, result] = await useSetterInts('updateCost', tinybarCost, 0);
+		expect(status == 'SUCCESS').to.be.true;
+
+		// buy WL for operator
+		[status, result] = await useSetterIntArray('buyWlWithTokens', [1]);
+		expect(status == 'SUCCESS').to.be.true;
+		expect(Number(result['wlSpotsPurchased']) == 1).to.be.true;
+		// send two NFTs to Alice to check she can buy WL with the serials
+		await transferNFTBySDK(operatorId, aliceId, wlTokenId, [2, 3]);
+		client.setOperator(aliceId, alicePK);
+		[status, result] = await useSetterIntArray('buyWlWithTokens', [2, 3]);
+		expect(status == 'SUCCESS').to.be.true;
+		expect(Number(result['wlSpotsPurchased']) == 2).to.be.true;
+
+		// expect operator to have 1 WL slot and alice to have 2
+		result = await getSettings('getWhitelist', 'wl', 'wlQty');
+		expect(result[0].length == 2).to.be.true;
+		// order not g'teed but should be sum to 3.
+		expect((Number(result[1][0]) + Number(result[1][1])) == 3).to.be.true;
 	});
 
-	it('Enables ensure no double spend on the serial', async function() {
-		expect.fail(0, 1, 'Not implemented');
+	it('ensure no double spend on the serial', async function() {
+		// attempt to buy WL for operator again using serial 1 - expect failure
+		client.setOperator(operatorId, operatorKey);
+		let errorCount = 0;
+		try {
+			// should fail as already redeemed
+			await useSetterIntArray('buyWlWithTokens', [1]);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('ensure user must own the serial', async function() {
+		// attempt to buy WL for operator again using serial 1 - expect failure
+		client.setOperator(aliceId, alicePK);
+		// have Alice try and buy WL using serial 4 that she does not own.
+		let errorCount = 0;
+		try {
+			// should fail as already redeemed
+			await useSetterIntArray('buyWlWithTokens', [4]);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
 	});
 });
 
@@ -908,7 +992,7 @@ describe('Test out Discount mint functions...', function() {
 		expect(status == 'SUCCESS').to.be.true;
 
 		[status, result] = await methodCallerNoArgs('clearWhitelist', 300000);
-		// console.log('WL entries removed:', Number(result['numAddressesRemoved']));
+		expect(Number(result['numAddressesRemoved']) == 2).to.be.true;
 		expect(status == 'SUCCESS').to.be.true;
 
 		client.setOperator(aliceId, alicePK);
@@ -1395,8 +1479,23 @@ async function useSetterInts(fcnName, ...values) {
 	for (let i = 0 ; i < values.length; i++) {
 		params.addUint256(values[i]);
 	}
-	const [setterAddressRx, setterResult] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterAddressRx.status.toString(), setterResult];
+	const [setterIntsRx, setterResult] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return [setterIntsRx.status.toString(), setterResult];
+}
+
+/**
+ * Generic setter caller
+ * @param {string} fcnName
+ * @param {number[]} ints
+ * @returns {string}
+ */
+// eslint-disable-next-line no-unused-vars
+async function useSetterIntArray(fcnName, ints) {
+	const gasLim = 8000000;
+	const params = new ContractFunctionParameters().addUint256Array(ints);
+
+	const [setterIntArrayRx, setterResult] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return [setterIntArrayRx.status.toString(), setterResult];
 }
 
 /**
@@ -1491,10 +1590,33 @@ async function getAccountBalance(acctId) {
 }
 
 /**
+ * Method to transfer an NFT by SDK
+ * @param {AccountId} sender
+ * @param {AccounId} receiver
+ * @param {TokenId} token
+ * @param {int[]} serials
+ * @param {Client=} cliebntToUse allows for overide
+ * @returns {string} sumbission status
+ */
+async function transferNFTBySDK(sender, receiver, token, serials, clientToUse = client) {
+	const tokenTransferTx = new TransferTransaction();
+	for (let s = 0; s < serials.length; s++) {
+		const nftId = new NftId(token, serials[s]);
+		tokenTransferTx.addNftTransfer(nftId, sender, receiver);
+	}
+	const tokenTransferSubmit = await tokenTransferTx.setTransactionMemo('WL Token Transfer')
+		.freezeWith(clientToUse)
+		.execute(clientToUse);
+	const tokenTransferRx = await tokenTransferSubmit.getReceipt(client);
+	return tokenTransferRx.status.toString();
+
+}
+
+/**
  * Helper function to create new accounts
  * @param {PrivateKey} privateKey new accounts private key
  * @param {string | number} initialBalance initial balance in hbar
- * @returns {AccountId} the nrewly created Account ID object
+ * @returns {AccountId} the newly created Account ID object
  */
 async function accountCreator(privateKey, initialBalance) {
 	const response = await new AccountCreateTransaction()
@@ -1592,4 +1714,58 @@ class NFTFeeObject {
 		this.fallbackfee = fallbackfee;
 		this.account = account;
 	}
+}
+
+/**
+ * Helper function to mint an NFT and a serial on to that token
+ * Using royaltyies to test the (potentially) more complicate case
+ */
+async function mintNFTBySDK(name) {
+	const supplyKey = PrivateKey.generateED25519();
+
+	// create a basic royalty
+	const fee = new CustomRoyaltyFee()
+		.setNumerator(2 * 100)
+		.setDenominator(10000)
+		.setFeeCollectorAccountId(operatorId)
+		.setFallbackFee(new CustomFixedFee().setHbarAmount(new Hbar(5)));
+
+	const tokenCreateTx = new TokenCreateTransaction()
+		.setTokenType(TokenType.NonFungibleUnique)
+		.setTokenName(name + new Date().toISOString())
+		.setTokenSymbol('MCWL')
+		.setInitialSupply(0)
+		.setMaxSupply(10)
+		.setSupplyType(TokenSupplyType.Finite)
+		.setTreasuryAccountId(operatorId)
+		.setAutoRenewAccountId(operatorId)
+		.setSupplyKey(supplyKey)
+		.setCustomFees([fee])
+		.setMaxTransactionFee(new Hbar(50, HbarUnit.Hbar));
+
+	tokenCreateTx.freezeWith(client);
+	const signedCreateTx = await tokenCreateTx.sign(operatorKey);
+	const executionResponse = await signedCreateTx.execute(client);
+
+	/* Get the receipt of the transaction */
+	const createTokenRx = await executionResponse.getReceipt(client).catch((e) => {
+		console.log(e);
+		console.log('Token Create **FAILED*');
+	});
+
+	/* Get the token ID from the receipt */
+	const mintedTokenId = createTokenRx.tokenId;
+
+	// YOU CAN MINT *UP TO* 10 in a single tx by supplying and array of metadata
+	const tokenMintTx = new TokenMintTransaction();
+	for (let c = 0 ; c < 10; c++) {
+		tokenMintTx.addMetadata(Buffer.from('ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/metadata.json'));
+	}
+	tokenMintTx.setTokenId(mintedTokenId).freezeWith(client);
+
+	const signedTx = await tokenMintTx.sign(supplyKey);
+	const tokenMintSubmit = await signedTx.execute(client);
+	// check it worked
+	const mintRx = await tokenMintSubmit.getReceipt(client);
+	return [mintRx.status.toString(), mintedTokenId];
 }
