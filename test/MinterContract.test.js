@@ -103,7 +103,7 @@ describe('Deployment: ', function() {
 
 		// create Alice account
 		alicePK = PrivateKey.generateED25519();
-		aliceId = await accountCreator(alicePK, 150);
+		aliceId = await accountCreator(alicePK, 200);
 		console.log('Alice account ID:', aliceId.toString(), '\nkey:', alicePK.toString());
 		clientAlice.setOperator(aliceId, alicePK);
 
@@ -119,8 +119,8 @@ describe('Deployment: ', function() {
 	});
 
 	it('Ensure Alice & Contract are a little LAZY (send some to prime the pumps)', async function() {
-		// send 1 $LAZY
-		let result = await ftTansferFcn(operatorId, aliceId, 10, lazyTokenId);
+		// send 2 $LAZY
+		let result = await ftTansferFcn(operatorId, aliceId, 20, lazyTokenId);
 		expect(result).to.be.equal('SUCCESS');
 		result = await ftTansferFcn(operatorId, contractId, 10, lazyTokenId);
 		expect(result).to.be.equal('SUCCESS');
@@ -149,36 +149,14 @@ describe('Check SC deployment...', function() {
 		expect(paused).to.be.true;
 		const wlOnly = await getSetting('getWlOnly', 'wlOnly');
 		expect(wlOnly).to.be.false;
-		const lazyFromSC = await getSetting('getPayLazyFromSC', 'payFromSC');
-		expect(lazyFromSC).to.be.false;
-		const priceHbar = await getSetting('getBasePriceHbar', 'priceHbar');
-		expect(Number(priceHbar) == 0).to.be.true;
-		const priceLazy = await getSetting('getBasePriceLazy', 'priceLazy');
-		expect(Number(priceLazy) == 0).to.be.true;
-		const wlDisc = await getSetting('getWlDiscount', 'wlDiscount');
-		expect(Number(wlDisc) == 0).to.be.true;
-		const lastMint = await getSetting('getLastMint', 'lastMintTime');
-		expect(Number(lastMint) == 0).to.be.true;
-		const mintStart = await getSetting('getMintStartTime', 'mintStartTime');
-		expect(Number(mintStart) == 0).to.be.true;
-		const refundWindow = await getSetting('getRefundWindow', 'refundWindow');
-		expect(Number(refundWindow) == 0).to.be.true;
-		const maxMint = await getSetting('getMaxMint', 'maxMint');
-		expect(Number(maxMint) == 20).to.be.true;
 		const lazyAmt = await getSetting('getBuyWlWithLazy', 'lazyAmt');
 		expect(Number(lazyAmt) == 0).to.be.true;
-		const maxWlAddressMint = await getSetting('getMaxWlAddressMint', 'maxMint');
-		expect(Number(maxWlAddressMint) == 0).to.be.true;
-		const cooldown = await getSetting('getCooldownPeriod', 'cooldownPeriod');
-		expect(Number(cooldown) == 0).to.be.true;
 		const batchSize = await getSetting('getBatchSize', 'batchSize');
 		expect(Number(batchSize) == 10).to.be.true;
 		const lazyBurn = await getSetting('getLazyBurnPercentage', 'lazyBurn');
 		expect(Number(lazyBurn) == lazyBurnPerc).to.be.true;
 		const [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
 		expect(Number(hbarCost) == 0 && Number(lazyCost) == 0).to.be.true;
-		const wlToken = await getSetting('getWlToken', 'wlToken');
-		expect(wlToken == ZERO_ADDRESS).to.be.true;
 		const mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
 		expect(!mintEconomics[0] &&
 			mintEconomics[1] == 0 &&
@@ -779,7 +757,8 @@ describe('Basic interaction with the Minter...', function() {
 		const tinybarCost = new Hbar(1).toTinybars();
 		await useSetterInts('updateCost', tinybarCost, 1);
 		// sleep to ensure past the start time
-		const mintStart = await getSetting('getMintStartTime', 'mintStartTime');
+		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
+		const mintStart = Number(mintTiming[1]);
 		const now = Math.floor(new Date().getTime() / 1000);
 		const sleepTime = Math.max((mintStart - now) * 1000, 0);
 		// console.log(mintStart, '\nSleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
@@ -934,13 +913,13 @@ describe('Test out WL functions...', function() {
 		expect(status == 'SUCCESS').to.be.true;
 
 		// buy WL for operator
-		[status, result] = await useSetterIntArray('buyWlWithTokens', [1]);
+		[status, result] = await useSetterInt256Array('buyWlWithTokens', [1]);
 		expect(status == 'SUCCESS').to.be.true;
 		expect(Number(result['wlSpotsPurchased']) == 1).to.be.true;
 		// send two NFTs to Alice to check she can buy WL with the serials
 		await transferNFTBySDK(operatorId, aliceId, wlTokenId, [2, 3]);
 		client.setOperator(aliceId, alicePK);
-		[status, result] = await useSetterIntArray('buyWlWithTokens', [2, 3]);
+		[status, result] = await useSetterInt256Array('buyWlWithTokens', [2, 3]);
 		expect(status == 'SUCCESS').to.be.true;
 		expect(Number(result['wlSpotsPurchased']) == 2).to.be.true;
 
@@ -957,7 +936,7 @@ describe('Test out WL functions...', function() {
 		let errorCount = 0;
 		try {
 			// should fail as already redeemed
-			await useSetterIntArray('buyWlWithTokens', [1]);
+			await useSetterInt256Array('buyWlWithTokens', [1]);
 		}
 		catch (err) {
 			errorCount++;
@@ -972,7 +951,7 @@ describe('Test out WL functions...', function() {
 		let errorCount = 0;
 		try {
 			// should fail as already redeemed
-			await useSetterIntArray('buyWlWithTokens', [4]);
+			await useSetterInt256Array('buyWlWithTokens', [4]);
 		}
 		catch (err) {
 			errorCount++;
@@ -1025,7 +1004,6 @@ describe('Test out Discount mint functions...', function() {
 		await useSetterBool('updateWlOnlyStatus', false);
 		let errorCount = 0;
 		try {
-			// should fail as only space for a single mint
 			const tinybarCost = new Hbar(0.8).toTinybars();
 			await mintNFT(1, tinybarCost);
 		}
@@ -1041,6 +1019,41 @@ describe('Test out Discount mint functions...', function() {
 });
 
 describe('Test out refund functions...', function() {
+	it('Check Owner can burn NFTs', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		let [status, result] = await useSetterInts('updateCost', tinybarCost, 0);
+		expect(status == 'SUCCESS').to.be.true;
+
+		client.setOperator(aliceId, alicePK);
+		const [success, serials] = await mintNFT(2, tinybarCost * 2);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 2).to.be.true;
+
+		client.setOperator(operatorId, operatorKey);
+		[status, result] = await methodCallerNoArgs('getNumberMintedByAllAddresses', 600000);
+		expect(status == 'SUCCESS').to.be.true;
+		const walletList = result['walletList'];
+		const numMints = result['numMintedList'];
+		let totalMinted = 0;
+
+		// gather total minted
+		for (let w = 0; w < walletList.length; w++) {
+			totalMinted += Number(numMints[w]);
+		}
+
+		// Alice now burns her NFTs
+		const serialsAsNum = [];
+		for (let s = 0; s < serials.length; s++) {
+			serialsAsNum.push(Number(serials[s]));
+		}
+		client.setOperator(aliceId, alicePK);
+		const [txStatus, txResObj] = await useSetterInt64Array('burnNFTs', serialsAsNum);
+		expect(txStatus == 'SUCCESS').to.be.true;
+		// check supply is now 2 less
+		expect(totalMinted == (Number(txResObj['newTotalSupply']) + 2)).to.be.true;
+	});
+
 	it('Enable refund (& burn), mint then refund - hbar', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
@@ -1087,7 +1100,8 @@ describe('Withdrawal tests...', function() {
 
 	it('Check Owner cannot pull funds before X time has elapsed from last mint', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const lastMint = Number(await getSetting('getLastMint', 'lastMintTime'));
+		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
+		const lastMint = Number(mintTiming[0]);
 		if (lastMint != 0) {
 			const clockTime = Math.floor(new Date().getTime() / 1000);
 			const delay = clockTime - lastMint + 8;
@@ -1490,7 +1504,7 @@ async function useSetterInts(fcnName, ...values) {
  * @returns {string}
  */
 // eslint-disable-next-line no-unused-vars
-async function useSetterIntArray(fcnName, ints) {
+async function useSetterInt256Array(fcnName, ints) {
 	const gasLim = 8000000;
 	const params = new ContractFunctionParameters().addUint256Array(ints);
 
@@ -1498,6 +1512,20 @@ async function useSetterIntArray(fcnName, ints) {
 	return [setterIntArrayRx.status.toString(), setterResult];
 }
 
+/**
+ * Generic setter caller
+ * @param {string} fcnName
+ * @param {number[]} ints
+ * @returns {string}
+ */
+// eslint-disable-next-line no-unused-vars
+async function useSetterInt64Array(fcnName, ints) {
+	const gasLim = 8000000;
+	const params = new ContractFunctionParameters().addInt64Array(ints);
+
+	const [setterIntArrayRx, setterResult] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return [setterIntArrayRx.status.toString(), setterResult];
+}
 /**
  * Helper function to get the Lazy, hbar & minted NFT balance of the contract
  * @returns {[number | Long.Long, Hbar, number | Long.Long]} The balance of the FT (without decimals), Hbar & NFT at the SC
@@ -1741,7 +1769,7 @@ async function mintNFTBySDK(name) {
 		.setAutoRenewAccountId(operatorId)
 		.setSupplyKey(supplyKey)
 		.setCustomFees([fee])
-		.setMaxTransactionFee(new Hbar(50, HbarUnit.Hbar));
+		.setMaxTransactionFee(new Hbar(75, HbarUnit.Hbar));
 
 	tokenCreateTx.freezeWith(client);
 	const signedCreateTx = await tokenCreateTx.sign(operatorKey);
@@ -1757,7 +1785,7 @@ async function mintNFTBySDK(name) {
 	const mintedTokenId = createTokenRx.tokenId;
 
 	// YOU CAN MINT *UP TO* 10 in a single tx by supplying and array of metadata
-	const tokenMintTx = new TokenMintTransaction();
+	const tokenMintTx = new TokenMintTransaction().setMaxTransactionFee(10);
 	for (let c = 0 ; c < 10; c++) {
 		tokenMintTx.addMetadata(Buffer.from('ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/metadata.json'));
 	}
