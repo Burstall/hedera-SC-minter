@@ -25,6 +25,8 @@ const MINT_PAYMENT = process.env.MINT_PAYMENT || 50;
 
 const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
+const METADATA_BATCH = 60;
+
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 let gas = 500000;
@@ -137,15 +139,30 @@ const main = async () => {
 		// tell user how many found
 		const proceed = readlineSync.keyInYNStrict('Do you want to upload metadata?');
 		if (proceed) {
-			// shuffle 10 times...
-			for (let p = 1; p <= 10; p++) {
-				console.log('Shuffle pass:', p);
-				for (let i = pinnedMetadataList.length - 1; i > 0; i--) {
-					const j = Math.floor(Math.random() * (i + 1));
-					[pinnedMetadataList[i], pinnedMetadataList[j]] = [pinnedMetadataList[j], pinnedMetadataList[i]];
+			// mainnet behaving strangely moving to manual chunking
+			if (env.toUpperCase() == 'MAIN') {
+				if (getArgFlag('chunk')) {
+					const chunk = Number(getArg('chunk'));
+					const mList = pinnedMetadataList.slice(chunk * METADATA_BATCH, (chunk + 1) * METADATA_BATCH);
+					console.log('Chunk:', chunk, mList);
+					await uploadMetadata(mList);
+				}
+				else {
+					console.log('Specify chunk');
+					return;
 				}
 			}
-			await uploadMetadata(pinnedMetadataList);
+			else {
+				// shuffle 10 times...
+				for (let p = 1; p <= 10; p++) {
+					console.log('Shuffle pass:', p);
+					for (let i = pinnedMetadataList.length - 1; i > 0; i--) {
+						const j = Math.floor(Math.random() * (i + 1));
+						[pinnedMetadataList[i], pinnedMetadataList[j]] = [pinnedMetadataList[j], pinnedMetadataList[i]];
+					}
+				}
+				await uploadMetadata(pinnedMetadataList);
+			}
 		}
 	}
 	else if (getArgFlag('init')) {
@@ -371,13 +388,12 @@ function encodeFunctionCall(functionName, parameters) {
  * @return {[string, Number]}
  */
 async function uploadMetadata(metadata) {
-	const uploadBatchSize = 60;
 	const gasLim = 1500000;
 	let totalLoaded = 0;
 	let result;
-	for (let outer = 0; outer < metadata.length; outer += uploadBatchSize) {
+	for (let outer = 0; outer < metadata.length; outer += METADATA_BATCH) {
 		const dataToSend = [];
-		for (let inner = 0; (inner < uploadBatchSize) && ((inner + outer) < metadata.length); inner++) {
+		for (let inner = 0; (inner < METADATA_BATCH) && ((inner + outer) < metadata.length); inner++) {
 			dataToSend.push(metadata[inner + outer]);
 		}
 		[, result] = await useSetterStringArray('addMetadata', dataToSend, gasLim);
