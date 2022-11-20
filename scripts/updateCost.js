@@ -29,7 +29,6 @@ let client;
 // check-out the deployed script - test read-only method
 const main = async () => {
 	const args = process.argv.slice(2);
-	console.log(args.length);
 	if (getArgFlag('-h') || args.length != 2) {
 		console.log('Usage: updateCost.js XX YY');
 		console.log('   where XX is price in Hbar and YY is price in Lazy allowinf for decimal so 10 == 1 $LAZY');
