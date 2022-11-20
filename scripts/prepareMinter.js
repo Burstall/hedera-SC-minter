@@ -144,7 +144,7 @@ const main = async () => {
 				if (getArgFlag('chunk')) {
 					const chunk = Number(getArg('chunk'));
 					const mList = pinnedMetadataList.slice(chunk * METADATA_BATCH, (chunk + 1) * METADATA_BATCH);
-					console.log('Chunk:', chunk, mList);
+					console.log('Chunk:', chunk);
 					await uploadMetadata(mList);
 				}
 				else {
