@@ -17,28 +17,40 @@ const operatorKey = PrivateKey.fromString(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = process.env.CONTRACT_NAME ?? null;
 
+const CHUNK_SIZE = 5120;
+
 const env = process.env.ENVIRONMENT ?? null;
 
 let client;
 
-async function loadBytecodeToHedera(bytecode) {
+async function createFileOnHedera() {
 	// Create a file on Hedera and store the hex-encoded bytecode
 	const fileCreateTx = new FileCreateTransaction().setKeys([operatorKey]);
 	const fileSubmit = await fileCreateTx.execute(client);
 	const fileCreateRx = await fileSubmit.getReceipt(client);
 	const bytecodeFileId = fileCreateRx.fileId;
 	console.log(`- The smart contract bytecode file ID is: ${bytecodeFileId}`);
+}
 
+async function appendChunk(bytecodeFileId, bytecode, chunk) {
 	// Append contents to the file
-	const fileAppendTx = new FileAppendTransaction()
-		.setFileId(bytecodeFileId)
-		.setContents(bytecode)
-		.setMaxAttempts(20)
-		.setMaxChunks(20)
-		.setMaxTransactionFee(new Hbar(5));
-	const fileAppendSubmit = await fileAppendTx.execute(client);
-	const fileAppendRx = await fileAppendSubmit.getReceipt(client);
-	console.log(`- Content added: ${fileAppendRx.status} \n`);
+	const toAppend = bytecode.slice(chunk * CHUNK_SIZE, CHUNK_SIZE * (chunk + 1));
+
+	if (toAppend) {
+		const fileAppendTx = new FileAppendTransaction()
+			.setFileId(bytecodeFileId)
+			.setContents(bytecode.slice(chunk * CHUNK_SIZE, CHUNK_SIZE * (chunk + 1)))
+			.setChunkSize(CHUNK_SIZE)
+			.setMaxChunks(1)
+			.setMaxTransactionFee(new Hbar(4))
+			.freezeWith(client);
+		const fileAppendSubmit = await fileAppendTx.execute(client);
+		const fileAppendRx = await fileAppendSubmit.getReceipt(client);
+		console.log(`- Content added: ${fileAppendRx.status} \n`);
+	}
+	else {
+		console.log('Already uploaded all chunks');
+	}
 
 }
 
@@ -92,9 +104,20 @@ const main = async () => {
 
 		const contractBytecode = json.bytecode;
 
-		console.log('\n- Uploading bytecode...');
+		console.log('Using chunk size', CHUNK_SIZE, ' => ', contractBytecode.length / CHUNK_SIZE);
 
-		await loadBytecodeToHedera(contractBytecode);
+		if (args.length == 2) {
+
+			const chunk = Number(args[1]);
+
+			console.log('\n- Uploading chunk', chunk);
+			await appendChunk(FileId.fromString(args[0]), contractBytecode, Number(args[1]));
+		}
+		else {
+			// create the new file
+			console.log('Creating file');
+			await createFileOnHedera();
+		}
 	}
 	else {
 		console.log('User aborted');
