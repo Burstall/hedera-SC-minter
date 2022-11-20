@@ -6,6 +6,7 @@ const {
 	ContractFunctionParameters,
 	ContractId,
 	TokenId,
+	ContractCreateTransaction,
 } = require('@hashgraph/sdk');
 const fs = require('fs');
 const readlineSync = require('readline-sync');
@@ -42,6 +43,24 @@ async function contractDeployFcn(bytecode, gasLim) {
 	return [contractId, contractAddress];
 }
 
+async function contractCreateFcn(bytecodeFileId, gasLim) {
+	const contractCreateTx = new ContractCreateTransaction()
+		.setBytecodeFileId(bytecodeFileId)
+		.setGas(gasLim)
+		.setAutoRenewAccountId(operatorId)
+		.setConstructorParameters(
+			new ContractFunctionParameters()
+				.addAddress(lazyContractId.toSolidityAddress())
+				.addAddress(lazyTokenId.toSolidityAddress())
+				.addUint256(lazyBurnPerc),
+		);
+	const contractCreateSubmit = await contractCreateTx.execute(client);
+	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
+	const contractId = contractCreateRx.contractId;
+	const contractAddress = contractId.toSolidityAddress();
+	return [contractId, contractAddress];
+}
+
 const main = async () => {
 	if (contractName === undefined || contractName == null) {
 		console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
@@ -55,7 +74,7 @@ const main = async () => {
 	console.log('\n-Using LAZY Token:', lazyTokenId.toString());
 	console.log('\n-Using LAZY Burn %:', lazyBurnPerc);
 
-	const proceed = readlineSync.keyInYNStrict('Do you deploy the minter?');
+	const proceed = readlineSync.keyInYNStrict('Do you want to deploy the minter?');
 
 	if (proceed) {
 		if (env.toUpperCase() == 'TEST') {
@@ -78,9 +97,19 @@ const main = async () => {
 		const contractBytecode = json.bytecode;
 
 		console.log('\n- Deploying contract...');
-		const gasLimit = 1200000;
+		const gasLimit = 1500000;
 
-		const [contractId, contractAddress] = await contractDeployFcn(contractBytecode, gasLimit);
+		const args = process.argv.slice(2);
+
+		let contractId, contractAddress;
+		if (args.length == 1) {
+			console.log('Using FileID', args[0]);
+			[contractId, contractAddress] = await contractCreateFcn(args[0], gasLimit);
+		}
+		else {
+			console.log('Uploading bytecode and deploying...');
+			[contractId, contractAddress] = await contractDeployFcn(contractBytecode, gasLimit);
+		}
 
 		console.log(`Contract created with ID: ${contractId} / ${contractAddress}`);
 	}
