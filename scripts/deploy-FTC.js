@@ -17,7 +17,7 @@ const env = process.env.ENVIRONMENT ?? null;
 let client;
 
 async function contractDeployFcn(bytecode, gasLim) {
-	const contractCreateTx = new ContractCreateFlow().setBytecode(bytecode).setGas(gasLim);
+	const contractCreateTx = new ContractCreateFlow().setBytecode(bytecode).setGas(gasLim).setAutoRenewAccountId(operatorId);
 	const contractCreateSubmit = await contractCreateTx.execute(client);
 	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
 	const contractId = contractCreateRx.contractId;

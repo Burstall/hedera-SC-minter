@@ -12,6 +12,7 @@ const {
 require('dotenv').config();
 const fs = require('fs');
 const Web3 = require('web3');
+const readlineSync = require('readline-sync');
 const web3 = new Web3();
 let abi;
 
@@ -27,6 +28,14 @@ let client;
 
 // check-out the deployed script - test read-only method
 const main = async () => {
+	const args = process.argv.slice(2);
+	console.log(args.length);
+	if (getArgFlag('-h') || args.length != 2) {
+		console.log('Usage: updateCost.js XX YY');
+		console.log('   where XX is price in Hbar and YY is price in Lazy allowinf for decimal so 10 == 1 $LAZY');
+		return;
+	}
+
 	if (contractName === undefined || contractName == null) {
 		console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
 		return;
@@ -59,10 +68,20 @@ const main = async () => {
 	let [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
 	console.log('Cost to mint:\nHbar:', new Hbar(hbarCost, HbarUnit.Tinybar).toString(),
 		'\nLazy:', lazyCost / 10);
-	await useSetterInts('updateCost', 1, 0);
-	[hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
-	console.log('New cost to mint:\nHbar:', new Hbar(hbarCost, HbarUnit.Tinybar).toString(),
-		'\nLazy:', lazyCost / 10);
+
+	const newCostHbar = new Hbar(Number(args[0]));
+	console.log('\nNew Cost Hbar:', newCostHbar.toString());
+	console.log('New Cost LAZY:', Number(args[1]) / 10);
+	const proceed = readlineSync.keyInYNStrict('Do you want to update mint price?');
+	if (proceed) {
+		await useSetterInts('updateCost', newCostHbar.toTinybars(), Number(args[1]));
+		[hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
+		console.log('New cost to mint:\nHbar:', new Hbar(hbarCost, HbarUnit.Tinybar).toString(),
+			'\nLazy:', lazyCost / 10);
+	}
+	else {
+		console.log('User aborted');
+	}
 };
 
 /**
@@ -188,6 +207,16 @@ function encodeFunctionCall(functionName, parameters) {
 	const functionAbi = abi.find((func) => func.name === functionName && func.type === 'function');
 	const encodedParametersHex = web3.eth.abi.encodeFunctionCall(functionAbi, parameters).slice(2);
 	return Buffer.from(encodedParametersHex, 'hex');
+}
+
+function getArgFlag(arg) {
+	const customIndex = process.argv.indexOf(`-${arg}`);
+
+	if (customIndex > -1) {
+		return true;
+	}
+
+	return false;
 }
 
 main()

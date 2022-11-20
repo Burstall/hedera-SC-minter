@@ -12,6 +12,7 @@ const {
 require('dotenv').config();
 const readlineSync = require('readline-sync');
 const fs = require('fs');
+const path = require('path');
 const Web3 = require('web3');
 const web3 = new Web3();
 let abi;
@@ -26,9 +27,20 @@ const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
 const env = process.env.ENVIRONMENT ?? null;
 let client;
+let gas = 500000;
 
 // check-out the deployed script - test read-only method
 const main = async () => {
+	if (getArgFlag('h')) {
+		console.log('Usage: prepareMinter.js [-gas X] -[upload|init|reset|hardreset]');
+		console.log('			-gas X								where X is the gas overide to use');
+		console.log('			-upload <path_to_file>/*.json		containing an array of metadata to upload');
+		console.log('			-init [-royalty <path_to_json>] -name NNN -symbol SSS -memo MMM -cid CCC');
+		console.log('			-reset								remove data -- minimise SC rent(?)');
+		console.log('			-hardreset							remove data & token ID');
+		return;
+	}
+
 	if (contractName === undefined || contractName == null) {
 		console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
 		return;
@@ -53,46 +65,187 @@ const main = async () => {
 
 	client.setOperator(operatorId, operatorKey);
 
+	if (getArgFlag('gas')) {
+		gas = Number(getArg('gas'));
+	}
+
 	// import ABI
 	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`, 'utf8'));
 	abi = json.abi;
 	console.log('\n -Loading ABI...\n');
 
 	console.log('Using contract:', contractId.toString());
+	console.log('Using default gas:', gas);
 
-	const proceed = readlineSync.keyInYNStrict('Do you wish to reset contract, upload new metadata and create a new token?');
-	if (proceed) {
+	if (getArgFlag('reset')) {
+		const proceed = readlineSync.keyInYNStrict('Do you wish to reset contract data only (token intact)?');
+		if (proceed) {
+			const result = await useSetterBool('resetContract', false, gas);
+			console.log(result);
+		}
+		else {
+			console.log('User Aborted');
+		}
+	}
+	else if (getArgFlag('hardreset')) {
+		const proceed = readlineSync.keyInYNStrict('Do you wish to **HARD** reset contract data AND TOKEN ID - burn function will be lost?');
+		if (proceed) {
+			const result = await useSetterBool('resetContract', true, gas);
+			console.log(result);
+		}
+		else {
+			console.log('User Aborted');
+		}
+	}
+	else if (getArgFlag('upload')) {
+		// read in the metadata file
+		const fileToProcess = getArg('upload');
+		const fullpath = path.resolve(fileToProcess);
 
-		await methodCallerNoArgs('resetToken', 500000);
-		const metadataList = [];
-
-		// 23 * 444 = 10,212 for testing!
-		for (let outer = 0; outer < 23; outer++) {
-			for (let m = 1; m <= 444; m++) {
-				const num = '' + m;
-				metadataList.push(num.padStart(3, '0') + '_metadata.json');
-			}
+		if (!fullpath) {
+			console.log('ERROR: must specifiy file to upload - EXITING');
+			process.exit(1);
+		}
+		let metadataJSONString;
+		// read in the file specified
+		try {
+			metadataJSONString = fs.readFileSync(fullpath, 'utf8');
+		}
+		catch (err) {
+			console.log(`ERROR: Could not read file (${fullpath})`, err);
+			process.exit(1);
 		}
 
-		await uploadMetadata(metadataList);
+		// parse JSON
+		let pinnedMetadataObjFromFile;
+		try {
+			pinnedMetadataObjFromFile = JSON.parse(metadataJSONString);
+		}
+		catch (err) {
+			console.log('ERROR: failed to parse the specified JSON', err, metadataJSONString);
+			process.exit(1);
+		}
 
-		const royalty1 = new NFTFeeObject(200, 10000, operatorId.toSolidityAddress(), 5);
+		const pinnedMetadataObjFromFileLength = Object.keys(pinnedMetadataObjFromFile).length;
+		const pinnedMetadataList = [];
+		for (let p = 0; p < pinnedMetadataObjFromFileLength; p++) {
+			pinnedMetadataList.push(pinnedMetadataObjFromFile[p]);
+		}
 
-		const royaltyList = [royalty1];
+		console.log('Found ', pinnedMetadataList.length, 'metadata to upload');
 
-		const [, tokenAddressSolidity] = await initialiseNFTMint(
-			'MC-test',
-			'MCt',
-			'MC testing memo',
-			'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/',
-			royaltyList,
-		);
-		const tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
-		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+		// tell user how many found
+		const proceed = readlineSync.keyInYNStrict('Do you want to upload metadata?');
+		if (proceed) {
+			// shuffle 10 times...
+			for (let p = 1; p <= 10; p++) {
+				console.log('Shuffle pass:', p);
+				for (let i = pinnedMetadataList.length - 1; i > 0; i--) {
+					const j = Math.floor(Math.random() * (i + 1));
+					[pinnedMetadataList[i], pinnedMetadataList[j]] = [pinnedMetadataList[j], pinnedMetadataList[i]];
+				}
+			}
+			await uploadMetadata(pinnedMetadataList);
+		}
+	}
+	else if (getArgFlag('init')) {
+		const proceed = readlineSync.keyInYNStrict('Do you wish to initalise the contract based on the metadata you have uploaded?');
+		if (proceed) {
 
+			const royaltyList = [];
+			let royaltiesAsString = '\n\n';
+			if (getArgFlag('royalty')) {
+				// read in the file specified
+				const fileToProcess = getArg('royalty');
+				let royaltiesJSONAsString;
+				try {
+					royaltiesJSONAsString = fs.readFileSync(fileToProcess, 'utf8');
+				}
+				catch (err) {
+					console.log(`ERROR: Could not read file (${fileToProcess})`, err);
+					process.exit(1);
+				}
+
+				// parse JSON
+				let royaltyObjFromFile;
+				try {
+					royaltyObjFromFile = JSON.parse(royaltiesJSONAsString);
+				}
+				catch (err) {
+					console.log('ERROR: failed to parse the specified JSON', err, royaltyObjFromFile);
+					process.exit(1);
+				}
+				for (const idx in royaltyObjFromFile) {
+					let fee;
+					const royalty = royaltyObjFromFile[idx];
+					// console.log('Processing custom fee:', royalty);
+					if (royalty.percentage) {
+						// ensure collector account
+						if (!royalty.account) {
+							console.log('ERROR: Royalty defined as ' + royalty.percentage + ' but no account specified', royalty.account);
+							process.exit(1);
+						}
+						fee = new NFTFeeObject(royalty.percentage * 100, 10000, AccountId.fromString(royalty.account).toSolidityAddress());
+						royaltiesAsString += 'Pay ' + royalty.percentage + '% to ' + royalty.account;
+					}
+					if (royalty.fbf) {
+						fee.fallbackfee = Number(royalty.fbf);
+						royaltiesAsString += ' with Fallback of: ' + royalty.fbf + 'hbar\n';
+					}
+					else {
+						royaltiesAsString += ' NO FALLBACK\n';
+					}
+					royaltyList.push(fee);
+				}
+			}
+
+			const nftName = getArg('name');
+			const nftSymbol = getArg('symbol');
+			let nftDesc = getArg('memo');
+			const cid = getArg('cid');
+
+			// check memo length
+			const memoAsBytes = new TextEncoder().encode(Buffer.from(nftDesc));
+			if (memoAsBytes.length > 100) {
+				console.log('Memo too long -- max 100 bytes', nftDesc);
+				nftDesc = new TextDecoder().decode(memoAsBytes.slice(0, 100));
+			}
+
+			let tokenDetails = 'Name:\t' + nftName +
+					'\nSymbol:\t' + nftSymbol +
+					'\nDescription/Memo (max 100 bytes!):\t' + nftDesc +
+					'\nCID path:\t' + cid;
+
+			if (royaltyList.length > 0) tokenDetails += royaltiesAsString;
+			else tokenDetails += '\nNO ROYALTIES SET\n';
+
+			console.log(tokenDetails);
+
+			// take user input
+			const execute = readlineSync.keyInYNStrict('Do wish to create the token?');
+
+			if (execute) {
+				const [, tokenAddressSolidity] = await initialiseNFTMint(
+					nftName,
+					nftSymbol,
+					nftDesc,
+					cid,
+					royaltyList,
+				);
+				const tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
+				console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+			}
+			else {
+				console.log('User Aborted');
+			}
+
+		}
+		else {
+			console.log('User aborted.');
+		}
 	}
 	else {
-		console.log('User aborted.');
+		console.log('No option slected, run with -h for usage pattern');
 	}
 };
 
@@ -269,6 +422,43 @@ async function contractExecuteFcn(cId, gasLim, fcnName, params, amountHbar) {
 	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
 	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
 	return [contractExecuteRx, contractResults, record];
+}
+
+/**
+ * Generic setter caller
+ * @param {string} fcnName
+ * @param {boolean} value
+ * @param {number=} gasLim
+ * @returns {string}
+ */
+// eslint-disable-next-line no-unused-vars
+async function useSetterBool(fcnName, value, gasLim = 200000) {
+	const params = new ContractFunctionParameters()
+		.addBool(value);
+	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return setterAddressRx.status.toString();
+}
+
+function getArg(arg) {
+	const customidx = process.argv.indexOf(`-${arg}`);
+	let customValue;
+
+	if (customidx > -1) {
+		// Retrieve the value after --custom
+		customValue = process.argv[customidx + 1];
+	}
+
+	return customValue;
+}
+
+function getArgFlag(arg) {
+	const customIndex = process.argv.indexOf(`-${arg}`);
+
+	if (customIndex > -1) {
+		return true;
+	}
+
+	return false;
 }
 
 class NFTFeeObject {

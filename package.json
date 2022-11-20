@@ -8,8 +8,8 @@
     "test-ft": "npx hardhat test test/FungibleTokenCreator.test.js",
     "test-nft": "npx hardhat test test/MinterContract.test.js",
 	"mint-nft": "node scripts/mint.js",
-    "deploy": "npx hardhat run scripts/deploy.js",
-    "interact": "npx hardhat run scripts/interact.js",
+    "deploy-ft": "npx hardhat run scripts/deploy-FTC.js",
+	"deploy-nft": "npx hardhat run scripts/deploy-MC.js",
     "logs": "node scripts/getContractLogs.js",
     "solhint": "solhint -f table contracts/**/*.sol"
   },
