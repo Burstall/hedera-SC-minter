@@ -688,7 +688,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			(address key, ) = _addressToNumMintedMap.at(a - 1);
 			_addressToNumMintedMap.remove(key);
 		}
-		for (uint a = 0; a <_metadata.length; a++) {
+		size = _metadata.length;
+		for (uint a = size; a > 0; a--) {
 			_metadata.pop();
 		}
 		size = _walletMintTimeMap.length();
