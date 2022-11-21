@@ -66,6 +66,7 @@ const main = async () => {
 	}
 
 	client.setOperator(operatorId, operatorKey);
+	client.setSignOnDemand(true);
 
 	if (getArgFlag('gas')) {
 		gas = Number(getArg('gas'));
