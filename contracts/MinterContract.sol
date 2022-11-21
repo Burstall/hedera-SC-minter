@@ -262,7 +262,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 		int64[] memory mintedSerials = new int64[](numberToMint);
 		for (uint outer = 0; outer < numberToMint; outer += _batchSize) {
-			uint batchSize = (numberToMint - outer) >= _batchSize ? _batchSize : numberToMint;
+			uint batchSize = (numberToMint - outer) >= _batchSize ? _batchSize : (numberToMint - outer);
 			bytes[] memory batchMetadataForMint = new bytes[](batchSize);
 			for (uint inner = 0; ((outer + inner) < numberToMint) && (inner < _batchSize); inner++) {
 				batchMetadataForMint[inner] = metadataForMint[inner + outer];
