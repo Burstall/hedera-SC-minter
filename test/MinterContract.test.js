@@ -606,14 +606,14 @@ describe('Basic interaction with the Minter...', function() {
 		expect(serials.length == 1).to.be.true;
 	});
 
-	it('Mint 20 tokens from the SC for hbar', async function() {
+	it('Mint 19 tokens from the SC for hbar', async function() {
 		client.setOperator(operatorId, operatorKey);
 		// unpause the contract
 		await useSetterBool('updatePauseStatus', false);
 		const tinybarCost = new Hbar(1).toTinybars();
 		await useSetterInts('updateCost', tinybarCost, 0);
 
-		const toMint = 20;
+		const toMint = 19;
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
