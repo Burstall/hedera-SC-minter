@@ -255,7 +255,13 @@ describe('Check SC deployment...', function() {
 		catch (err) {
 			errorCount++;
 		}
-		expect(errorCount).to.be.equal(0);
+		try {
+			await useSetterStringArray('addMetadata', ['meta1']);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
 	});
 
 	it('Re-initialise the minter for a token with **WITH FEES**', async function() {
