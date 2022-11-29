@@ -202,7 +202,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         }
 
 		_token = tokenAddress;
-		maxSupply = _metadata.length;
+		maxSupply = _maxSupply;
 
 		emit MinterContractMessage("TknCreate", _token, maxSupply);
 

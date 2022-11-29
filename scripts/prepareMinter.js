@@ -37,7 +37,7 @@ const main = async () => {
 		console.log('Usage: prepareMinter.js [-gas X] -[upload|init|reset|hardreset]');
 		console.log('			-gas X								where X is the gas overide to use');
 		console.log('			-upload <path_to_file>/*.json		containing an array of metadata to upload');
-		console.log('			-init [-royalty <path_to_json>] -name NNN -symbol SSS -memo MMM -cid CCC');
+		console.log('			-init [-royalty <path_to_json>] [-max MM] -name NNN -symbol SSS -memo MMM -cid CCC');
 		console.log('			-reset								remove data -- minimise SC rent(?)');
 		console.log('			-hardreset							remove data & token ID');
 		return;
@@ -218,6 +218,8 @@ const main = async () => {
 				}
 			}
 
+			const maxSupply = getArg('max') ?? 0;
+
 			const nftName = getArg('name');
 			const nftSymbol = getArg('symbol');
 			let nftDesc = getArg('memo');
@@ -233,7 +235,8 @@ const main = async () => {
 			let tokenDetails = 'Name:\t' + nftName +
 					'\nSymbol:\t' + nftSymbol +
 					'\nDescription/Memo (max 100 bytes!):\t' + nftDesc +
-					'\nCID path:\t' + cid;
+					'\nCID path:\t' + cid +
+					'\nMax Supply:\t' + maxSupply + '\t' + '(0 => supply equal to metadata uploaded)';
 
 			if (royaltyList.length > 0) tokenDetails += royaltiesAsString;
 			else tokenDetails += '\nNO ROYALTIES SET\n';
@@ -244,15 +247,17 @@ const main = async () => {
 			const execute = readlineSync.keyInYNStrict('Do wish to create the token?');
 
 			if (execute) {
-				const [, tokenAddressSolidity] = await initialiseNFTMint(
+				const [, tokenAddressSolidity, supplyOnToken] = await initialiseNFTMint(
 					nftName,
 					nftSymbol,
 					nftDesc,
 					cid,
 					royaltyList,
+					maxSupply,
 				);
 				const tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
 				console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+				console.log('Max Supply:', Number(supplyOnToken));
 			}
 			else {
 				console.log('User Aborted');
@@ -288,9 +293,11 @@ async function methodCallerNoArgs(fcnName, gasLim = 500000) {
  * @param {string} memo
  * @param {string} cid
  * @param {*} royaltyList
+ * @param {Number=0} maxSupply
+ * @param {Number=1000000} gasLim
  */
-async function initialiseNFTMint(name, symbol, memo, cid, royaltyList, gasLim = 1000000) {
-	const params = [name, symbol, memo, cid, royaltyList];
+async function initialiseNFTMint(name, symbol, memo, cid, royaltyList, maxSupply = 0, gasLim = 1000000) {
+	const params = [name, symbol, memo, cid, royaltyList, maxSupply];
 
 	const [initialiseRx, initialiseResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'initialiseNFTMint', params, MINT_PAYMENT);
 	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress'], initialiseResults['maxSupply']] ;
