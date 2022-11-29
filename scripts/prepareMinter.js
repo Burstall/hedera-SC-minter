@@ -141,6 +141,7 @@ const main = async () => {
 		const proceed = readlineSync.keyInYNStrict('Do you want to upload metadata?');
 		if (proceed) {
 			// mainnet behaving strangely moving to manual chunking
+			/*
 			if (env.toUpperCase() == 'MAIN') {
 				if (getArgFlag('chunk')) {
 					const chunk = Number(getArg('chunk'));
@@ -153,17 +154,17 @@ const main = async () => {
 					return;
 				}
 			}
-			else {
-				// shuffle 10 times...
-				for (let p = 1; p <= 10; p++) {
-					console.log('Shuffle pass:', p);
-					for (let i = pinnedMetadataList.length - 1; i > 0; i--) {
-						const j = Math.floor(Math.random() * (i + 1));
-						[pinnedMetadataList[i], pinnedMetadataList[j]] = [pinnedMetadataList[j], pinnedMetadataList[i]];
-					}
+			else { */
+			// shuffle 10 times...
+			for (let p = 1; p <= 10; p++) {
+				console.log('Shuffle pass:', p);
+				for (let i = pinnedMetadataList.length - 1; i > 0; i--) {
+					const j = Math.floor(Math.random() * (i + 1));
+					[pinnedMetadataList[i], pinnedMetadataList[j]] = [pinnedMetadataList[j], pinnedMetadataList[i]];
 				}
-				await uploadMetadata(pinnedMetadataList);
 			}
+			await uploadMetadata(pinnedMetadataList);
+			// }
 		}
 	}
 	else if (getArgFlag('init')) {

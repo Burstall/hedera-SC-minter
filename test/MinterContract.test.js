@@ -145,12 +145,6 @@ describe('Check SC deployment...', function() {
 
 	it('Check default values are set in Constructor', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const paused = await getSetting('getMintPaused', 'paused');
-		expect(paused).to.be.true;
-		const wlOnly = await getSetting('getWlOnly', 'wlOnly');
-		expect(wlOnly).to.be.false;
-		const lazyAmt = await getSetting('getBuyWlWithLazy', 'lazyAmt');
-		expect(Number(lazyAmt) == 0).to.be.true;
 		const batchSize = await getSetting('getBatchSize', 'batchSize');
 		expect(Number(batchSize) == 10).to.be.true;
 		const lazyBurn = await getSetting('getLazyBurnPercentage', 'lazyBurn');
@@ -199,6 +193,7 @@ describe('Check SC deployment...', function() {
 			'MC testing memo',
 			'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
 			royaltyList,
+			0,
 		);
 
 		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
@@ -207,7 +202,51 @@ describe('Check SC deployment...', function() {
 		expect(result).to.be.equal('SUCCESS');
 	});
 
-	it('Cannot add more metadata now token is intialised', async function() {
+	it('Cannot add more metadata - given no capacity', async function() {
+		client.setOperator(operatorId, operatorKey);
+		let errorCount = 0;
+		try {
+			const [result, resultObj] = await useSetterStringArray('addMetadata', ['meta1', 'meta2']);
+			expect(result).to.be.equal('SUCCESS');
+			expect(Number(resultObj['totalLoaded']) == 2).to.be.true;
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
+	it('Initialise the for a token wth additional headroom', async function() {
+		client.setOperator(operatorId, operatorKey);
+
+		// reset metadata
+		const outcome = await useSetterBool('resetContract', true, 500000);
+		expect(outcome).to.be.equal('SUCCESS');
+		const metadataList = ['metadata.json'];
+
+		// set metadata seperately
+		const [success, totalLoaded] = await uploadMetadata(metadataList);
+		expect(success).to.be.equal('SUCCESS');
+		expect(totalLoaded == 1).to.be.true;
+
+		const royaltyList = [];
+
+		const [result, tokenAddressSolidity] = await initialiseNFTMint(
+			'MC-test',
+			'MCt',
+			'MC testing memo',
+			'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
+			royaltyList,
+			3,
+		);
+
+		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
+		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
+		expect(result).to.be.equal('SUCCESS');
+	});
+
+	it('Can add more metadata - given spare capacity', async function() {
 		client.setOperator(operatorId, operatorKey);
 		let errorCount = 0;
 		try {
@@ -216,7 +255,7 @@ describe('Check SC deployment...', function() {
 		catch (err) {
 			errorCount++;
 		}
-		expect(errorCount).to.be.equal(1);
+		expect(errorCount).to.be.equal(0);
 	});
 
 	it('Re-initialise the minter for a token with **WITH FEES**', async function() {
@@ -251,6 +290,7 @@ describe('Check SC deployment...', function() {
 			'MC testing memo',
 			'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/',
 			royaltyList,
+			0,
 			1600000,
 		);
 		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
@@ -1311,9 +1351,11 @@ async function uploadMetadata(metadata) {
  * @param {string} memo
  * @param {string} cid
  * @param {*} royaltyList
+ * @param {Number=0} maxSupply
+ * @param {Number=1000000} gasLim
  */
-async function initialiseNFTMint(name, symbol, memo, cid, royaltyList, gasLim = 1000000) {
-	const params = [name, symbol, memo, cid, royaltyList];
+async function initialiseNFTMint(name, symbol, memo, cid, royaltyList, maxSupply = 0, gasLim = 1000000) {
+	const params = [name, symbol, memo, cid, royaltyList, maxSupply];
 
 	const [initialiseRx, initialiseResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'initialiseNFTMint', params, MINT_PAYMENT);
 	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress'], initialiseResults['maxSupply']] ;
