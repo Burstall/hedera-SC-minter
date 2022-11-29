@@ -55,11 +55,8 @@ const main = async () => {
 	abi = json.abi;
 	console.log('\n -Loading ABI...\n');
 
-	let paused = await getSetting('getMintPaused', 'paused');
-	console.log('Current state:', paused);
-	await useSetterBool('updatePauseStatus', !paused);
-	paused = await getSetting('getMintPaused', 'paused');
-	console.log('New state:', paused);
+	const paused = await useSetterBool('updatePauseStatus', false);
+	console.log('Tx:', paused);
 };
 
 /**

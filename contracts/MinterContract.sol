@@ -586,6 +586,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	/// @return changed indicative of whether a change was made
 	function updateContractPaysLazy(bool lazyFromContract) external onlyOwner returns (bool changed) {
 		changed = _mintEconomics.lazyFromContract == lazyFromContract ? false : true;
+		if (changed) emit MinterContractMessage("CPlzy", msg.sender, lazyFromContract ? 1 : 0);
 		_mintEconomics.lazyFromContract = lazyFromContract;
 	}
 
