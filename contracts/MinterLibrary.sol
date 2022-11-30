@@ -42,35 +42,42 @@ library MinterLibrary {
         EnumerableMap.AddressToUintMap storage walletMintTimeMap,
         EnumerableMap.AddressToUintMap storage wlAddressToNumMintedMap,
         EnumerableMap.UintToUintMap storage serialMintTimeMap,
-        EnumerableSet.UintSet storage wlSerialsUsed
+        EnumerableSet.UintSet storage wlSerialsUsed,
+		uint batch
         ) 
         internal {
 
 		uint size = addressToNumMintedMap.length();
+		size = size > batch ? batch : size; 
 		for (uint a = size; a > 0; a--) {
 			(address key, ) = addressToNumMintedMap.at(a - 1);
 			addressToNumMintedMap.remove(key);
 		}
 		size = metadata.length;
+		size = size > batch ? batch : size; 
 		for (uint a = size; a > 0; a--) {
 			metadata.pop();
 		}
 		size = walletMintTimeMap.length();
+		size = size > batch ? batch : size; 
 		for (uint a = size; a > 0; a--) {
 			(address key, ) = walletMintTimeMap.at(a - 1);
 			walletMintTimeMap.remove(key);
 		}
 		size = wlAddressToNumMintedMap.length();
+		size = size > batch ? batch : size; 
 		for (uint a = size; a > 0; a--) {
 			(address key, ) = wlAddressToNumMintedMap.at(a - 1);
 			wlAddressToNumMintedMap.remove(key);
 		}
 		size = serialMintTimeMap.length();
+		size = size > batch ? batch : size; 
 		for (uint a = size; a > 0; a--) {
 			(uint key, ) = serialMintTimeMap.at(a - 1);
 			serialMintTimeMap.remove(key);
 		}
 		size = wlSerialsUsed.length();
+		size = size > batch ? batch : size; 
 		for (uint a = size; a > 0; a--) {
 			uint key = wlSerialsUsed.at(a - 1);
 			wlSerialsUsed.remove(key);

@@ -220,7 +220,7 @@ describe('Check SC deployment...', function() {
 		client.setOperator(operatorId, operatorKey);
 
 		// reset metadata
-		const outcome = await useSetterBool('resetContract', true, 500000);
+		const outcome = await resetContract();
 		expect(outcome).to.be.equal('SUCCESS');
 		const metadataList = ['metadata.json'];
 
@@ -269,7 +269,7 @@ describe('Check SC deployment...', function() {
 		client.setOperator(operatorId, operatorKey);
 
 		// reset metadata
-		const outcome = await useSetterBool('resetContract', true, 500000);
+		const outcome = await resetContract();
 		expect(outcome).to.be.equal('SUCCESS');
 
 		const metadataList = [];
@@ -1436,6 +1436,14 @@ async function useSetterBool(fcnName, value, gasLim = 200000) {
 	const params = new ContractFunctionParameters()
 		.addBool(value);
 	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
+	return setterAddressRx.status.toString();
+}
+
+async function resetContract() {
+	const params = new ContractFunctionParameters()
+		.addBool(true)
+		.addUint256(1000);
+	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, 1000000, 'resetContract', params);
 	return setterAddressRx.status.toString();
 }
 

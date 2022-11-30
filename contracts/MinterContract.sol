@@ -677,7 +677,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// Helper method to strip storage requirements
 	// boolean toggle to remove the token ID if full reset
 	/// @param removeToken reset token to zero address
-	function resetContract(bool removeToken) external onlyOwner {
+	/// @param batch allow for batched reset
+	function resetContract(bool removeToken, uint batch) external onlyOwner {
 		if (removeToken) {
 			_token = address(0);
 			_totalMinted = 0;
@@ -688,7 +689,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			_walletMintTimeMap, 
 			_wlAddressToNumMintedMap, 
 			_serialMintTimeMap, 
-			_wlSerialsUsed);
+			_wlSerialsUsed,
+			batch);
 
 		emit MinterContractMessage(removeToken ? "ClrTkn" : "RstCtrct", msg.sender, 0);
 	}
