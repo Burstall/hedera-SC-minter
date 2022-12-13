@@ -163,7 +163,7 @@ main()
  */
 async function retrieveLazyFromContract(receiver, amount) {
 
-	const gasLim = 600000;
+	const gasLim = 200000;
 	const params = new ContractFunctionParameters()
 		.addAddress(receiver.toSolidityAddress())
 		.addInt64(amount);

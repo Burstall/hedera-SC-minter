@@ -83,6 +83,7 @@ const main = async () => {
 		}
 		else if (env.toUpperCase() == 'MAIN') {
 			client = Client.forMainnet();
+			client.setMirrorNetwork('mainnet-public.mirrornode.hedera.com:443');
 			console.log('deploying in *MAINNET*');
 		}
 		else {
