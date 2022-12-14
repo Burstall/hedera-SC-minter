@@ -9,6 +9,7 @@ const {
 	ContractFunctionParameters,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
+const readlineSync = require('readline-sync');
 const fs = require('fs');
 const Web3 = require('web3');
 const web3 = new Web3();
@@ -55,9 +56,15 @@ const main = async () => {
 	abi = json.abi;
 	console.log('\n -Loading ABI...\n');
 
+	const proceed = readlineSync.keyInYNStrict('Do you want to reset the contract?');
 
-	const paysLazy = await resetContract(false);
-	console.log('State changed:', paysLazy);
+	if (proceed) {
+		const rstContract = await resetContract(false);
+		console.log('State changed:', rstContract);
+	}
+	else {
+		console.log('user aborted');
+	}
 };
 
 /**
@@ -82,7 +89,7 @@ async function useSetterBool(fcnName, value) {
  * @param {Number=1000000} gasLim
  * @returns {string}
  */
-async function resetContract(resetToken = false, batch = 1000, gasLim = 1000000) {
+async function resetContract(resetToken = false, batch = 1000, gasLim = 6000000) {
 	const params = new ContractFunctionParameters()
 		.addBool(resetToken)
 		.addUint256(batch);
