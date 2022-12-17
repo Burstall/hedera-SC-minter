@@ -52,6 +52,7 @@ const main = async () => {
 	console.log('Storage:', txResp.storage.toString());
 	console.log('Balance:', txResp.balance.toString());
 	console.log('AutoRenew Account:', txResp.autoRenewAccountId ? txResp.autoRenewAccountId.toString() : txResp.autoRenewAccountId);
+	console.log('Expires:', txResp.expirationTime.toDate().toISOString());
 };
 
 main()
