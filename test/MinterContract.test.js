@@ -582,6 +582,18 @@ describe('Check access control permission...', function() {
 		expect(errorCount).to.be.equal(1);
 	});
 
+	it('Check Alice cannot adjust max mints per wallet', async function() {
+		client.setOperator(aliceId, alicePK);
+		let errorCount = 0;
+		try {
+			await useSetterInts('updateMaxMintPerWallet', 2);
+		}
+		catch (err) {
+			errorCount++;
+		}
+		expect(errorCount).to.be.equal(1);
+	});
+
 	it('Check Alice cannot enable buying WL with $LAZY', async function() {
 		client.setOperator(aliceId, alicePK);
 		let errorCount = 0;
@@ -1062,10 +1074,47 @@ describe('Test out Discount mint functions...', function() {
 		expect(serials.length == 1).to.be.true;
 		expect(errorCount).to.be.equal(1);
 	});
+
+	it('Checks we can update the max mints per wallet and cap it', async function() {
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		let [status, result] = await useSetterInts('updateCost', tinybarCost, 0);
+		expect(status == 'SUCCESS').to.be.true;
+		// check how many we have already minted
+		[status, result] = await methodCallerNoArgs('getNumberMintedByAddress', 600000);
+		expect(status == 'SUCCESS').to.be.true;
+		// add 1 for headroom
+		const numMints = Number(result['numMinted']) + 1;
+		// get the max per Wallet
+		await useSetterInts('updateMaxMintPerWallet', numMints);
+		let mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
+		expect(Number(mintEconomics[7]) == numMints).to.be.true;
+
+		// mint one
+		const [success, serials] = await mintNFT(1, tinybarCost);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 1).to.be.true;
+
+		let errorCount = 0;
+		// second should fail
+		try {
+			await mintNFT(1, tinybarCost);
+		}
+		catch (err) {
+			errorCount++;
+		}
+
+		expect(errorCount).to.be.equal(1);
+
+		// clean-up
+		await useSetterInts('updateMaxMintPerWallet', 0);
+		mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
+		expect(Number(mintEconomics[7]) == 0).to.be.true;
+	});
 });
 
 describe('Test out refund functions...', function() {
-	it('Check Owner can burn NFTs', async function() {
+	it('Check anyone can burn NFTs', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
 		let [status, result] = await useSetterInts('updateCost', tinybarCost, 0);

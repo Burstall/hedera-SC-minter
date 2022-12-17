@@ -646,6 +646,9 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         _mintEconomics.wlToken = wlToken;
     }
 
+	function updateMaxMintPerWallet(uint256 max) external onlyOwner {
+        _mintEconomics.maxMintPerWallet = max;
+    }
 
 	/// @param cid new cid
     function updateCID(string memory cid) external onlyOwner {
