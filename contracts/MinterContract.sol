@@ -511,7 +511,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		numAddressesRemoved = MinterLibrary.clearWhitelist(_whitelistedAddressQtyMap);
 	}
 
-	// function to allow the burning of NFTs
+	// function to allow the burning of NFTs (as long as no fallback fee)
 	// NFTs transfered to the SC and then burnt with contract as supply key
 	/// @param serialNumbers array of serials to burn
 	function burnNFTs(int64[] memory serialNumbers) external returns (int responseCode, uint64 newTotalSupply) {
@@ -525,12 +525,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 
 		responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
+		// emit events for each transfer
 
 		if (responseCode != HederaResponseCodes.SUCCESS) {
 			revert ("FTnftBrn");
 		}
 
 		(responseCode, newTotalSupply) = burnToken(_token, 0, serialNumbers);
+		// emit events for burn
 
 		if (responseCode != HederaResponseCodes.SUCCESS) {
             revert ("Brn");
@@ -695,7 +697,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			_wlSerialsUsed,
 			batch);
 
-		emit MinterContractMessage(removeToken ? "ClrTkn" : "RstCtrct", msg.sender, 0);
+		emit MinterContractMessage(removeToken ? "ClrTkn" : "RstCtrct", msg.sender, batch);
 	}
 
 	/// @return metadataList of metadata unminted -> only owner

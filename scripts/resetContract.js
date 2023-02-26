@@ -35,6 +35,7 @@ const main = async () => {
 
 	console.log('\n-Using ENIVRONMENT:', env);
 	console.log('\n-Using Operator:', operatorId.toString());
+	console.log('\n-Using Contract:', contractId.toString());
 
 	if (env.toUpperCase() == 'TEST') {
 		client = Client.forTestnet();
@@ -89,7 +90,7 @@ async function useSetterBool(fcnName, value) {
  * @param {Number=1000000} gasLim
  * @returns {string}
  */
-async function resetContract(resetToken = false, batch = 1000, gasLim = 6000000) {
+async function resetContract(resetToken = false, batch = 260, gasLim = 7_000_000) {
 	const params = new ContractFunctionParameters()
 		.addBool(resetToken)
 		.addUint256(batch);
