@@ -263,6 +263,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	/// @param numberToMint the number of serials to mint
 	function mintNFT(uint256 numberToMint) external payable nonReentrant returns (int64[] memory serials, bytes[] memory metadataForMint) {
 		require(numberToMint > 0, ">0");
+		if (numberToMint == 0) revert MintError(MinterLibrary.MINT_ZERO);
 		require(_mintTiming.mintStartTime == 0 ||
 			_mintTiming.mintStartTime <= block.timestamp, 
 			"NotOpen");
@@ -319,8 +320,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 				_mintEconomics.lazyFromContract ? address(this) : msg.sender);
 		}
 
-		if (totalHbarCost > 0) {
-			require(msg.value >= totalHbarCost, "+Hbar");
+		if (totalHbarCost > 0 && msg.value < totalHbarCost ) {
+			revert MintError(MinterLibrary.INSUFFICIENT_PAYMENT_HBAR);
 		}
 
 		// pop the metadata

@@ -17,6 +17,8 @@ library MinterLibrary {
 	int8 internal constant LAZY_BURN_FAILED = 5; // Failed when burnign the supplied $LAZY
 	int8 internal constant NOT_ENOUGH_LAZY = 6; // User does not have enough $LAZY
 	int8 internal constant MINT_ERROR_ASSOCIATE_TOKEN = 7; // failed to associate $LAZY with minter contract
+	int8 internal constant INSUFFICIENT_PAYMENT_HBAR = 8; // send more hbar to cover the fee
+	int8 internal constant MINT_ZERO = 9; // requested a zero mint quantity
 
     function checkWhitelistConditions(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
