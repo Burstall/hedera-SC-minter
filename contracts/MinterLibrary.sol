@@ -10,6 +10,14 @@ library MinterLibrary {
 	using EnumerableMap for EnumerableMap.UintToUintMap;
 	using EnumerableSet for EnumerableSet.UintSet;
 
+	int8 internal constant CONTRACT_TOKEN_NOT_RESET = 1; // Need to reset contract token before second init
+    int8 internal constant MEMO_TOO_LONG = 2; // Memo is > 100bytes
+	int8 internal constant ROYALTY_TOO_MANY = 3; // Too many custom fees supplied (10 is limit)
+	int8 internal constant TOKEN_CREATE_FAILED = 4; // HTS token creation failed
+	int8 internal constant LAZY_BURN_FAILED = 5; // Failed when burnign the supplied $LAZY
+	int8 internal constant NOT_ENOUGH_LAZY = 6; // User does not have enough $LAZY
+	int8 internal constant MINT_ERROR_ASSOCIATE_TOKEN = 7; // failed to associate $LAZY with minter contract
+
     function checkWhitelistConditions(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
         uint maxWlAddressMint

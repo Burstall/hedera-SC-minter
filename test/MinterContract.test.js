@@ -136,19 +136,14 @@ describe('Check SC deployment...', function() {
 
 	it('Check linkage to Lazy token / LSCT is correct', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const addressLSCT = await getSetting('getLSCT', 'lsct');
+		const [lazyToken, lazyBurn, addressLSCT] = await getSetting('getLazyDetails', 'lazy', 'lazyBurn', 'lazySCT');
 		expect(ContractId.fromSolidityAddress(addressLSCT).toString() == lazyContractId.toString()).to.be.true;
-
-		const addressLazy = await getSetting('getLazyToken', 'lazy');
-		expect(TokenId.fromSolidityAddress(addressLazy).toString() == lazyTokenId.toString()).to.be.true;
+		expect(TokenId.fromSolidityAddress(lazyToken).toString() == lazyTokenId.toString()).to.be.true;
+		expect(Number(lazyBurn) == lazyBurnPerc).to.be.true;
 	});
 
 	it('Check default values are set in Constructor', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const batchSize = await getSetting('getBatchSize', 'batchSize');
-		expect(Number(batchSize) == 10).to.be.true;
-		const lazyBurn = await getSetting('getLazyBurnPercentage', 'lazyBurn');
-		expect(Number(lazyBurn) == lazyBurnPerc).to.be.true;
 		const [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
 		expect(Number(hbarCost) == 0 && Number(lazyCost) == 0).to.be.true;
 		const mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
@@ -605,24 +600,6 @@ describe('Check access control permission...', function() {
 		}
 		expect(errorCount).to.be.equal(1);
 	});
-
-	it('Check Alice cannot get details of who minted', async function() {
-		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
-		try {
-			await methodCallerNoArgs('getNumberMintedByAllAddresses');
-		}
-		catch (err) {
-			errorCount++;
-		}
-		try {
-			await methodCallerNoArgs('getNumberMintedByAllWlAddresses');
-		}
-		catch (err) {
-			errorCount++;
-		}
-		expect(errorCount).to.be.equal(2);
-	});
 });
 
 describe('Basic interaction with the Minter...', function() {
@@ -931,32 +908,6 @@ describe('Test out WL functions...', function() {
 		expect(errorCount).to.be.equal(2);
 	});
 
-	it('Check Owner can get WL / mint history', async function() {
-		client.setOperator(operatorId, operatorKey);
-		let [status, result] = await methodCallerNoArgs('getNumberMintedByAllAddresses', 600000);
-		expect(status == 'SUCCESS').to.be.true;
-		let walletList = result['walletList'];
-		let numMints = result['numMintedList'];
-		let totalMinted = 0;
-
-		for (let w = 0; w < walletList.length; w++) {
-			console.log('Regular mint:', AccountId.fromSolidityAddress(walletList[w]).toString(), Number(numMints[w]));
-			totalMinted += Number(numMints[w]);
-		}
-
-		[status, result] = await methodCallerNoArgs('getNumberMintedByAllWlAddresses', 600000);
-		expect(status == 'SUCCESS').to.be.true;
-		walletList = result['wlWalletList'];
-		numMints = result['wlNumMintedList'];
-		let totalWlMints = 0;
-
-		for (let w = 0; w < walletList.length; w++) {
-			console.log('WL mint:', AccountId.fromSolidityAddress(walletList[w]).toString(), Number(numMints[w]));
-			totalWlMints += Number(numMints[w]);
-		}
-		expect(totalMinted > totalWlMints).to.be.true;
-	});
-
 	it('Enables buying WL based on serial', async function() {
 		client.setOperator(operatorId, operatorKey);
 		await useSetterAddress('updateWlToken', wlTokenId);
@@ -1117,13 +1068,17 @@ describe('Test out refund functions...', function() {
 	it('Check anyone can burn NFTs', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
-		let [status, result] = await useSetterInts('updateCost', tinybarCost, 0);
+		const [status] = await useSetterInts('updateCost', tinybarCost, 0);
 		expect(status == 'SUCCESS').to.be.true;
 
 		client.setOperator(aliceId, alicePK);
 		const [success, serials] = await mintNFT(2, tinybarCost * 2);
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 2).to.be.true;
+
+		/**
+		 * TODO:
+		 * move to using events to gather how many were minted then add this back
 
 		client.setOperator(operatorId, operatorKey);
 		[status, result] = await methodCallerNoArgs('getNumberMintedByAllAddresses', 600000);
@@ -1136,17 +1091,18 @@ describe('Test out refund functions...', function() {
 		for (let w = 0; w < walletList.length; w++) {
 			totalMinted += Number(numMints[w]);
 		}
+		*/
 
 		// Alice now burns her NFTs
 		const serialsAsNum = [];
 		for (let s = 0; s < serials.length; s++) {
 			serialsAsNum.push(Number(serials[s]));
 		}
-		client.setOperator(aliceId, alicePK);
-		const [txStatus, txResObj] = await useSetterInt64Array('burnNFTs', serialsAsNum);
+		// client.setOperator(aliceId, alicePK);
+		const [txStatus] = await useSetterInt64Array('burnNFTs', serialsAsNum);
 		expect(txStatus == 'SUCCESS').to.be.true;
 		// check supply is now 2 less
-		expect(totalMinted == (Number(txResObj['newTotalSupply']) + 2)).to.be.true;
+		// expect(totalMinted == (Number(txResObj['newTotalSupply']) + 2)).to.be.true;
 	});
 
 	it('Enable refund (& burn), mint then refund - hbar', async function() {

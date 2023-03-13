@@ -10,6 +10,7 @@
     "mint-nft": "node scripts/mint.js",
     "deploy-ft": "npx hardhat run scripts/deploy-FTC.js",
     "deploy-nft": "npx hardhat run scripts/deploy-MC.js",
+	"check-size": "npx hardhat size-contracts",
     "logs": "node scripts/getContractLogs.js",
     "solhint": "solhint -f table contracts/**/*.sol"
   },
@@ -30,6 +31,7 @@
     "chai": "^4.3.7",
     "eslint": "^8.29.0",
     "hardhat": "^2.12.3",
+    "hardhat-contract-sizer": "^2.8.0",
     "solhint": "^3.3.7",
     "web3": "^1.8.1"
   }
