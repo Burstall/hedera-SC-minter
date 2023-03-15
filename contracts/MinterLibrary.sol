@@ -19,6 +19,26 @@ library MinterLibrary {
 	int8 internal constant MINT_ERROR_ASSOCIATE_TOKEN = 7; // failed to associate $LAZY with minter contract
 	int8 internal constant INSUFFICIENT_PAYMENT_HBAR = 8; // send more hbar to cover the fee
 	int8 internal constant MINT_ZERO = 9; // requested a zero mint quantity
+	int8 internal constant TOO_MUCH_METADATA = 10; // too many items in the metadata array vs max supply
+	int8 internal constant NO_METADATA_LOADED = 11; // no items of metadata loaded!
+	int8 internal constant MINT_NOT_OPEN = 12; // not yet open for minting
+	int8 internal constant PAUSED = 13; // contract paused
+	int8 internal constant MINT_OUT = 14; // not enough left to mint to satisfy the request
+	int8 internal constant ABOVE_MAX_MINT = 15; // too many mints requested
+	int8 internal constant NOT_ENOUGH_WL_SLOTS = 16; // trying to mint more than WL slots exist
+	int8 internal constant ABOVE_MAX_MINT_PER_WALLET = 17; // above max mint per wallet
+	int8 internal constant HTS_MINT_FAIL = 18; // failed to call mint
+	int8 internal constant HTS_TRANSFER_TOKEN_FAIL = 19; // failed to transfer minted token
+	int8 internal constant HTS_TRANSFER_LAZY_FAIL = 20; // failed to transfer $LAZY
+	int8 internal constant REFUND_WINDOW_NOT_PASSED = 21; // need to cooldown before encomic value retrieved
+	int8 internal constant UNABLE_TO_BUY_WL_LAZY = 22; // WL buying disabled
+	int8 internal constant UNABLE_TO_BUY_WL_TOKEN = 23; // no WL token set
+	int8 internal constant SERIAL_ALREADY_USED = 24; // token serial already used to redeem WL
+	int8 internal constant SERIAL_NOT_OWNED = 25; // msg.sender does not own the serial
+	int8 internal constant BAD_ARGUMENTS = 26; // incorrect arguments
+	int8 internal constant OUT_OF_RANGE = 27; // out of range
+	int8 internal constant BURN_FAILED = 28; // failed to BURN/WIPE NFT
+	int8 internal constant TOO_MANY_SERIALS_SUPPLIED = 29; // 10 per TX is the limit
 
     function checkWhitelistConditions(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
