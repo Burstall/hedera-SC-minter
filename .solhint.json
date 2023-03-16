@@ -7,6 +7,7 @@
       "avoid-sha3": "warn",
       "not-rely-on-time": false,
 	  "compiler-version": ["error", "^0.8.12"],
-	  "func-visibility": ["warn",{"ignoreConstructors":true}]
+	  "func-visibility": ["warn",{"ignoreConstructors":true}],
+	  "avoid-low-level-calls": "off"
     }
 }

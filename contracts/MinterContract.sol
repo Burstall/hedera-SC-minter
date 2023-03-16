@@ -4,6 +4,7 @@ pragma solidity >=0.8.12 <0.9.0;
 import "./HederaResponseCodes.sol";
 import "./HederaTokenService.sol";
 import "./ExpiryHelper.sol";
+import "./IPrngGenerator.sol";
 
 // functionality preparing to move to library for space saving
 import "./MinterLibrary.sol";
@@ -32,15 +33,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	error MintError(int8 responseCode);
 
-	// list of WL addresses
-    EnumerableMap.AddressToUintMap private _whitelistedAddressQtyMap;
+	uint public constant BATCH_SIZE = 10;
+
 	LazyDetails private _lazyDetails;
 	string private _cid;
 	string[] private _metadata;
-	uint public constant BATCH_SIZE = 10;
 	uint private _totalMinted;
 	uint private _maxSupply;
-	bool private _fallBackFees;
 	// map address to timestamps
 	// for cooldown mechanic
 	EnumerableMap.AddressToUintMap private _walletMintTimeMap;
@@ -55,6 +54,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// map ALL addreesses to the numbers of mints used
 	// track mints per wallet for max cap
 	EnumerableMap.AddressToUintMap private _addressToNumMintedMap;
+	// list of WL addresses
+    EnumerableMap.AddressToUintMap private _whitelistedAddressQtyMap;
 
 	struct MintTiming {
 		uint lastMintTime;
@@ -98,6 +99,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	MintEconomics private _mintEconomics;
 
 	address private _token;
+	address private _prngGenerator;
 
 	enum ContractEventType {
 		INITIALISE, 
@@ -147,6 +149,12 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		string metadata
 	);
 
+	event BurnEvent(
+		address indexed burnerAddress,
+		int64[] serials,
+		uint64 newSupply
+	);
+
 	/// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
 	constructor(
 		address lsct, 
@@ -194,9 +202,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		if (royalties.length >10) revert MintError(MinterLibrary.ROYALTY_TOO_MANY);
 
 		_cid = cid;
-		// ensure fallback fee is unset when initialising
-		// used to decide on single key (supply) or duplex (supply/wipe)
-		_fallBackFees = false;
 
 		// translate fee objects to avoid oddities from serialisation of default/empty values
 		IHederaTokenService.RoyaltyFee[] memory fees = new IHederaTokenService.RoyaltyFee[](royalties.length);
@@ -210,7 +215,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			if (royalties[f].fallbackfee != 0) {
 				fee.amount = royalties[f].fallbackfee;
 				fee.useHbarsForPayment = true;
-				_fallBackFees = true;
 			}
 
 			fees[f] = fee;
@@ -220,15 +224,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         IHederaTokenService.TokenKey[]
             memory keys = new IHederaTokenService.TokenKey[](1);
 
-		if (_fallBackFees) {
-			// if we have fallback fees we need to use the duplex key
-			// need to use wipe key for burn to avoid transferring back to contract
-			keys[0] = getSingleKey(KeyType.SUPPLY, KeyType.WIPE, KeyValueType.CONTRACT_ID, address(this));
-		}
-		else {
-			// if we don't have fallback fees we can use the single key
-			keys[0] = getSingleKey(KeyType.SUPPLY, KeyValueType.CONTRACT_ID, address(this));
-		}
+		keys[0] = getSingleKey(KeyType.SUPPLY, KeyValueType.CONTRACT_ID, address(this));
 
 		IHederaTokenService.HederaToken memory token;
 		token.name = name;
@@ -560,30 +556,60 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		numAddressesRemoved = MinterLibrary.clearWhitelist(_whitelistedAddressQtyMap);
 	}
 
-	// function to allow the burning of NFTs (as long as no fallback fee)
+	// function to allow the burning of NFTs
 	// NFTs transfered to the SC and then burnt with contract as supply key
-	// TODO: move to wipe if fallback fee is added
-	/// @param serialNumbers array of serials to burn
-	function burnNFTs(int64[] memory serialNumbers) external returns (int responseCode, uint64 newTotalSupply) {
-		if (serialNumbers.length > 10) revert MintError(MinterLibrary.TOO_MANY_SERIALS_SUPPLIED);
-		// need to transfer back to treasury to burn
-		address[] memory senderList = new address[](serialNumbers.length);
-		address[] memory receiverList = new address[](serialNumbers.length);
-		for (uint256 s = 0 ; s < serialNumbers.length; s++) {
-			senderList[s] = msg.sender;
-			receiverList[s] = address(this);
-		}
+	// using staking tech to enable the burn
+	// requires strictly 0.1 $LAZY per NFT - returned back to the contract during 'stake'
+	/// @param serials array of serials to burn
+	function burnNFTs(int64[] memory serials) external returns (int responseCode, uint64 newTotalSupply) {
+		if (serials.length > 8) revert MintError(MinterLibrary.TOO_MANY_SERIALS_SUPPLIED);
+		// get the $LAZY needed from caller
+		takeLazyPayment(serials.length, msg.sender);
 
-		responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
-		// emit events for each transfer
+        // sized to a single move, expandable to up to 10 elements (untested)
+        IHederaTokenService.TokenTransferList[]
+            memory _transfers = new IHederaTokenService.TokenTransferList[](
+                serials.length + 1
+            );
+        //transfer lazy token
+        _transfers[0].transfers = new IHederaTokenService.AccountAmount[](2);
+        _transfers[0].token = _lazyDetails.lazyToken;
 
-		if (responseCode != HederaResponseCodes.SUCCESS) revert MintError(MinterLibrary.HTS_TRANSFER_TOKEN_FAIL);
+        IHederaTokenService.AccountAmount memory _sendAccountAmount;
+        _sendAccountAmount.accountID = address(this);
+        _sendAccountAmount.amount = -1;
+        _transfers[0].transfers[0] = _sendAccountAmount;
 
-		(responseCode, newTotalSupply) = burnToken(_token, 0, serialNumbers);
+        IHederaTokenService.AccountAmount memory _recieveAccountAmount;
+        _recieveAccountAmount.accountID = msg.sender;
+        _recieveAccountAmount.amount = 1;
+        _transfers[0].transfers[1] = _recieveAccountAmount;
+
+        // transfer NFT
+        for (uint256 i = 0; i < serials.length; i++) {
+            IHederaTokenService.NftTransfer memory _nftTransfer;
+            _nftTransfer.senderAccountID = msg.sender;
+            _nftTransfer.receiverAccountID = address(this);
+            if (serials[i] == 0) {
+                continue;
+            }
+            _transfers[i + 1].token = _token;
+            _transfers[i + 1]
+                .nftTransfers = new IHederaTokenService.NftTransfer[](1);
+
+            _nftTransfer.serialNumber = SafeCast.toInt64(int256(serials[i]));
+            _transfers[i + 1].nftTransfers[0] = _nftTransfer;
+        }
+
+        int256 response = HederaTokenService.cryptoTransfer(_transfers);
+
+        if (response != HederaResponseCodes.SUCCESS) revert MintError(MinterLibrary.HTS_TRANSFER_TOKEN_FAIL);
+
+		(responseCode, newTotalSupply) = burnToken(_token, 0, serials);
 		// emit events for burn
+		emit BurnEvent(msg.sender, serials, newTotalSupply);
 
 		if (responseCode != HederaResponseCodes.SUCCESS) revert MintError(MinterLibrary.BURN_FAILED);
-
 	}
 
 	// unsigned ints so no ability to set a negative cost.

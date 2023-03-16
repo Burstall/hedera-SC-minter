@@ -21,10 +21,11 @@ interface IHederaTokenService {
         // The amount of  the lowest denomination of the given token that
         // the account sends(negative) or receives(positive)
         int64 amount;
-
+		/* removed due to cryptoTransfer 'not_supported' error
         // If true then the transfer is expected to be an approved allowance and the
         // accountID is expected to be the owner. The default is false (omitted).
         bool isApproval;
+		*/
     }
 
     /// A sender account, a receiver account, and the serial number of an NFT of a Token with
@@ -41,9 +42,11 @@ interface IHederaTokenService {
         // The serial number of the NFT
         int64 serialNumber;
 
+        /* removed due to cryptoTransfer 'not_supported' error
         // If true then the transfer is expected to be an approved allowance and the
         // accountID is expected to be the owner. The default is false (omitted).
         bool isApproval;
+		*/
     }
 
     struct TokenTransferList {
@@ -300,11 +303,21 @@ interface IHederaTokenService {
      * Direct HTS Calls   *
      **********************/
 
+	/*
+	REMOVED UNTIL FUNCTION ENABLED PER NEW SIGNATURE
     /// Performs transfers among combinations of tokens and hbars
     /// @param transferList the list of hbar transfers to do
     /// @param tokenTransfers the list of token transfers to do
     /// @custom:version 0.3.0 the signature of the previous version was cryptoTransfer(TokenTransferList[] memory tokenTransfers)
     function cryptoTransfer(TransferList memory transferList, TokenTransferList[] memory tokenTransfers)
+        external
+        returns (int64 responseCode);
+	*/
+	
+	/// Initiates a Token Transfer
+    /// @param tokenTransfers the list of transfers to do
+    /// @return responseCode The response code for the status of the request. SUCCESS is 22.
+    function cryptoTransfer(TokenTransferList[] memory tokenTransfers)
         external
         returns (int64 responseCode);
 
