@@ -101,7 +101,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	enum ContractEventType {
 		INITIALISE, 
-		MINT,
 		REFUND,
 		BURN,
 		PAUSE,
@@ -118,7 +117,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		UPDATE_WL_LAZY_BUY,
 		UPDATE_WL_ONLY,
 		UPDATE_WL_MAX,
-		UPDATE_WL_MINT,
 		UPDATE_WL_DISCOUNT,
 		UPDATE_MAX_MINT,
 		UPDATE_MAX_WALLET_MINT,
@@ -126,12 +124,11 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		UPDATE_REFUND_WINDOW,
 		UPDATE_MINT_PRICE,
 		UPDATE_MINT_PRICE_LAZY,
-		UPDATE_LAZY_BURN,
+		UPDATE_LAZY_BURN_PERCENTAGE,
 		UPDATE_LAZY_FROM_CONTRACT,
 		UPDATE_LAZY_SCT,
 		UPDATE_LAZY_TOKEN,
 		UPDATE_CID,
-		UPDATE_METADATA,
 		UPDATE_MINT_START_TIME,
 		RECIEVE,
 		FALLBACK
@@ -645,54 +642,65 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	/// @param startTime new start time in seconds
     function updateMintStartTime(uint256 startTime) external onlyOwner {
         _mintTiming.mintStartTime = startTime;
+		emit MinterContractMessage(ContractEventType.UPDATE_MINT_START_TIME, msg.sender, startTime);
     }
 
 	/// @param lbp new Lazy SC Treasury address
     function updateLazyBurnPercentage(uint256 lbp) external onlyOwner {
         _lazyDetails.lazyBurnPerc = lbp;
+		emit MinterContractMessage(ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE, msg.sender, lbp);
     }
 
 	/// @param maxMint new max mint (0 = uncapped)
     function updateMaxMint(uint256 maxMint) external onlyOwner {
         _mintEconomics.maxMint = maxMint;
+		emit MinterContractMessage(ContractEventType.UPDATE_MAX_MINT, msg.sender, maxMint);
     }
 
 	/// @param wlDiscount as percentage
     function updateWlDiscount(uint256 wlDiscount) external onlyOwner {
         _mintEconomics.wlDiscount = wlDiscount;
+		emit MinterContractMessage(ContractEventType.UPDATE_WL_DISCOUNT, msg.sender, wlDiscount);
     }
 
 	/// @param cooldownPeriod cooldown period as seconds
     function updateCooldown(uint256 cooldownPeriod) external onlyOwner {
         _mintTiming.cooldownPeriod = cooldownPeriod;
+		emit MinterContractMessage(ContractEventType.UPDATE_COOLDOWN, msg.sender, cooldownPeriod);
     }
 
 	/// @param refundWindow refund period in seconds / cap on withdrawals
     function updateRefundWindow(uint256 refundWindow) external onlyOwner {
         _mintTiming.refundWindow = refundWindow;
+		emit MinterContractMessage(ContractEventType.UPDATE_REFUND_WINDOW, msg.sender, refundWindow);
     }
 
 	/// @param lsct new Lazy SC Treasury address
     function updateLSCT(address lsct) external onlyOwner {
         _lazyDetails.lazySCT = LAZYTokenCreator(lsct);
+		emit MinterContractMessage(ContractEventType.UPDATE_LAZY_SCT, msg.sender, 0);
     }
 
 	/// @param lazy new Lazy FT address
     function updateLazyToken(address lazy) external onlyOwner {
         _lazyDetails.lazyToken = lazy;
+		emit MinterContractMessage(ContractEventType.UPDATE_LAZY_TOKEN, msg.sender, 0);
     }
 
 	function updateWlToken(address wlToken) external onlyOwner {
         _mintEconomics.wlToken = wlToken;
+		emit MinterContractMessage(ContractEventType.UPDATE_WL_TOKEN, msg.sender, 0);
     }
 
 	function updateMaxMintPerWallet(uint256 max) external onlyOwner {
         _mintEconomics.maxMintPerWallet = max;
+		emit MinterContractMessage(ContractEventType.UPDATE_MAX_WALLET_MINT, msg.sender, max);
     }
 
 	/// @param cid new cid
     function updateCID(string memory cid) external onlyOwner {
         _cid = cid;
+		emit MinterContractMessage(ContractEventType.UPDATE_CID, msg.sender, 0);
     }
 
 	/// @param metadata new metadata array

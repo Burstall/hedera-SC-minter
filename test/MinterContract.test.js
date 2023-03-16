@@ -122,7 +122,7 @@ describe('Deployment: ', function() {
 		// send 2 $LAZY
 		let result = await ftTansferFcn(operatorId, aliceId, 20, lazyTokenId);
 		expect(result).to.be.equal('SUCCESS');
-		result = await ftTansferFcn(operatorId, contractId, 10, lazyTokenId);
+		result = await ftTansferFcn(operatorId, AccountId.fromString(contractId.toString()), 10, lazyTokenId);
 		expect(result).to.be.equal('SUCCESS');
 	});
 });
@@ -136,7 +136,7 @@ describe('Check SC deployment...', function() {
 
 	it('Check linkage to Lazy token / LSCT is correct', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const [lazyToken, lazyBurn, addressLSCT] = await getSetting('getLazyDetails', 'lazy', 'lazyBurn', 'lazySCT');
+		const [lazyToken, lazyBurn, addressLSCT] = await getSettings('getLazyDetails', 'lazy', 'lazyBurn', 'lazySCT');
 		expect(ContractId.fromSolidityAddress(addressLSCT).toString() == lazyContractId.toString()).to.be.true;
 		expect(TokenId.fromSolidityAddress(lazyToken).toString() == lazyTokenId.toString()).to.be.true;
 		expect(Number(lazyBurn) == lazyBurnPerc).to.be.true;
@@ -317,14 +317,6 @@ describe('Check SC deployment...', function() {
 			errorCount++;
 		}
 		expect(errorCount).to.be.equal(2);
-	});
-
-	it('Owner can update batch value if needed', async function() {
-		client.setOperator(operatorId, operatorKey);
-		const [status, resultObj] = await useSetterInts('updateBatchSize', 10);
-		expect(status).to.be.equal('SUCCESS');
-		expect(Boolean(resultObj['changed'])).to.be.false;
-
 	});
 
 	it('Owner can get metadata', async function() {
@@ -1118,6 +1110,10 @@ describe('Test out refund functions...', function() {
 	});
 
 	it('Check Owner can withdraw NFTs exchanged for refund', async function() {
+		expect.fail(0, 1, 'Not implemented');
+	});
+
+	it('Create NFT with custom fee and check wipe used to burn', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 });
