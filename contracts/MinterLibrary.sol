@@ -4,6 +4,8 @@ pragma solidity >=0.8.12 <0.9.0;
 import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "./IPrngGenerator.sol";
 
 library MinterLibrary {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
@@ -44,7 +46,7 @@ library MinterLibrary {
     function checkWhitelistConditions(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
         uint maxWlAddressMint
-    ) internal view returns (bool allowedToMint) {
+    ) public view returns (bool allowedToMint) {
 		(bool found, uint qty) = whitelistedAddressQtyMap.tryGet(msg.sender);
 		if (found) {
 			if (maxWlAddressMint > 0) {
@@ -59,11 +61,41 @@ library MinterLibrary {
 		}
 	}
 
-    function clearWhitelist(EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap) internal returns(uint numAddressesRemoved) {
+    function clearWhitelist(EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap) public returns(uint numAddressesRemoved) {
 		numAddressesRemoved = whitelistedAddressQtyMap.length();
 		for (uint a = numAddressesRemoved; a > 0; a--) {
 			(address key, ) = whitelistedAddressQtyMap.at(a - 1);
 			whitelistedAddressQtyMap.remove(key);
+		}
+	}
+
+	function selectMetdataToMint(
+		string[] storage metadata, 
+		uint numberToMint, 
+		string storage cid,
+		address prngGenerator
+		) 
+		internal returns (bytes[] memory metadataForMint) {
+
+		if (prngGenerator == address(0)) {
+			metadataForMint = new bytes[](numberToMint);
+			for (uint m = 0; m < numberToMint; m++) {
+				// TODO: use hedera PRGN to move a random element to the end of the array
+				metadataForMint[m] = bytes(string.concat(cid, metadata[metadata.length - 1]));
+				// pop discarding the element used up
+				metadata.pop();
+			}
+		}
+		else {
+			for (uint m = 0; m < numberToMint; m++) {
+				uint256 index = IPrngGenerator(prngGenerator).getPseudorandomNumber(0, metadata.length - 1, m);
+				string memory chosen = metadata[index];
+				// swap the chosen element with the last element
+				metadata[index] = metadata[metadata.length - 1];
+				metadataForMint[m] = bytes(string.concat(cid, chosen));
+				// pop discarding the element used up
+				metadata.pop();
+			}
 		}
 	}
 
@@ -76,7 +108,7 @@ library MinterLibrary {
         EnumerableSet.UintSet storage wlSerialsUsed,
 		uint batch
         ) 
-        internal {
+        public {
 
 		uint size = addressToNumMintedMap.length();
 		size = size > batch ? batch : size; 

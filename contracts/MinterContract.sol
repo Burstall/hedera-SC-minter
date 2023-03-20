@@ -5,6 +5,7 @@ import "./HederaResponseCodes.sol";
 import "./HederaTokenService.sol";
 import "./ExpiryHelper.sol";
 import "./IPrngGenerator.sol";
+import "./IMinter.sol";
 
 // functionality preparing to move to library for space saving
 import "./MinterLibrary.sol";
@@ -23,7 +24,7 @@ contract LAZYTokenCreator {
 	function burn(address token, uint32 amount) external returns (int responseCode) {}
 }
 
-contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
+contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 	using EnumerableMap for EnumerableMap.AddressToUintMap;
 	using EnumerableMap for EnumerableMap.UintToUintMap;
 	using EnumerableSet for EnumerableSet.UintSet;
@@ -57,42 +58,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// list of WL addresses
     EnumerableMap.AddressToUintMap private _whitelistedAddressQtyMap;
 
-	struct MintTiming {
-		uint lastMintTime;
-		uint mintStartTime;
-		bool mintPaused;
-		uint cooldownPeriod;
-		uint refundWindow;
-		bool wlOnly;
-	}
-
-	struct MintEconomics {
-		bool lazyFromContract;
-		// in tinybar
-		uint mintPriceHbar;
-		// adjusted for decimal 1
-		uint mintPriceLazy;
-		uint wlDiscount;
-		uint maxMint;
-		uint buyWlWithLazy;
-		uint maxWlAddressMint;
-		uint maxMintPerWallet;
-		address wlToken;
-	}
-
 	struct LazyDetails {
 		address lazyToken;
 		uint lazyBurnPerc;
 		LAZYTokenCreator lazySCT;
-	}
-
-	// to avoid serialisation related default causing odd behaviour
-	// implementing custom object as a wrapper
-	struct NFTFeeObject {
-		uint32 numerator;
-		uint32 denominator;
-		uint32 fallbackfee;
-		address account;
 	}
 
 	MintTiming private _mintTiming;
@@ -100,60 +69,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	address private _token;
 	address private _prngGenerator;
-
-	enum ContractEventType {
-		INITIALISE, 
-		REFUND,
-		BURN,
-		PAUSE,
-		UNPAUSE,
-		LAZY_PMT,
-		WL_PURCHASE_TOKEN,
-		WL_PURCHASE_LAZY,
-		WL_SPOTS_PURCHASED,
-		WL_ADD,
-		WL_REMOVE,
-		RESET_CONTRACT,
-		RESET_INC_TOKEN,
-		UPDATE_WL_TOKEN,
-		UPDATE_WL_LAZY_BUY,
-		UPDATE_WL_ONLY,
-		UPDATE_WL_MAX,
-		UPDATE_WL_DISCOUNT,
-		UPDATE_MAX_MINT,
-		UPDATE_MAX_WALLET_MINT,
-		UPDATE_COOLDOWN,
-		UPDATE_REFUND_WINDOW,
-		UPDATE_MINT_PRICE,
-		UPDATE_MINT_PRICE_LAZY,
-		UPDATE_LAZY_BURN_PERCENTAGE,
-		UPDATE_LAZY_FROM_CONTRACT,
-		UPDATE_LAZY_SCT,
-		UPDATE_LAZY_TOKEN,
-		UPDATE_CID,
-		UPDATE_MINT_START_TIME,
-		RECIEVE,
-		FALLBACK
-	}
 	
-	event MinterContractMessage(
-		ContractEventType eventType,
-		address indexed msgAddress,
-		uint msgNumeric
-	);
 
-	event MintEvent(
-		address indexed msgAddress,
-		bool mintType,
-		uint indexed serial,
-		string metadata
-	);
-
-	event BurnEvent(
-		address indexed burnerAddress,
-		int64[] serials,
-		uint64 newSupply
-	);
 
 	/// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
 	constructor(
@@ -278,6 +195,17 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		bool isWlMint = false;
 		bool found;
 		uint numPreviouslyMinted;
+		//check if wallet has minted before - if not try and associate
+		//SWALLOW ERROR as user may have already associated
+		//Ideally we would just check association before the brute force method
+		(found, ) = _walletMintTimeMap.tryGet(msg.sender);
+		if (!found) {
+			//let's associate
+			if(IERC721(_token).balanceOf(msg.sender) == 0) associateToken(msg.sender, _token);
+			// no need to capture result as failure simply means account already had it associated
+			// if user in the mint DB then will not be tried anyway
+		}
+
 		// Design decision: WL max mint per wallet takes priority 
 		// over max mint per wallet
 		if (_mintTiming.wlOnly) {
@@ -302,17 +230,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 					_mintEconomics.maxMintPerWallet) revert MintError(MinterLibrary.ABOVE_MAX_MINT_PER_WALLET);
 		}
 
-		//check if wallet has minted before - if not try and associate
-		//SWALLOW ERROR as user may have already associated
-		//Ideally we would just check association before the brute force method
-		(found, ) = _walletMintTimeMap.tryGet(msg.sender);
-		if (!found) {
-			//let's associate
-			if(IERC721(_token).balanceOf(msg.sender) == 0) associateToken(msg.sender, _token);
-			// no need to capture result as failure simply means account already had it associated
-			// if user in the mint DB then will not be tried anyway
-		}
-
 		//calculate cost
 		(uint totalHbarCost, uint totalLazyCost) = getCostInternal(isWlMint, numberToMint);
 
@@ -327,13 +244,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 
 		// pop the metadata
-		metadataForMint = new bytes[](numberToMint);
-		for (uint m = 0; m < numberToMint; m++) {
-			// TODO: use hedera PRGN to move a random element to the end of the array
-			metadataForMint[m] = bytes(string.concat(_cid, _metadata[_metadata.length - 1]));
-			// pop discarding the element used up
-			_metadata.pop();
-		}
+		metadataForMint = MinterLibrary.selectMetdataToMint(_metadata, numberToMint, _cid, _prngGenerator);
 
 		int64[] memory mintedSerials = new int64[](numberToMint);
 		for (uint outer = 0; outer < numberToMint; outer += BATCH_SIZE) {
