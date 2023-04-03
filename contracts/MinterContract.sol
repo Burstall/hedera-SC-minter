@@ -1,24 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import "./HederaResponseCodes.sol";
-import "./HederaTokenService.sol";
-import "./ExpiryHelper.sol";
-import "./IPrngGenerator.sol";
-import "./IMinter.sol";
+import { HederaResponseCodes } from "./HederaResponseCodes.sol";
+import { HederaTokenService } from "./HederaTokenService.sol";
+import { IHederaTokenService } from "./IHederaTokenService.sol";
+import { ExpiryHelper } from "./ExpiryHelper.sol";
+import { IPrngGenerator } from "./IPrngGenerator.sol";
+import { IMinter } from "./IMinter.sol";
 
 // functionality preparing to move to library for space saving
-import "./MinterLibrary.sol";
+import { MinterLibrary } from "./MinterLibrary.sol";
 
 // Import OpenZeppelin Contracts libraries where needed
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import { EnumerableMap } from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { IERC721 } from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { Address } from "@openzeppelin/contracts/utils/Address.sol";
+import { Strings } from "@openzeppelin/contracts/utils/Strings.sol";
 
 contract LAZYTokenCreator {
 	function burn(address token, uint32 amount) external returns (int responseCode) {}

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import "./PrngSystemContract.sol";
+import { PrngSystemContract } from "./PrngSystemContract.sol";
 
 contract PrngGenerator is PrngSystemContract {
 

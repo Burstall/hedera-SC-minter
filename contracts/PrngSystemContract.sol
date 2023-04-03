@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import "./IPrngSystemContract.sol";
+import { IPrngSystemContract } from "./IPrngSystemContract.sol";
 
 contract PrngSystemContract {
     // Prng system contract address with ContractID 0.0.361
