@@ -35,6 +35,7 @@ require('dotenv').config();
 const operatorKey = PrivateKey.fromString(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'MinterContract';
+const libraryName = 'MinterLibrary';
 const env = process.env.ENVIRONMENT ?? null;
 const lazyContractId = ContractId.fromString(process.env.LAZY_CONTRACT);
 const lazyTokenId = TokenId.fromString(process.env.LAZY_TOKEN);
@@ -85,17 +86,29 @@ describe('Deployment: ', function() {
 		// deploy the contract
 		console.log('\n-Using Operator:', operatorId.toString());
 
+		console.log('\n-Deploying library:', libraryName);
+
+		const gasLimit = 1200000;
+		const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
+
+		const libContractId = await contractDeployFcn(libraryBytecode, gasLimit);
+		console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
+
 		const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`));
 
 		// import ABI
 		abi = json.abi;
 
 		const contractBytecode = json.bytecode;
-		const gasLimit = 1200000;
+
+		// replace library address in bytecode
+		console.log('\n-Linking library address in bytecode...');
+		const readyToDeployBytecode = linkBytecode(contractBytecode, libraryName, libContractId.toSolidityAddress());
 
 		console.log('\n- Deploying contract...', contractName, '\n\tgas@', gasLimit);
 
-		await contractDeployFcn(contractBytecode, gasLimit);
+		contractId = await contractDeployFcn(readyToDeployBytecode, gasLimit);
+		contractAddress = contractId.toSolidityAddress();
 
 		console.log(`Contract created with ID: ${contractId} / ${contractAddress}`);
 
@@ -1217,6 +1230,30 @@ describe('Withdrawal tests...', function() {
 });
 
 /**
+ * Function to link solidity libraries into the bytecode for deployment
+ * @param {string} bytecode the bytecode to link
+ * @param {string} libName the name of the library to link
+ * @param {string} libAddress the address of the library to link
+ */
+function linkBytecode(bytecode, libName, libAddress) {
+	const nameToHash = `contracts/${libName}.sol:${libName}`;
+	const placeholder = `__$${web3.utils.soliditySha3({ t: 'string', v: nameToHash }).slice(2, 36)}$__`;
+	console.log('placeholder', placeholder);
+	const formattedAddress = libAddress.toLowerCase().replace('0x', '');
+	const libraryAddressAsHex = web3.utils.padLeft(formattedAddress, 40);
+	console.log('libraryAddressAsHex', libraryAddressAsHex);
+
+	if (bytecode.indexOf(placeholder) === -1) {
+		throw new Error(`Unable to find placeholder for library ${libName}`);
+	}
+	while (bytecode.indexOf(placeholder) !== -1) {
+		bytecode = bytecode.replace(placeholder, libraryAddressAsHex);
+	}
+
+	return bytecode;
+}
+
+/**
  * Helper function to get the current settings of the contract
  * @param {string} fcnName the name of the getter to call
  * @param {string} expectedVar the variable to exeppect to get back
@@ -1740,6 +1777,7 @@ async function associateTokenToAccount(account, tokenToAssociate) {
  * Helper function to deploy the contract
  * @param {string} bytecode bytecode from compiled SOL file
  * @param {number} gasLim gas limit as a number
+ * @returns {ContractId | null} the contract ID or null if failed
  */
 async function contractDeployFcn(bytecode, gasLim) {
 	const contractCreateTx = new ContractCreateFlow()
@@ -1753,8 +1791,7 @@ async function contractDeployFcn(bytecode, gasLim) {
 		);
 	const contractCreateSubmit = await contractCreateTx.execute(client);
 	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
-	contractId = contractCreateRx.contractId;
-	contractAddress = contractId.toSolidityAddress();
+	return contractCreateRx.contractId;
 }
 
 /*
