@@ -5,7 +5,6 @@ import { HederaResponseCodes } from "./HederaResponseCodes.sol";
 import { HederaTokenService } from "./HederaTokenService.sol";
 import { IHederaTokenService } from "./IHederaTokenService.sol";
 import { ExpiryHelper } from "./ExpiryHelper.sol";
-import { IPrngGenerator } from "./IPrngGenerator.sol";
 import { IMinter } from "./IMinter.sol";
 
 // functionality preparing to move to library for space saving
@@ -616,18 +615,23 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 	/// @param lsct new Lazy SC Treasury address
     function updateLSCT(address lsct) external onlyOwner {
         _lazyDetails.lazySCT = LAZYTokenCreator(lsct);
-		emit MinterContractMessage(ContractEventType.UPDATE_LAZY_SCT, msg.sender, 0);
+		emit MinterContractMessage(ContractEventType.UPDATE_LAZY_SCT, lsct, 0);
     }
+
+	function updatePrng(address prng) external onlyOwner {
+		_prngGenerator = prng;
+		emit MinterContractMessage(ContractEventType.UPDATE_PRNG, _prngGenerator, 0);
+	}
 
 	/// @param lazy new Lazy FT address
     function updateLazyToken(address lazy) external onlyOwner {
         _lazyDetails.lazyToken = lazy;
-		emit MinterContractMessage(ContractEventType.UPDATE_LAZY_TOKEN, msg.sender, 0);
+		emit MinterContractMessage(ContractEventType.UPDATE_LAZY_TOKEN, lazy, 0);
     }
 
 	function updateWlToken(address wlToken) external onlyOwner {
         _mintEconomics.wlToken = wlToken;
-		emit MinterContractMessage(ContractEventType.UPDATE_WL_TOKEN, msg.sender, 0);
+		emit MinterContractMessage(ContractEventType.UPDATE_WL_TOKEN, wlToken, 0);
     }
 
 	function updateMaxMintPerWallet(uint256 max) external onlyOwner {
@@ -749,19 +753,15 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
     }
 
 	/// Check the current Whitelist for minting
-    /// @return wl an array of addresses currently enabled for allownace approval
+    /// @return wl an array of addresses currently in the Whitelist
+	/// @return wlQty an array of quantities currently for users in Whitelist
 	//TODO: add batching
     function getWhitelist()
         external
         view
         returns (address[] memory wl, uint[] memory wlQty)
     {
-        wl = new address[](_whitelistedAddressQtyMap.length());
-		wlQty = new uint[](_whitelistedAddressQtyMap.length());
-		
-		for (uint a = 0; a < _whitelistedAddressQtyMap.length(); a++) {
-			(wl[a], wlQty[a]) = _whitelistedAddressQtyMap.at(a);
-		}
+		(wl, wlQty) = MinterLibrary.getWhitelist(_whitelistedAddressQtyMap);
     }
 
 	/// @return mintEconomics basic struct with mint economics details

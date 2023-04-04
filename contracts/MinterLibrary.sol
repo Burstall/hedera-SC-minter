@@ -67,6 +67,15 @@ library MinterLibrary {
 		}
 	}
 
+	function getWhitelist(EnumerableMap.AddressToUintMap storage _whitelistedAddressQtyMap) public view returns (address[] memory wl, uint[] memory wlQty) {
+		wl = new address[](_whitelistedAddressQtyMap.length());
+		wlQty = new uint[](_whitelistedAddressQtyMap.length());
+		
+		for (uint a = 0; a < _whitelistedAddressQtyMap.length(); a++) {
+			(wl[a], wlQty[a]) = _whitelistedAddressQtyMap.at(a);
+		}
+	}
+
 	function selectMetdataToMint(
 		string[] storage metadata, 
 		uint numberToMint, 
