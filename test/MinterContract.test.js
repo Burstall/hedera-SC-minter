@@ -22,6 +22,7 @@ const {
 	TokenSupplyType,
 	TokenMintTransaction,
 	NftId,
+	AccountAllowanceApproveTransaction,
 } = require('@hashgraph/sdk');
 const fs = require('fs');
 const Web3 = require('web3');
@@ -1103,6 +1104,10 @@ describe('Test out refund functions...', function() {
 		for (let s = 0; s < serials.length; s++) {
 			serialsAsNum.push(Number(serials[s]));
 		}
+
+		// set allowance to the contract
+		console.log('Setting allowance...');
+		await setNFTAllowanceAll(tokenId, aliceId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()));
 		// client.setOperator(aliceId, alicePK);
 		const [txStatus] = await useSetterInt64Array('burnNFTs', serialsAsNum);
 		expect(txStatus == 'SUCCESS').to.be.true;
@@ -1890,4 +1895,16 @@ async function mintNFTBySDK(name) {
 	// check it worked
 	const mintRx = await tokenMintSubmit.getReceipt(client);
 	return [mintRx.status.toString(), mintedTokenId];
+}
+
+async function setNFTAllowanceAll(_tokenId, _ownerId, _spenderId) {
+	const approvalTx = new AccountAllowanceApproveTransaction().approveTokenNftAllowanceAllSerials(_tokenId, _ownerId, _spenderId);
+	approvalTx.freezeWith(client);
+	const exResp = await approvalTx.execute(client);
+	const receipt = await exResp.getReceipt(client).catch((e) => {
+		console.log(e);
+		console.log('Allowance set **FAILED*');
+	});
+
+	console.log('Allowance:', receipt.status.toString());
 }
