@@ -291,10 +291,14 @@ describe('Interaction: ', function() {
 		// expect it to fail when used given 0
 		let errorCount = 0;
 		try {
-			await testUsingApproval(contractId, bobId, 5, operatorId, operatorKey);
+			await testUsingApproval(AccountId.fromSolidityAddress(contractId.toSolidityAddress()), bobId, 5, operatorId, operatorKey);
 		}
 		catch (err) {
 			if (err instanceof ReceiptStatusError && (err.status._code == 7 || err.status._code == 292)) {
+				errorCount++;
+			}
+			else {
+				console.log(err.status, typeof err, err);
 				errorCount++;
 			}
 		}
@@ -312,7 +316,7 @@ describe('Interaction: ', function() {
 
 		contractFTSupply -= amountForBob * (10 ** tokenDecimal);
 
-		const result = await testUsingApproval(contractId, bobId, amountForBob, aliceId, alicePK);
+		const result = await testUsingApproval(AccountId.fromSolidityAddress(contractId.toSolidityAddress()), bobId, amountForBob, aliceId, alicePK);
 		const [acctTokenBal] = await getAccountBalance(bobId);
 
 		expect(result).to.be.equal('SUCCESS');
@@ -329,10 +333,14 @@ describe('Interaction: ', function() {
 		// expect it to fail when used given 0
 		let errorCount = 0;
 		try {
-			await testUsingApproval(contractId, bobId, 5, aliceId, alicePK);
+			await testUsingApproval(AccountId.fromSolidityAddress(contractId.toSolidityAddress()), bobId, 5, aliceId, alicePK);
 		}
 		catch (err) {
 			if (err instanceof ReceiptStatusError && (err.status._code == 7 || err.status._code == 292)) {
+				errorCount++;
+			}
+			else {
+				console.log(err.status, typeof err, err);
 				errorCount++;
 			}
 		}
@@ -350,7 +358,7 @@ describe('Interaction: ', function() {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 10;
-		const result = await hbarTransferFcn(operatorId, operatorKey, contractId, amount);
+		const result = await hbarTransferFcn(operatorId, operatorKey, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), amount);
 
 		expect(result).to.be.equal('SUCCESS');
 
