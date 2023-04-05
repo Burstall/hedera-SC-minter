@@ -40,6 +40,7 @@ library MinterLibrary {
 	int8 internal constant BURN_FAILED = 28; // failed to BURN/WIPE NFT
 	int8 internal constant TOO_MANY_SERIALS_SUPPLIED = 29; // 10 per TX is the limit
 	int8 internal constant WIPE_FAILED = 30; // Wipe NFT failed
+	int8 internal constant LAZY_TRANSFER_FAILED = 31; // failed to take $LAZY pmt
 
     function checkWhitelistConditions(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,

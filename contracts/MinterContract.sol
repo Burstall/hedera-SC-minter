@@ -330,6 +330,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 				address(this),
 				amount.toInt256().toInt64()
 			);
+
+			if (responseCode != HederaResponseCodes.SUCCESS) {
+            	revert MintError(MinterLibrary.LAZY_TRANSFER_FAILED);
+        	}
 		}
 
 		uint256 burnAmt = (amount * _lazyDetails.lazyBurnPerc) / 100;
