@@ -722,6 +722,8 @@ describe('Basic interaction with the Minter...', function() {
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
+		// Alice to grant the contract approval spend over $LAZY
+		await approveLazy(lazyTokenId, aliceId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), 5);
 		const [success, serials] = await mintNFT(1, 0);
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 1).to.be.true;
@@ -734,6 +736,7 @@ describe('Basic interaction with the Minter...', function() {
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
+		await approveLazy(lazyTokenId, aliceId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), 1);
 		const [success, serials] = await mintNFT(1, tinybarCost);
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 1).to.be.true;
@@ -805,6 +808,7 @@ describe('Basic interaction with the Minter...', function() {
 		// console.log(mintStart, '\nSleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
 		await sleep(sleepTime + 1125);
 		client.setOperator(aliceId, alicePK);
+		await approveLazy(lazyTokenId, aliceId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), 1);
 		const [success, serials] = await mintNFT(1, tinybarCost);
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 1).to.be.true;
@@ -871,6 +875,7 @@ describe('Test out WL functions...', function() {
 
 		// now Alice can buy that WL spot
 		client.setOperator(aliceId, alicePK);
+		await approveLazy(lazyTokenId, aliceId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), 1);
 		[response] = await methodCallerNoArgs('buyWlWithLazy', 500000);
 		expect(response == 'SUCCESS').to.be.true;
 
@@ -888,6 +893,7 @@ describe('Test out WL functions...', function() {
 		await useSetterInts('updateCost', tinybarCost, 0);
 
 		client.setOperator(aliceId, alicePK);
+		await approveLazy(lazyTokenId, aliceId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), 2);
 		// Alice buys into WL again it should give her one slot
 		const [response] = await methodCallerNoArgs('buyWlWithLazy', 500000);
 		expect(response == 'SUCCESS').to.be.true;
@@ -1009,6 +1015,7 @@ describe('Test out Discount mint functions...', function() {
 
 	it('WL mint, at discount', async function() {
 		client.setOperator(aliceId, alicePK);
+		await approveLazy(lazyTokenId, aliceId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), 5);
 		const [success, serials] = await mintNFT(1, new Hbar(0.8).toTinybars());
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 1).to.be.true;
@@ -1016,6 +1023,7 @@ describe('Test out Discount mint functions...', function() {
 
 	it('Ensure non-WL has correct price for mint', async function() {
 		client.setOperator(operatorId, operatorKey);
+		await approveLazy(lazyTokenId, operatorId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), 5);
 		await useSetterBool('updateWlOnlyStatus', false);
 		let errorCount = 0;
 		try {
@@ -1025,7 +1033,6 @@ describe('Test out Discount mint functions...', function() {
 		catch (err) {
 			errorCount++;
 		}
-
 		const [success, serials] = await mintNFT(1, new Hbar(1).toTinybars());
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 1).to.be.true;
@@ -1078,6 +1085,7 @@ describe('Test out refund functions...', function() {
 		expect(status == 'SUCCESS').to.be.true;
 
 		client.setOperator(aliceId, alicePK);
+		await approveLazy(lazyTokenId, aliceId, AccountId.fromSolidityAddress(contractId.toSolidityAddress()), 2);
 		const [success, serials] = await mintNFT(2, tinybarCost * 2);
 		expect(success == 'SUCCESS').to.be.true;
 		expect(serials.length == 2).to.be.true;
@@ -1907,4 +1915,23 @@ async function setNFTAllowanceAll(_tokenId, _ownerId, _spenderId) {
 	});
 
 	console.log('Allowance:', receipt.status.toString());
+}
+
+/**
+ * setup an FT allowance
+ * @param {TokenId} _tokenId token to approve
+ * @param {AccountId} _ownerId account owning the token
+ * @param {*} _spenderId the spender to authorize
+ * @param {Number} amount amount to approve
+ */
+async function approveLazy(_tokenId, _ownerId, _spenderId, amount) {
+	const approvalTx = new AccountAllowanceApproveTransaction().approveTokenAllowance(_tokenId, _ownerId, _spenderId, amount);
+	approvalTx.freezeWith(client);
+	const exResp = await approvalTx.execute(client);
+	const receipt = await exResp.getReceipt(client).catch((e) => {
+		console.log(e);
+		console.log('FT Allowance set **FAILED**');
+	});
+
+	console.log('Lazy Allowance:', receipt.status.toString());
 }
