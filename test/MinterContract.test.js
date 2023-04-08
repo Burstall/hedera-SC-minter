@@ -175,8 +175,7 @@ describe('Check SC deployment...', function() {
 			mintTiming[1] == 0 &&
 			mintTiming[2] &&
 			mintTiming[3] == 0 &&
-			mintTiming[4] == 0 &&
-			mintTiming[5] == false).to.be.true;
+			mintTiming[4] == false).to.be.true;
 		const remainingMint = await getSetting('getRemainingMint', 'remainingMint');
 		expect(Number(remainingMint) == 0).to.be.true;
 		const numMinted = await getSetting('getNumberMintedByAddress', 'numMinted');
@@ -225,7 +224,7 @@ describe('Check SC deployment...', function() {
 		expect(errorCount).to.be.equal(1);
 	});
 
-	it('Initialise the for a token wth additional headroom', async function() {
+	it('Initialise the for a token with additional headroom', async function() {
 		client.setOperator(operatorId, operatorKey);
 
 		// reset metadata
@@ -1077,7 +1076,37 @@ describe('Test out Discount mint functions...', function() {
 	});
 });
 
-describe('Test out refund functions...', function() {
+// test out random selection
+describe('Test out random selection...', function() {
+	it('Mint 10 NFTs and check the random selection', async function() {
+		// initialise a new token with fees and 10 metadata items
+
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+		const [status] = await useSetterInts('updateCost', tinybarCost, 0);
+		expect(status == 'SUCCESS').to.be.true;
+
+		// deploy PRNG contract
+
+		// update PRNG object to minter
+
+		const [success, serials] = await mintNFT(10, tinybarCost * 10);
+		expect(success == 'SUCCESS').to.be.true;
+		expect(serials.length == 10).to.be.true;
+
+		// check the numbers are not sequential
+		let sequential = true;
+		for (let s = 0; s < serials.length - 1; s++) {
+			if (Number(serials[s]) + 1 != Number(serials[s + 1])) {
+				sequential = false;
+				break;
+			}
+		}
+		expect(sequential).to.be.false;
+	});
+});
+
+describe('Test out burn functions...', function() {
 	it('Check anyone can burn NFTs', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
@@ -1122,26 +1151,6 @@ describe('Test out refund functions...', function() {
 		// check supply is now 2 less
 		// expect(totalMinted == (Number(txResObj['newTotalSupply']) + 2)).to.be.true;
 	});
-
-	it('Enable refund (& burn), mint then refund - hbar', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Enable refund (& burn), mint then refund - lazy', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Shift to refund (hbar & lazy) but store NFT on refund', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Check Owner can withdraw NFTs exchanged for refund', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
-
-	it('Create NFT with custom fee and check wipe used to burn', async function() {
-		expect.fail(0, 1, 'Not implemented');
-	});
 });
 
 describe('Withdrawal tests...', function() {
@@ -1169,41 +1178,6 @@ describe('Withdrawal tests...', function() {
 			errorCount++;
 		}
 		expect(errorCount).to.be.equal(1);
-	});
-
-	it('Check Owner cannot pull funds before X time has elapsed from last mint', async function() {
-		client.setOperator(operatorId, operatorKey);
-		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
-		const lastMint = Number(mintTiming[0]);
-		if (lastMint != 0) {
-			const clockTime = Math.floor(new Date().getTime() / 1000);
-			const delay = clockTime - lastMint + 8;
-			// set refund window timing -> 5 seconds on the clock
-			await useSetterInts('updateRefundWindow', delay);
-			// console.log('Delay', delay, 'last mint', lastMint, 'clock', clockTime);
-			// withdrawal of funds should be blocked
-			const [contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
-			let errorCount = 0;
-			try {
-				await transferHbarFromContract(Number(contractHbarBal.toTinybars()), HbarUnit.Tinybar);
-			}
-			catch {
-				errorCount++;
-			}
-
-			try {
-				if (contractLazyBal > 0) {
-					const pullLazy = await retrieveLazyFromContract(operatorId, contractLazyBal);
-					expect(pullLazy).to.be.equal('SUCCESS');
-				}
-			}
-			catch {
-				errorCount++;
-			}
-			expect(errorCount).to.be.equal(2);
-			// sleep the required time to ensure next pull should work.
-			await sleep(delay * 1000);
-		}
 	});
 
 	it('Check Owner can pull hbar & Lazy', async function() {

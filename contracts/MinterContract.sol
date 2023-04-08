@@ -5,7 +5,6 @@ import { HederaResponseCodes } from "./HederaResponseCodes.sol";
 import { HederaTokenService } from "./HederaTokenService.sol";
 import { IHederaTokenService } from "./IHederaTokenService.sol";
 import { ExpiryHelper } from "./ExpiryHelper.sol";
-import { IMinter } from "./IMinter.sol";
 
 // functionality preparing to move to library for space saving
 import { MinterLibrary } from "./MinterLibrary.sol";
@@ -24,7 +23,7 @@ contract LAZYTokenCreator {
 	function burn(address token, uint32 amount) external returns (int responseCode) {}
 }
 
-contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
+contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	using EnumerableMap for EnumerableMap.AddressToUintMap;
 	using EnumerableMap for EnumerableMap.UintToUintMap;
 	using EnumerableSet for EnumerableSet.UintSet;
@@ -36,17 +35,19 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 
 	uint public constant BATCH_SIZE = 10;
 
-	LazyDetails private _lazyDetails;
 	string private _cid;
 	string[] private _metadata;
 	uint private _totalMinted;
 	uint private _maxSupply;
+	address private _token;
+	address private _prngGenerator;
+	LazyDetails private _lazyDetails;
+	MintTiming private _mintTiming;
+	MintEconomics private _mintEconomics;
+
 	// map address to timestamps
 	// for cooldown mechanic
 	EnumerableMap.AddressToUintMap private _walletMintTimeMap;
-	// map serials to timestamps
-	// for burn / refund mechanic
-	EnumerableMap.UintToUintMap private _serialMintTimeMap;
 	// set of the serials used to redeem WL to ensure no double dip
 	EnumerableSet.UintSet private _wlSerialsUsed;
 	// map WL addresses to the numbers of mints used
@@ -64,13 +65,90 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 		LAZYTokenCreator lazySCT;
 	}
 
-	MintTiming private _mintTiming;
-	MintEconomics private _mintEconomics;
+	struct MintTiming {
+		uint lastMintTime;
+		uint mintStartTime;
+		bool mintPaused;
+		uint cooldownPeriod;
+		bool wlOnly;
+	}
 
-	address private _token;
-	address private _prngGenerator;
-	
+	struct MintEconomics {
+		bool lazyFromContract;
+		// in tinybar
+		uint mintPriceHbar;
+		// adjusted for decimal 1
+		uint mintPriceLazy;
+		uint wlDiscount;
+		uint maxMint;
+		uint buyWlWithLazy;
+		uint maxWlAddressMint;
+		uint maxMintPerWallet;
+		address wlToken;
+	}
 
+	// to avoid serialisation related default causing odd behaviour
+	// implementing custom object as a wrapper
+	struct NFTFeeObject {
+		uint32 numerator;
+		uint32 denominator;
+		uint32 fallbackfee;
+		address account;
+	}
+
+	enum ContractEventType {
+		INITIALISE, 
+		REFUND,
+		BURN,
+		PAUSE,
+		UNPAUSE,
+		LAZY_PMT,
+		WL_PURCHASE_TOKEN,
+		WL_PURCHASE_LAZY,
+		WL_SPOTS_PURCHASED,
+		WL_ADD,
+		WL_REMOVE,
+		RESET_CONTRACT,
+		RESET_INC_TOKEN,
+		UPDATE_WL_TOKEN,
+		UPDATE_WL_LAZY_BUY,
+		UPDATE_WL_ONLY,
+		UPDATE_WL_MAX,
+		UPDATE_WL_DISCOUNT,
+		UPDATE_MAX_MINT,
+		UPDATE_MAX_WALLET_MINT,
+		UPDATE_COOLDOWN,
+		UPDATE_MINT_PRICE,
+		UPDATE_MINT_PRICE_LAZY,
+		UPDATE_LAZY_BURN_PERCENTAGE,
+		UPDATE_LAZY_FROM_CONTRACT,
+		UPDATE_LAZY_SCT,
+		UPDATE_LAZY_TOKEN,
+		UPDATE_CID,
+		UPDATE_MINT_START_TIME,
+		UPDATE_PRNG,
+		RECIEVE,
+		FALLBACK
+	}
+
+	event MinterContractMessage(
+		ContractEventType eventType,
+		address indexed msgAddress,
+		uint msgNumeric
+	);
+
+	event MintEvent(
+		address indexed msgAddress,
+		bool mintType,
+		uint indexed serial,
+		string metadata
+	);
+
+	event BurnEvent(
+		address indexed burnerAddress,
+		int64[] serials,
+		uint64 newSupply
+	);
 
 	/// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
 	constructor(
@@ -90,7 +168,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
         }
 
 		_mintEconomics = MintEconomics(false, 0, 0, 0, 20, 0, 0, 0, address(0));
-		_mintTiming = MintTiming(0, 0, true, 0, 0, false);
+		_mintTiming = MintTiming(0, 0, true, 0, false);
 		_token = address(0);
 	}
 
@@ -268,7 +346,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 				senderList[s] = address(this);
 				receiverList[s] = msg.sender;
 				mintedSerials[s + outer] = serialNumbers[s];
-				_serialMintTimeMap.set(serialNumbers[s].toUint256(), block.timestamp);
 			}
 
 			responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
@@ -378,9 +455,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 		external
 		onlyOwner 
 	returns (int responseCode) {
-		if (block.timestamp < (_mintTiming.lastMintTime + _mintTiming.refundWindow))
-			revert MintError(MinterLibrary.REFUND_WINDOW_NOT_PASSED);
-
         responseCode = HederaTokenService.transferToken(
             _lazyDetails.lazyToken,
             address(this),
@@ -432,8 +506,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
         external
         onlyOwner
     {
-		if (block.timestamp < (_mintTiming.lastMintTime + _mintTiming.refundWindow))
-			revert MintError(MinterLibrary.REFUND_WINDOW_NOT_PASSED);
         // throws error on failure
         //receiverAddress.transfer(amount);
 		Address.sendValue(receiverAddress, amount);
@@ -610,12 +682,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 		emit MinterContractMessage(ContractEventType.UPDATE_COOLDOWN, msg.sender, cooldownPeriod);
     }
 
-	/// @param refundWindow refund period in seconds / cap on withdrawals
-    function updateRefundWindow(uint256 refundWindow) external onlyOwner {
-        _mintTiming.refundWindow = refundWindow;
-		emit MinterContractMessage(ContractEventType.UPDATE_REFUND_WINDOW, msg.sender, refundWindow);
-    }
-
 	/// @param lsct new Lazy SC Treasury address
     function updateLSCT(address lsct) external onlyOwner {
         _lazyDetails.lazySCT = LAZYTokenCreator(lsct);
@@ -685,7 +751,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard, IMinter {
 			_metadata, 
 			_walletMintTimeMap, 
 			_wlAddressToNumMintedMap, 
-			_serialMintTimeMap, 
 			_wlSerialsUsed,
 			batch);
 

@@ -30,7 +30,6 @@ library MinterLibrary {
 	int8 internal constant HTS_MINT_FAIL = 18; // failed to call mint
 	int8 internal constant HTS_TRANSFER_TOKEN_FAIL = 19; // failed to transfer minted token
 	int8 internal constant HTS_TRANSFER_LAZY_FAIL = 20; // failed to transfer $LAZY
-	int8 internal constant REFUND_WINDOW_NOT_PASSED = 21; // need to cooldown before encomic value retrieved
 	int8 internal constant UNABLE_TO_BUY_WL_LAZY = 22; // WL buying disabled
 	int8 internal constant UNABLE_TO_BUY_WL_TOKEN = 23; // no WL token set
 	int8 internal constant SERIAL_ALREADY_USED = 24; // token serial already used to redeem WL
@@ -112,7 +111,6 @@ library MinterLibrary {
         string[] storage metadata,
         EnumerableMap.AddressToUintMap storage walletMintTimeMap,
         EnumerableMap.AddressToUintMap storage wlAddressToNumMintedMap,
-        EnumerableMap.UintToUintMap storage serialMintTimeMap,
         EnumerableSet.UintSet storage wlSerialsUsed,
 		uint batch
         ) 
@@ -140,12 +138,6 @@ library MinterLibrary {
 		for (uint a = size; a > 0; a--) {
 			(address key, ) = wlAddressToNumMintedMap.at(a - 1);
 			wlAddressToNumMintedMap.remove(key);
-		}
-		size = serialMintTimeMap.length();
-		size = size > batch ? batch : size; 
-		for (uint a = size; a > 0; a--) {
-			(uint key, ) = serialMintTimeMap.at(a - 1);
-			serialMintTimeMap.remove(key);
 		}
 		size = wlSerialsUsed.length();
 		size = size > batch ? batch : size; 
