@@ -10,7 +10,7 @@
     "mint-nft": "node scripts/mint.js",
     "deploy-ft": "npx hardhat run scripts/deploy-FTC.js",
     "deploy-nft": "npx hardhat run scripts/deploy-MC.js",
-	"check-size": "npx hardhat size-contracts",
+    "check-size": "npx hardhat size-contracts",
     "logs": "node scripts/getContractLogs.js",
     "solhint": "solhint -f table contracts/**/*.sol"
   },
@@ -22,6 +22,7 @@
     "abi-decoder": "^2.4.0",
     "axios": "^1.2.0",
     "dotenv": "^16.0.3",
+    "ethers": "^5.7.2",
     "readline-sync": "^1.4.10"
   },
   "devDependencies": {
