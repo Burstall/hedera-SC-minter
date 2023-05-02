@@ -6,7 +6,7 @@ const {
 require('dotenv').config();
 const fs = require('fs');
 const axios = require('axios');
-const Web3 = require('web3');
+const { ethers } = require('ethers');
 
 const baseUrlForMainnet = 'https://mainnet-public.mirrornode.hedera.com';
 const baseUrlForTestnet = 'http://testnet.mirrornode.hedera.com';
@@ -14,8 +14,7 @@ const env = process.env.ENVIRONMENT ?? null;
 const contractName = process.env.CONTRACT_NAME ?? null;
 const eventName = process.env.EVENT_NAME ?? null;
 
-let abi;
-const web3 = new Web3;
+let abi, iface;
 
 async function main() {
 	console.log('Using ENIVRONMENT:', env);
@@ -39,6 +38,8 @@ async function main() {
 	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`, 'utf8'));
 	abi = json.abi;
 
+	iface = new ethers.utils.Interface(abi);
+
 	const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
 	// get contract events from a mirror node
@@ -61,16 +62,27 @@ async function getEventsFromMirror(contractId) {
 		.then(function(response) {
 			const jsonResponse = response.data;
 			jsonResponse.logs.forEach(log => {
+				// console.log(log);
 				// decode the event data
 				if (log.data == '0x') return;
-				const event = decodeEvent(log.data, log.topics.slice(1));
+				const data = log.data;
+				const topics = log.topics;
+				const event = iface.parseLog({ data, topics });
 
 				// console.log('EVENT:\n', JSON.stringify(event, null, 3));
 
-				let outputStr = '';
-				for (let f = 0; f < event.__length__; f++) {
-					const field = event[f];
-					let output = field.startsWith('0x') ? AccountId.fromSolidityAddress(field).toString() : field;
+				let outputStr = '@ ' + log.timestamp + ' : ' + event.name + ' : ';
+				for (let f = 0; f < event.args.length; f++) {
+					const field = event.args[f];
+					// console.log(field);
+					let output;
+					switch (typeof field) {
+					case 'string':
+						output = field.startsWith('0x') ? AccountId.fromSolidityAddress(field).toString() : field;
+						break;
+					default:
+						output = field;
+					}
 					output = f == 0 ? output : ' : ' + output;
 					outputStr += output;
 				}
@@ -81,17 +93,6 @@ async function getEventsFromMirror(contractId) {
 		.catch(function(err) {
 			console.error(err);
 		});
-}
-
-/**
- * Decodes event contents using the ABI definition of the event
- * @param log log data as a Hex string
- * @param topics an array of event topics
- */
-function decodeEvent(log, topics) {
-	const eventAbi = abi.find(event => (event.name === eventName && event.type === 'event'));
-	const decodedLog = web3.eth.abi.decodeLog(eventAbi.inputs, log, topics);
-	return decodedLog;
 }
 
 void main();
