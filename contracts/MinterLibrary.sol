@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 library MinterLibrary {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
@@ -12,9 +11,9 @@ library MinterLibrary {
 
     function checkWhitelistConditions(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
-        uint maxWlAddressMint
+        uint256 maxWlAddressMint
     ) internal view returns (bool allowedToMint) {
-		(bool found, uint qty) = whitelistedAddressQtyMap.tryGet(msg.sender);
+		(bool found, uint256 qty) = whitelistedAddressQtyMap.tryGet(msg.sender);
 		if (found) {
 			if (maxWlAddressMint > 0) {
 				allowedToMint = qty > 0 ? true : false;
@@ -28,11 +27,14 @@ library MinterLibrary {
 		}
 	}
 
-    function clearWhitelist(EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap) internal returns(uint numAddressesRemoved) {
+    function clearWhitelist(EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap) internal returns(uint256 numAddressesRemoved) {
 		numAddressesRemoved = whitelistedAddressQtyMap.length();
-		for (uint a = numAddressesRemoved; a > 0; a--) {
+		for (uint256 a = numAddressesRemoved; a > 0; ) {
 			(address key, ) = whitelistedAddressQtyMap.at(a - 1);
 			whitelistedAddressQtyMap.remove(key);
+			unchecked {
+				--a;
+			}
 		}
 	}
 
@@ -43,44 +45,62 @@ library MinterLibrary {
         EnumerableMap.AddressToUintMap storage wlAddressToNumMintedMap,
         EnumerableMap.UintToUintMap storage serialMintTimeMap,
         EnumerableSet.UintSet storage wlSerialsUsed,
-		uint batch
+		uint256 batch
         ) 
         internal {
 
-		uint size = addressToNumMintedMap.length();
+		uint256 size = addressToNumMintedMap.length();
 		size = size > batch ? batch : size; 
-		for (uint a = size; a > 0; a--) {
+		for (uint256 a = size; a > 0; ) {
 			(address key, ) = addressToNumMintedMap.at(a - 1);
 			addressToNumMintedMap.remove(key);
+			unchecked {
+				--a;
+			}
 		}
 		size = metadata.length;
 		size = size > batch ? batch : size; 
-		for (uint a = size; a > 0; a--) {
+		for (uint256 a = size; a > 0; ) {
 			metadata.pop();
+			unchecked {
+				--a;
+			}
 		}
 		size = walletMintTimeMap.length();
 		size = size > batch ? batch : size; 
-		for (uint a = size; a > 0; a--) {
+		for (uint256 a = size; a > 0; ) {
 			(address key, ) = walletMintTimeMap.at(a - 1);
 			walletMintTimeMap.remove(key);
+			unchecked {
+				--a;
+			}
 		}
 		size = wlAddressToNumMintedMap.length();
 		size = size > batch ? batch : size; 
-		for (uint a = size; a > 0; a--) {
+		for (uint256 a = size; a > 0; ) {
 			(address key, ) = wlAddressToNumMintedMap.at(a - 1);
 			wlAddressToNumMintedMap.remove(key);
+			unchecked {
+				--a;
+			}
 		}
 		size = serialMintTimeMap.length();
 		size = size > batch ? batch : size; 
-		for (uint a = size; a > 0; a--) {
-			(uint key, ) = serialMintTimeMap.at(a - 1);
+		for (uint256 a = size; a > 0; ) {
+			(uint256 key, ) = serialMintTimeMap.at(a - 1);
 			serialMintTimeMap.remove(key);
+			unchecked {
+				--a;
+			}
 		}
 		size = wlSerialsUsed.length();
 		size = size > batch ? batch : size; 
-		for (uint a = size; a > 0; a--) {
-			uint key = wlSerialsUsed.at(a - 1);
+		for (uint256 a = size; a > 0; ) {
+			uint256 key = wlSerialsUsed.at(a - 1);
 			wlSerialsUsed.remove(key);
+			unchecked {
+				--a;
+			}
 		}
 
 	}

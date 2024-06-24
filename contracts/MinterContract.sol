@@ -1,45 +1,46 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import "./HederaResponseCodes.sol";
-import "./HederaTokenService.sol";
-import "./ExpiryHelper.sol";
+import {HederaResponseCodes} from "./HederaResponseCodes.sol";
+import {HederaTokenService} from "./HederaTokenService.sol";
+import {IHederaTokenService} from "./IHederaTokenService.sol";
+import {ExpiryHelper} from "./ExpiryHelper.sol";
+import {IHRC719} from "./IHRC719.sol";
 
-// functionality moved ot library for space saving
-import "./MinterLibrary.sol";
+// functionality moved to library for space saving
+import {MinterLibrary} from "./MinterLibrary.sol";
+import {IBurnableHTS} from "./IBurnableHTS.sol";
 
 // Import OpenZeppelin Contracts libraries where needed
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
-import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
-
-contract LAZYTokenCreator {
-	function burn(address token, uint32 amount) external returns (int responseCode) {}
-}
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	using EnumerableMap for EnumerableMap.AddressToUintMap;
 	using EnumerableMap for EnumerableMap.UintToUintMap;
 	using EnumerableSet for EnumerableSet.UintSet;
+	using SafeCast for uint256;
+	using SafeCast for int64;
+	using SafeCast for int256;
+	using Address for address;
+	using Strings for string;
+
 
 	// list of WL addresses
     EnumerableMap.AddressToUintMap private _whitelistedAddressQtyMap;
 	LazyDetails private _lazyDetails;
 	string private _cid;
 	string[] private _metadata;
-	uint private _batchSize;
-	uint private _totalMinted;
-	uint private _maxSupply;
+	uint256 private _batchSize;
+	uint256 private _totalMinted;
+	uint256 private _maxSupply;
 	// map address to timestamps
 	// for cooldown mechanic
 	EnumerableMap.AddressToUintMap private _walletMintTimeMap;
@@ -55,33 +56,63 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// track mints per wallet for max cap
 	EnumerableMap.AddressToUintMap private _addressToNumMintedMap;
 
+	error NotReset(address token);
+	error MemoTooLong();
+	error TooManyFees();
+	error TooMuchMetadata();
+	error EmptyMetadata();
+	error FailedToMint();
+	error BadQuantity(uint256 quantity);
+	error NotOpen();
+	error Paused();
+	error NotWL();
+	error NotEnoughWLSlots();
+	error MintedOut();
+	error MaxMintExceeded();
+	error MaxMintPerWalletExceeded();
+	error NotEnoughLazy();
+	error NotEnoughHbar();
+	error FailedNFTMint();
+	error NFTTransferFailed();
+	error AssociationFailed();
+	error FailedToPayLazy();
+	error BurnFailed();
+	error LazyCooldown();
+	error HbarCooldown();
+	error WLPurchaseFailed();
+	error NoWLToken();
+	error WLTokenUsed();
+	error NotTokenOwner();
+	error MaxSerials();
+	error BadArguments();
+
 	struct MintTiming {
-		uint lastMintTime;
-		uint mintStartTime;
+		uint256 lastMintTime;
+		uint256 mintStartTime;
 		bool mintPaused;
-		uint cooldownPeriod;
-		uint refundWindow;
+		uint256 cooldownPeriod;
+		uint256 refundWindow;
 		bool wlOnly;
 	}
 
 	struct MintEconomics {
 		bool lazyFromContract;
 		// in tinybar
-		uint mintPriceHbar;
+		uint256 mintPriceHbar;
 		// adjusted for decimal 1
-		uint mintPriceLazy;
-		uint wlDiscount;
-		uint maxMint;
-		uint buyWlWithLazy;
-		uint maxWlAddressMint;
-		uint maxMintPerWallet;
+		uint256 mintPriceLazy;
+		uint256 wlDiscount;
+		uint256 maxMint;
+		uint256 buyWlWithLazy;
+		uint256 maxWlAddressMint;
+		uint256 maxMintPerWallet;
 		address wlToken;
 	}
 
 	struct LazyDetails {
 		address lazyToken;
-		uint lazyBurnPerc;
-		LAZYTokenCreator lazySCT;
+		uint256 lazyBurnPerc;
+		IBurnableHTS lazySCT;
 	}
 
 	// to avoid serialisation related default causing odd behaviour
@@ -101,7 +132,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	event MinterContractMessage(
 		string evtType,
 		address indexed msgAddress,
-		uint msgNumeric
+		uint256 msgNumeric
 	);
 
 	/// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
@@ -110,9 +141,12 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		address lazy,
 		uint256 lazyBurnPerc
 	) {
-		_lazyDetails = LazyDetails(lazy, lazyBurnPerc, LAZYTokenCreator(lsct));
+		_lazyDetails = LazyDetails(lazy, lazyBurnPerc, IBurnableHTS(lsct));
 
-		tokenAssociate(_lazyDetails.lazyToken);
+		uint256 responseCode = IHRC719(_lazyDetails.lazyToken).associate();
+		if (responseCode.toInt256().toInt32() != HederaResponseCodes.SUCCESS) {
+			revert AssociationFailed();
+		}
 
 		_mintEconomics = MintEconomics(false, 0, 0, 0, 20, 0, 0, 0, address(0));
 		_mintTiming = MintTiming(0, 0, true, 0, 0, false);
@@ -139,10 +173,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		external
 		payable
 		onlyOwner
-	returns (address createdTokenAddress, uint maxSupply) {
-		require(_token == address(0), "NRst");
-		require(bytes(memo).length <= 100, "Memo<100b");
-		require(royalties.length <= 10, "<=10Fee");
+	returns (address createdTokenAddress, uint256 maxSupply) {
+		if(_token != address(0)) revert NotReset(_token);
+		if(bytes(memo).length > 100) revert MemoTooLong();
+		if(royalties.length > 10) revert TooManyFees();
 
 		_cid = cid;
 
@@ -160,13 +194,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         token.tokenKeys = keys;
 		token.tokenSupplyType = true;
 		if (maxIssuance > 0) {
-			// check that there is not already too much metadat in the contract
-			require(_metadata.length <= SafeCast.toUint256(maxIssuance), "TMM");
+			// check that there is not already too much metadats in the contract
+			if(_metadata.length > maxIssuance.toUint256()) revert TooMuchMetadata();
 			token.maxSupply = maxIssuance;
 		} 
 		else {
-			require(_metadata.length > 0, "EM");
-        	token.maxSupply = SafeCast.toInt64(SafeCast.toInt256(_metadata.length));
+			if(_metadata.length == 0) revert EmptyMetadata();
+        	token.maxSupply = _metadata.length.toInt256().toInt64();
 		}
 		_maxSupply = SafeCast.toUint256(token.maxSupply);
 		// create the expiry schedule for the token using ExpiryHelper
@@ -192,13 +226,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			fees[f] = fee;
 		}
 
-		(int responseCode, address tokenAddress) = HederaTokenService.createNonFungibleTokenWithCustomFees(
+		(int32 responseCode, address tokenAddress) = HederaTokenService.createNonFungibleTokenWithCustomFees(
 			token,
 			new IHederaTokenService.FixedFee[](0),
 			fees);
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert ("FM");
+            revert FailedToMint();
         }
 
 		_token = tokenAddress;
@@ -211,26 +245,24 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	/// @param numberToMint the number of serials to mint
 	function mintNFT(uint256 numberToMint) external payable nonReentrant returns (int64[] memory serials, bytes[] memory metadataForMint) {
-		require(numberToMint > 0, ">0");
-		require(_mintTiming.mintStartTime == 0 ||
-			_mintTiming.mintStartTime <= block.timestamp, 
-			"NotOpen");
-		require(!_mintTiming.mintPaused, "Paused");
-		require(numberToMint <= _metadata.length, "MOut");
-		require(numberToMint <= _mintEconomics.maxMint, "MaxMint");
+		if(numberToMint == 0) revert BadQuantity(numberToMint);
+		if(_mintTiming.mintStartTime != 0 && _mintTiming.mintStartTime > block.timestamp) revert NotOpen();
+		if(_mintTiming.mintPaused) revert Paused();
+		if(numberToMint > _metadata.length) revert MintedOut();
+		if(numberToMint > _mintEconomics.maxMint) revert MaxMintExceeded();
 
 		bool isWlMint = false;
 		bool found;
-		uint numPreviouslyMinted;
+		uint256 numPreviouslyMinted;
 		// Design decision: WL max mint per wallet takes priority 
 		// over max mint per wallet
 		if (_mintTiming.wlOnly) {
-			require(MinterLibrary.checkWhitelistConditions(_whitelistedAddressQtyMap, _mintEconomics.maxWlAddressMint), "NotWL");
+			if(!MinterLibrary.checkWhitelistConditions(_whitelistedAddressQtyMap, _mintEconomics.maxWlAddressMint)) revert NotWL();
 			// only check the qty if there is a limit at contract level
 			if (_mintEconomics.maxWlAddressMint > 0) {
 				// we know the address is in the list to get here.
-				uint wlMintsRemaining = _whitelistedAddressQtyMap.get(msg.sender);
-				require(wlMintsRemaining >= numberToMint, "WLSlots");
+				uint256 wlMintsRemaining = _whitelistedAddressQtyMap.get(msg.sender);
+				if(wlMintsRemaining < numberToMint) revert NotEnoughWLSlots();
 				_whitelistedAddressQtyMap.set(msg.sender, wlMintsRemaining -= numberToMint);
 			}
 			isWlMint = true;
@@ -241,9 +273,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 				numPreviouslyMinted = 0;
 			}
 		
-			require((numPreviouslyMinted + numberToMint) <=
-					_mintEconomics.maxMintPerWallet,
-					">WMax");
+			if((numPreviouslyMinted + numberToMint) >
+					_mintEconomics.maxMintPerWallet) revert MaxMintPerWalletExceeded();
 		}
 
 		//check if wallet has minted before - if not try and associate
@@ -258,9 +289,9 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 
 		//calculate cost
-		(uint hbarCost, uint lazyCost) = getCostInternal(isWlMint);
-		uint totalHbarCost = SafeMath.mul(numberToMint, hbarCost);
-		uint totalLazyCost = SafeMath.mul(numberToMint, lazyCost);
+		(uint256 hbarCost, uint256 lazyCost) = getCostInternal(isWlMint);
+		uint256 totalHbarCost = numberToMint * hbarCost;
+		uint256 totalLazyCost = numberToMint * lazyCost;
 
 		// take the payment
 		if (totalLazyCost > 0) {
@@ -269,30 +300,34 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 
 		if (totalHbarCost > 0) {
-			require(msg.value >= totalHbarCost, "+Hbar");
+			if(msg.value < totalHbarCost) revert NotEnoughHbar();
 		}
 
 		// pop the metadata
 		metadataForMint = new bytes[](numberToMint);
-		for (uint m = 0; m < numberToMint; m++) {
+		for (uint256 m = 0; m < numberToMint; ) {
 			metadataForMint[m] = bytes(string.concat(_cid, _metadata[_metadata.length - 1]));
-			// pop discarding the elemnt used up
+			// pop discarding the element used up
 			_metadata.pop();
+
+			unchecked {
+				++m;
+			}
 		}
 
 		int64[] memory mintedSerials = new int64[](numberToMint);
-		for (uint outer = 0; outer < numberToMint; outer += _batchSize) {
-			uint batchSize = (numberToMint - outer) >= _batchSize ? _batchSize : (numberToMint - outer);
+		for (uint256 outer = 0; outer < numberToMint; outer += _batchSize) {
+			uint256 batchSize = (numberToMint - outer) >= _batchSize ? _batchSize : (numberToMint - outer);
 			bytes[] memory batchMetadataForMint = new bytes[](batchSize);
-			for (uint inner = 0; ((outer + inner) < numberToMint) && (inner < _batchSize); inner++) {
+			for (uint256 inner = 0; ((outer + inner) < numberToMint) && (inner < _batchSize); inner++) {
 				batchMetadataForMint[inner] = metadataForMint[inner + outer];
 			}
 
-			(int responseCode, , int64[] memory serialNumbers) 
+			(int32 responseCode, , int64[] memory serialNumbers) 
 				= mintToken(_token, 0, batchMetadataForMint);
 
 			if (responseCode != HederaResponseCodes.SUCCESS) {
-				revert ("FSMint");
+				revert FailedNFTMint();
 			}
 
 			
@@ -310,7 +345,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
 
 			if (responseCode != HederaResponseCodes.SUCCESS) {
-				revert ("FSNFT");
+				revert NFTTransferFailed();
 			}
 		}
 		
@@ -342,55 +377,41 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		
 	}
 
-	// Call to associate a new token to the contract
-    /// @param tokenId EVM token to associate
-    function tokenAssociate(address tokenId) internal {
-        int256 response = HederaTokenService.associateToken(
-            address(this),
-            tokenId
-        );
-
-        if (response != HederaResponseCodes.SUCCESS) {
-            revert("AF");
-        }
-    }
-
 	/// Use HTS to transfer FT - add the burn
     /// @param amount Non-negative value to take as pmt. a negative value will result in a failure.
     function takeLazyPayment(
-        uint amount,
+        uint256 amount,
 		address payer
     )
 		internal 
-	returns (int responseCode) {
-		require(IERC721(_lazyDetails.lazyToken).balanceOf(payer) >= amount, "LAZYpmt");
+	returns (int256 responseCode) {
+		// check the payer has the required amount && the allowance is in place
+		if(IERC721(_lazyDetails.lazyToken).balanceOf(payer) < amount) revert NotEnoughLazy();
 
 		if (payer != address(this)) {
-			responseCode = transferToken(
-				_lazyDetails.lazyToken,
-				msg.sender,
-				address(this),
-				SafeCast.toInt64(int256(amount))
-			);
+			bool success = IERC20(_lazyDetails.lazyToken).transferFrom(payer, address(this), amount);
+			if (!success) {
+				revert FailedToPayLazy();
+			}
 		}
 
-		uint256 burnAmt = SafeMath.div(SafeMath.mul(amount, _lazyDetails.lazyBurnPerc), 100);
+		uint256 burnAmt = (amount * _lazyDetails.lazyBurnPerc) / 100;
 
 		// This is a safe cast to uint32 as max value is >> max supply of Lazy
 		
 		if (burnAmt > 0) {
 			responseCode = _lazyDetails.lazySCT.burn(_lazyDetails.lazyToken, SafeCast.toUint32(burnAmt));
 			if (responseCode != HederaResponseCodes.SUCCESS) {
-            	revert("BF");
+				revert BurnFailed();
         	}
 		}
         emit MinterContractMessage("LZYPmt", payer, amount);
     }
 
-	function getCostInternal(bool wl) internal view returns (uint hbarCost, uint lazyCost) {
+	function getCostInternal(bool wl) internal view returns (uint256 hbarCost, uint256 lazyCost) {
 		if (wl) {
-			hbarCost = SafeMath.div(SafeMath.mul(_mintEconomics.mintPriceHbar, (100 - _mintEconomics.wlDiscount)), 100);
-			lazyCost = SafeMath.div(SafeMath.mul(_mintEconomics.mintPriceLazy, (100 - _mintEconomics.wlDiscount)), 100);
+			hbarCost = (_mintEconomics.mintPriceHbar * (100 - _mintEconomics.wlDiscount)) / 100;
+			lazyCost = (_mintEconomics.mintPriceLazy * (100 - _mintEconomics.wlDiscount)) / 100;
 		}
 		else {
 			hbarCost = _mintEconomics.mintPriceHbar;
@@ -402,7 +423,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// currently flat cost, eventually dynamic on holdings
 	/// @return hbarCost
 	/// @return lazyCost
-    function getCost() external view returns (uint hbarCost, uint lazyCost) {
+    function getCost() external view returns (uint256 hbarCost, uint256 lazyCost) {
 		(hbarCost, lazyCost) = getCostInternal(MinterLibrary.checkWhitelistConditions(_whitelistedAddressQtyMap, _mintEconomics.maxWlAddressMint));
     }
 
@@ -415,9 +436,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     )
 		external
 		onlyOwner 
-	returns (int responseCode) {
-		require(block.timestamp >= (_mintTiming.lastMintTime + _mintTiming.refundWindow), 
-			"lazyCdown");
+	returns (int32 responseCode) {
+		if(block.timestamp < (_mintTiming.lastMintTime + _mintTiming.refundWindow)) revert LazyCooldown();
 
         responseCode = HederaTokenService.transferToken(
             _lazyDetails.lazyToken,
@@ -427,13 +447,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("gLazy");
+            revert FailedToPayLazy();
         }
     }
 
 	/// @return wlSpotsPurchased number of spots purchased
-	function buyWlWithLazy() external returns (uint wlSpotsPurchased) {
-		require(_mintEconomics.buyWlWithLazy > 0, "WL0");
+	function buyWlWithLazy() external returns (uint256 wlSpotsPurchased) {
+		if(_mintEconomics.buyWlWithLazy == 0) revert WLPurchaseFailed();
 
 		wlSpotsPurchased = _whitelistedAddressQtyMap.contains(msg.sender) ?
 			_whitelistedAddressQtyMap.get(msg.sender) + _mintEconomics.maxWlAddressMint :
@@ -445,14 +465,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	}
 
 	/// @return wlSpotsPurchased number of sports purchased
-	function buyWlWithTokens(uint256[] memory serials) external returns (uint wlSpotsPurchased) {
-		require(_mintEconomics.wlToken != address(0), "NoWLTkn");
+	function buyWlWithTokens(uint256[] memory serials) external returns (uint256 wlSpotsPurchased) {
+		if(_mintEconomics.wlToken == address(0)) revert NoWLToken();
 
 		for (uint8 i = 0; i < serials.length; i++) {
 			// check no double dipping
-			require(!_wlSerialsUsed.contains(serials[i]), "Used");
+			if(_wlSerialsUsed.contains(serials[i])) revert WLTokenUsed();
 			// check user owns the token
-			require(IERC721(_mintEconomics.wlToken).ownerOf(serials[i]) == msg.sender, "NotWLTOwner");
+			if(IERC721(_mintEconomics.wlToken).ownerOf(serials[i]) != msg.sender) revert NotTokenOwner();
 			_wlSerialsUsed.add(serials[i]);
 			emit MinterContractMessage("WLPTkn", msg.sender, serials[i]);
 		}
@@ -468,12 +488,11 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// using OZ sendValue()
     /// @param receiverAddress address in EVM format of the reciever of the hbar
     /// @param amount number of tokens to send (in long form adjusted for decimal)
-    function transferHbar(address payable receiverAddress, uint amount)
+    function transferHbar(address payable receiverAddress, uint256 amount)
         external
         onlyOwner
     {
-		require(block.timestamp >= (_mintTiming.lastMintTime + _mintTiming.refundWindow), 
-			"HbarCdown");
+		if(block.timestamp < (_mintTiming.lastMintTime + _mintTiming.refundWindow)) revert HbarCooldown();
         // throws error on failure
         //receiverAddress.transfer(amount);
 		Address.sendValue(receiverAddress, amount);
@@ -482,10 +501,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// Add an address to the allowance WL
     /// @param newAddresses array of addresses to add
     function addToWhitelist(address[] memory newAddresses) external onlyOwner {
-		for (uint a = 0 ; a < newAddresses.length; a++ ){
+		for (uint256 a = 0 ; a < newAddresses.length; a++ ){
 			bool result = _whitelistedAddressQtyMap.set(newAddresses[a], _mintEconomics.maxWlAddressMint);
 			emit MinterContractMessage(
-				"ADD WL", 
+				"+WL", 
 				newAddresses[a],
 				result ? 1 : 0
 			);
@@ -495,10 +514,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// Remove an address to the allowance WL
     /// @param oldAddresses the address to remove
     function removeFromWhitelist(address[] memory oldAddresses) external onlyOwner {
-		for (uint a = 0 ; a < oldAddresses.length; a++ ){
+		for (uint256 a = 0 ; a < oldAddresses.length; a++ ){
 			bool result = _whitelistedAddressQtyMap.remove(oldAddresses[a]);
 			emit MinterContractMessage(
-				"REM WL", 
+				"-WL", 
 				oldAddresses[a],
 				result ? 1 : 0
 			);
@@ -507,15 +526,15 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	// clear the whole WL
 	/// @return numAddressesRemoved how many WL entries were removed. 
-	function clearWhitelist() external onlyOwner returns(uint numAddressesRemoved) {
+	function clearWhitelist() external onlyOwner returns(uint256 numAddressesRemoved) {
 		numAddressesRemoved = MinterLibrary.clearWhitelist(_whitelistedAddressQtyMap);
 	}
 
 	// function to allow the burning of NFTs (as long as no fallback fee)
 	// NFTs transfered to the SC and then burnt with contract as supply key
 	/// @param serialNumbers array of serials to burn
-	function burnNFTs(int64[] memory serialNumbers) external returns (int responseCode, uint64 newTotalSupply) {
-		require(serialNumbers.length <= 10, "MaxSerial");
+	function burnNFTs(int64[] memory serialNumbers) external returns (int32 responseCode, uint64 newTotalSupply) {
+		if(serialNumbers.length > 10) revert MaxSerials();
 		// need to transfer back to treasury to burn
 		address[] memory senderList = new address[](serialNumbers.length);
 		address[] memory receiverList = new address[](serialNumbers.length);
@@ -524,18 +543,19 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 			receiverList[s] = address(this);
 		}
 
+		// Need to check if this allows approval based transfers, else move it to 'stake' code
 		responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
 		// emit events for each transfer
 
 		if (responseCode != HederaResponseCodes.SUCCESS) {
-			revert ("FTnftBrn");
+			revert NFTTransferFailed();
 		}
 
 		(responseCode, newTotalSupply) = burnToken(_token, 0, serialNumbers);
 		// emit events for burn
 
 		if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert ("Brn");
+            revert BurnFailed();
         }
 	}
 
@@ -571,14 +591,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	}
 
 	/// @param lazyAmt int amount of Lazy (adjusted for decimals)
-	function setBuyWlWithLazy(uint lazyAmt) external onlyOwner returns (bool changed) {
+	function setBuyWlWithLazy(uint256 lazyAmt) external onlyOwner returns (bool changed) {
 		changed = _mintEconomics.buyWlWithLazy == lazyAmt ? false : true;
 		if (changed) emit MinterContractMessage("BuyWLw/LAZY", msg.sender, lazyAmt);
 		_mintEconomics.buyWlWithLazy = lazyAmt;
 	}
 
 	/// @param maxMint int of how many a WL address can mint
-	function setMaxWlAddressMint(uint maxMint) external onlyOwner returns (bool changed) {
+	function setMaxWlAddressMint(uint256 maxMint) external onlyOwner returns (bool changed) {
 		changed = _mintEconomics.maxWlAddressMint == maxMint ? false : true;
 		if (changed) emit MinterContractMessage("SMaxMint", msg.sender, maxMint);
 		_mintEconomics.maxWlAddressMint = maxMint;
@@ -599,7 +619,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	/// @param batchSize updated minting batch just in case
     function updateBatchSize(uint256 batchSize) external onlyOwner returns (bool changed) {
-		require((batchSize > 0) && (batchSize <= 10), "Bch Sze");
+		if((batchSize == 0) || (batchSize > 10)) revert BadArguments();
 		changed = _batchSize == batchSize ? false : true;
     	_batchSize = batchSize;
     }
@@ -631,7 +651,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
 	/// @param lsct new Lazy SC Treasury address
     function updateLSCT(address lsct) external onlyOwner {
-        _lazyDetails.lazySCT = LAZYTokenCreator(lsct);
+        _lazyDetails.lazySCT = IBurnableHTS(lsct);
     }
 
 	/// @return lsct the address set for the current lazy SC Treasury
@@ -658,23 +678,30 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     }
 
 	/// @param metadata new metadata array
-    function updateMetadataArray(string[] memory metadata, uint startIndex) external onlyOwner {
+    function updateMetadataArray(string[] memory metadata, uint256 startIndex) external onlyOwner {
 		// enforce consistency of the metadata list
-		require((startIndex + metadata.length) <= _metadata.length, "offset");
-		uint index = 0;
-		for (uint i = startIndex; i < (startIndex + metadata.length); i++) {
+		if((startIndex + metadata.length) > _metadata.length) revert TooMuchMetadata();
+		uint256 index = 0;
+		for (uint256 i = startIndex; i < (startIndex + metadata.length); ) {
 			_metadata[i] = metadata[index];
 			index++;
+			unchecked {
+				++i;
+			}
 		}
     }
 
 	// method to push metadata end points up
-	function addMetadata(string[] memory metadata) external onlyOwner returns (uint totalLoaded) {
+	function addMetadata(string[] memory metadata) external onlyOwner returns (uint256 totalLoaded) {
 		if (_token != address(0)) {
-			require((_totalMinted + _metadata.length + metadata.length) <= _maxSupply, "tMM");
+			if((_totalMinted + _metadata.length + metadata.length) > _maxSupply) revert TooMuchMetadata();
 		}
-		for (uint i = 0; i < metadata.length; i++) {
+		for (uint256 i = 0; i < metadata.length; ) {
 			_metadata.push(metadata[i]);
+
+			unchecked {
+				++i;
+			}
 		}
 		totalLoaded = _metadata.length;
 	}
@@ -683,7 +710,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// boolean toggle to remove the token ID if full reset
 	/// @param removeToken reset token to zero address
 	/// @param batch allow for batched reset
-	function resetContract(bool removeToken, uint batch) external onlyOwner {
+	function resetContract(bool removeToken, uint256 batch) external onlyOwner {
 		if (removeToken) {
 			_token = address(0);
 			_totalMinted = 0;
@@ -701,17 +728,20 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	}
 
 	/// @return metadataList of metadata unminted -> only owner
-    function getMetadataArray(uint startIndex, uint endIndex) 
+    function getMetadataArray(uint256 startIndex, uint256 endIndex) 
 		external view onlyOwner 
 		returns (string[] memory metadataList) 
 	{
-		require(endIndex > startIndex, "args");
-		require(endIndex <= _metadata.length, "OOR");
+		if(endIndex <= startIndex) revert BadArguments();
+		if(endIndex > _metadata.length) revert TooMuchMetadata();
 		metadataList = new string[](endIndex - startIndex);
-		uint index = 0;
-        for (uint i = startIndex; i < endIndex; i++) {
+		uint256 index = 0;
+        for (uint256 i = startIndex; i < endIndex; ) {
 			metadataList[index] = _metadata[i];
 			index++;
+			unchecked {
+				++i;
+			}
 		}
     }
 
@@ -726,9 +756,9 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     }
 
 	/// @return numMinted helper function to check how many a wallet has minted
-	function getNumberMintedByAddress() external view returns(uint numMinted) {
+	function getNumberMintedByAddress() external view returns(uint256 numMinted) {
 		bool found;
-		uint numPreviouslyMinted;
+		uint256 numPreviouslyMinted;
 		(found, numPreviouslyMinted) = _addressToNumMintedMap.tryGet(msg.sender);
 		if (found) {
 			numMinted = numPreviouslyMinted;
@@ -741,18 +771,21 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// Likely only viable with smaller mints
 	/// @return walletList list of wallets who minted
 	/// @return numMintedList lst of number minted
-	function getNumberMintedByAllAddresses() external view onlyOwner returns(address[] memory walletList, uint[] memory numMintedList) {
+	function getNumberMintedByAllAddresses() external view onlyOwner returns(address[] memory walletList, uint256[] memory numMintedList) {
 		walletList = new address[](_addressToNumMintedMap.length());
-		numMintedList = new uint[](_addressToNumMintedMap.length());
-		for (uint a = 0; a < _addressToNumMintedMap.length(); a++) {
+		numMintedList = new uint256[](_addressToNumMintedMap.length());
+		for (uint256 a = 0; a < _addressToNumMintedMap.length(); ) {
 			(walletList[a], numMintedList[a]) = _addressToNumMintedMap.at(a);
+			unchecked {
+				++a;
+			}
 		}
 	}
 
 	/// @return wlNumMinted helper function to check how many a wallet has minted
-	function getNumberMintedByWlAddress() external view returns(uint wlNumMinted) {
+	function getNumberMintedByWlAddress() external view returns(uint256 wlNumMinted) {
 		bool found;
-		uint numPreviouslyMinted;
+		uint256 numPreviouslyMinted;
 		(found, numPreviouslyMinted) = _wlAddressToNumMintedMap.tryGet(msg.sender);
 		if (found) {
 			wlNumMinted = numPreviouslyMinted;
@@ -765,10 +798,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// Likely only viable with smaller mints
 	/// @return wlWalletList list of wallets who minted
 	/// @return wlNumMintedList lst of number minted
-	function getNumberMintedByAllWlAddresses() external view onlyOwner returns(address[] memory wlWalletList, uint[] memory wlNumMintedList) {
+	function getNumberMintedByAllWlAddresses() external view onlyOwner returns(address[] memory wlWalletList, uint256[] memory wlNumMintedList) {
 		wlWalletList = new address[](_wlAddressToNumMintedMap.length());
-		wlNumMintedList = new uint[](_wlAddressToNumMintedMap.length());
-		for (uint a = 0; a < _wlAddressToNumMintedMap.length(); a++) {
+		wlNumMintedList = new uint256[](_wlAddressToNumMintedMap.length());
+		for (uint256 a = 0; a < _wlAddressToNumMintedMap.length(); a++) {
 			(wlWalletList[a], wlNumMintedList[a]) = _wlAddressToNumMintedMap.at(a);
 		}
 	}
@@ -779,12 +812,12 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     }
 
 	/// @return batchSize the size for mint/transfer
-    function getBatchSize() external view returns (uint batchSize) {
+    function getBatchSize() external view returns (uint256 batchSize) {
     	batchSize = _batchSize;
     }
 
 	/// @return lazyBurn percentage of lazy to brun each interaction
-    function getLazyBurnPercentage() external view returns (uint lazyBurn) {
+    function getLazyBurnPercentage() external view returns (uint256 lazyBurn) {
     	lazyBurn = _lazyDetails.lazyBurnPerc;
     }
 
@@ -793,13 +826,16 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     function getWhitelist()
         external
         view
-        returns (address[] memory wl, uint[] memory wlQty)
+        returns (address[] memory wl, uint256[] memory wlQty)
     {
         wl = new address[](_whitelistedAddressQtyMap.length());
-		wlQty = new uint[](_whitelistedAddressQtyMap.length());
+		wlQty = new uint256[](_whitelistedAddressQtyMap.length());
 		
-		for (uint a = 0; a < _whitelistedAddressQtyMap.length(); a++) {
+		for (uint256 a = 0; a < _whitelistedAddressQtyMap.length(); ) {
 			(wl[a], wlQty[a]) = _whitelistedAddressQtyMap.at(a);
+			unchecked {
+				++a;
+			}
 		}
     }
 
@@ -817,7 +853,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param addressToCheck the address to check in WL
     /// @return inWl if in the WL
 	/// @return qty the number of WL mints (0 = unbounded)
-    function isAddressWL(address addressToCheck) external view returns (bool inWl, uint qty) {
+    function isAddressWL(address addressToCheck) external view returns (bool inWl, uint256 qty) {
 		(inWl, qty) = _whitelistedAddressQtyMap.tryGet(addressToCheck);
     }
 
