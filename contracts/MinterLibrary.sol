@@ -9,6 +9,19 @@ library MinterLibrary {
 	using EnumerableMap for EnumerableMap.UintToUintMap;
 	using EnumerableSet for EnumerableSet.UintSet;
 
+	error BadArguments();
+
+	function getNumberMintedByAllWlAddressesBatch(EnumerableMap.AddressToUintMap storage wlAddressToNumMintedMap, uint256 offset, uint256 batchSize) public view returns(address[] memory wlWalletList, uint256[] memory wlNumMintedList) {
+		if (offset >= wlAddressToNumMintedMap.length()) revert BadArguments();
+		if (batchSize > wlAddressToNumMintedMap.length()) revert BadArguments();
+		if ((offset + batchSize) > wlAddressToNumMintedMap.length()) revert BadArguments();
+		wlWalletList = new address[](batchSize);
+		wlNumMintedList = new uint256[](batchSize);
+		for (uint256 a = 0; a < batchSize; a++) {
+			(wlWalletList[a], wlNumMintedList[a]) = wlAddressToNumMintedMap.at(a + offset);
+		}
+	}
+
     function checkWhitelistConditions(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
         uint256 maxWlAddressMint

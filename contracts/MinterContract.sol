@@ -277,17 +277,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 					_mintEconomics.maxMintPerWallet) revert MaxMintPerWalletExceeded();
 		}
 
-		//check if wallet has minted before - if not try and associate
-		//SWALLOW ERROR as user may have already associated
-		//Ideally we would just check association before the brute force method
-		(found, ) = _walletMintTimeMap.tryGet(msg.sender);
-		if (!found) {
-			//let's associate
-			if(IERC721(_token).balanceOf(msg.sender) == 0) associateToken(msg.sender, _token);
-			// no need to capture result as failure simply means account already had it associated
-			// if user in the mint DB then will not be tried anyway
-		}
-
 		//calculate cost
 		(uint256 hbarCost, uint256 lazyCost) = getCostInternal(isWlMint);
 		uint256 totalHbarCost = numberToMint * hbarCost;
@@ -533,7 +522,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	// function to allow the burning of NFTs (as long as no fallback fee)
 	// NFTs transfered to the SC and then burnt with contract as supply key
 	/// @param serialNumbers array of serials to burn
-	function burnNFTs(int64[] memory serialNumbers) external returns (int32 responseCode, uint64 newTotalSupply) {
+	/// @return newTotalSupply the new total supply of the NFT
+	function burnNFTs(int64[] memory serialNumbers) external returns (uint64 newTotalSupply) {
 		if(serialNumbers.length > 10) revert MaxSerials();
 		// need to transfer back to treasury to burn
 		address[] memory senderList = new address[](serialNumbers.length);
@@ -544,7 +534,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		}
 
 		// Need to check if this allows approval based transfers, else move it to 'stake' code
-		responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
+		int32 responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
 		// emit events for each transfer
 
 		if (responseCode != HederaResponseCodes.SUCCESS) {
@@ -727,9 +717,11 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 		emit MinterContractMessage(removeToken ? "ClrTkn" : "RstCtrct", msg.sender, batch);
 	}
 
-	/// @return metadataList of metadata unminted -> only owner
+	/// @return metadataList of metadata unminted
+	// no point in obfuscating the ability to view unminted metadata
+	// technical workarounds are trivial.
     function getMetadataArray(uint256 startIndex, uint256 endIndex) 
-		external view onlyOwner 
+		external view 
 		returns (string[] memory metadataList) 
 	{
 		if(endIndex <= startIndex) revert BadArguments();
@@ -796,14 +788,16 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 	}
 
 	// Likely only viable with smaller mints
+	// else gather via events emitted.
+	// TODO: Create a batched retrieval
 	/// @return wlWalletList list of wallets who minted
 	/// @return wlNumMintedList lst of number minted
-	function getNumberMintedByAllWlAddresses() external view onlyOwner returns(address[] memory wlWalletList, uint256[] memory wlNumMintedList) {
-		wlWalletList = new address[](_wlAddressToNumMintedMap.length());
-		wlNumMintedList = new uint256[](_wlAddressToNumMintedMap.length());
-		for (uint256 a = 0; a < _wlAddressToNumMintedMap.length(); a++) {
-			(wlWalletList[a], wlNumMintedList[a]) = _wlAddressToNumMintedMap.at(a);
-		}
+	function getNumberMintedByAllWlAddresses() external view returns(address[] memory wlWalletList, uint256[] memory wlNumMintedList) {
+		(wlWalletList, wlNumMintedList) = MinterLibrary.getNumberMintedByAllWlAddressesBatch(_wlAddressToNumMintedMap, 0, _wlAddressToNumMintedMap.length());
+	}
+
+	function getNumberMintedByAllWlAddressesBatch(uint256 offset, uint256 batchSize) external view returns(address[] memory wlWalletList, uint256[] memory wlNumMintedList) {
+		(wlWalletList, wlNumMintedList) = MinterLibrary.getNumberMintedByAllWlAddressesBatch(_wlAddressToNumMintedMap, offset, batchSize);
 	}
 
 	/// @return remainingMint number of NFTs left to mint
@@ -822,7 +816,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     }
 
 	/// Check the current Whitelist for minting
-    /// @return wl an array of addresses currently enabled for allownace approval
+    /// @return wl an array of addresses on WL
+	/// @return wlQty an array of the number of mints allowed
     function getWhitelist()
         external
         view

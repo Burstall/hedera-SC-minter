@@ -12,3 +12,5 @@ Using contract: 0.0.48928030
 Storage: 570176
 Balance: 9.86512295 ℏ
 AutoRenew Account: null
+
+TODO: Add in IPRNG for mints (unless edition mint)
