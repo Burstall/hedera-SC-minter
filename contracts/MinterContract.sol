@@ -23,453 +23,556 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
-	using EnumerableMap for EnumerableMap.AddressToUintMap;
-	using EnumerableMap for EnumerableMap.UintToUintMap;
-	using EnumerableSet for EnumerableSet.UintSet;
-	using SafeCast for uint256;
-	using SafeCast for int64;
-	using SafeCast for int256;
-	using Address for address;
-	using Strings for string;
+    using EnumerableMap for EnumerableMap.AddressToUintMap;
+    using EnumerableMap for EnumerableMap.UintToUintMap;
+    using EnumerableSet for EnumerableSet.UintSet;
+    using SafeCast for uint256;
+    using SafeCast for int64;
+    using SafeCast for int256;
+    using Address for address;
+    using Strings for string;
 
+    // list of WL addresses
+    EnumerableMap.AddressToUintMap private whitelistedAddressQtyMap;
+    LazyDetails private lazyDetails;
+    string private cid;
+    string[] private metadata;
+    uint256 private batchSize;
+    uint256 public totalMinted;
+    uint256 private maxSupply;
+    // map address to timestamps
+    // for cooldown mechanic
+    EnumerableMap.AddressToUintMap private walletMintTimeMap;
+    // map serials to timestamps
+    // for burn / refund mechanic
+    EnumerableMap.UintToUintMap private serialMintTimeMap;
+    // set of the serials used to redeem WL to ensure no double dip
+    EnumerableSet.UintSet private wlSerialsUsed;
+    // map WL addresses to the numbers of mints used
+    // track WL mints per address for max cap
+    EnumerableMap.AddressToUintMap private wlAddressToNumMintedMap;
+    // map ALL addreesses to the numbers of mints used
+    // track mints per wallet for max cap
+    EnumerableMap.AddressToUintMap private addressToNumMintedMap;
 
-	// list of WL addresses
-    EnumerableMap.AddressToUintMap private _whitelistedAddressQtyMap;
-	LazyDetails private _lazyDetails;
-	string private _cid;
-	string[] private _metadata;
-	uint256 private _batchSize;
-	uint256 private _totalMinted;
-	uint256 private _maxSupply;
-	// map address to timestamps
-	// for cooldown mechanic
-	EnumerableMap.AddressToUintMap private _walletMintTimeMap;
-	// map serials to timestamps
-	// for burn / refund mechanic
-	EnumerableMap.UintToUintMap private _serialMintTimeMap;
-	// set of the serials used to redeem WL to ensure no double dip
-	EnumerableSet.UintSet private _wlSerialsUsed;
-	// map WL addresses to the numbers of mints used
-	// track WL mints per address for max cap
-	EnumerableMap.AddressToUintMap private _wlAddressToNumMintedMap;
-	// map ALL addreesses to the numbers of mints used
-	// track mints per wallet for max cap
-	EnumerableMap.AddressToUintMap private _addressToNumMintedMap;
+    error NotReset(address token);
+    error MemoTooLong();
+    error TooManyFees();
+    error TooMuchMetadata();
+    error EmptyMetadata();
+    error FailedToMint();
+    error BadQuantity(uint256 quantity);
+    error NotOpen();
+    error Paused();
+    error NotWL();
+    error NotEnoughWLSlots();
+    error MintedOut();
+    error MaxMintExceeded();
+    error MaxMintPerWalletExceeded();
+    error NotEnoughLazy();
+    error NotEnoughHbar();
+    error FailedNFTMint();
+    error NFTTransferFailed();
+    error AssociationFailed();
+    error FailedToPayLazy();
+    error BurnFailed();
+    error LazyCooldown();
+    error HbarCooldown();
+    error WLPurchaseFailed();
+    error NoWLToken();
+    error WLTokenUsed();
+    error NotTokenOwner();
+    error MaxSerials();
+    error BadArguments();
 
-	error NotReset(address token);
-	error MemoTooLong();
-	error TooManyFees();
-	error TooMuchMetadata();
-	error EmptyMetadata();
-	error FailedToMint();
-	error BadQuantity(uint256 quantity);
-	error NotOpen();
-	error Paused();
-	error NotWL();
-	error NotEnoughWLSlots();
-	error MintedOut();
-	error MaxMintExceeded();
-	error MaxMintPerWalletExceeded();
-	error NotEnoughLazy();
-	error NotEnoughHbar();
-	error FailedNFTMint();
-	error NFTTransferFailed();
-	error AssociationFailed();
-	error FailedToPayLazy();
-	error BurnFailed();
-	error LazyCooldown();
-	error HbarCooldown();
-	error WLPurchaseFailed();
-	error NoWLToken();
-	error WLTokenUsed();
-	error NotTokenOwner();
-	error MaxSerials();
-	error BadArguments();
+    struct MintTiming {
+        uint256 lastMintTime;
+        uint256 mintStartTime;
+        bool mintPaused;
+        uint256 cooldownPeriod;
+        uint256 refundWindow;
+        bool wlOnly;
+    }
 
-	struct MintTiming {
-		uint256 lastMintTime;
-		uint256 mintStartTime;
-		bool mintPaused;
-		uint256 cooldownPeriod;
-		uint256 refundWindow;
-		bool wlOnly;
-	}
+    struct MintEconomics {
+        bool lazyFromContract;
+        // in tinybar
+        uint256 mintPriceHbar;
+        // adjusted for decimal 1
+        uint256 mintPriceLazy;
+        uint256 wlDiscount;
+        uint256 maxMint;
+        uint256 buyWlWithLazy;
+        uint256 maxWlAddressMint;
+        uint256 maxMintPerWallet;
+        address wlToken;
+    }
 
-	struct MintEconomics {
-		bool lazyFromContract;
-		// in tinybar
-		uint256 mintPriceHbar;
-		// adjusted for decimal 1
-		uint256 mintPriceLazy;
-		uint256 wlDiscount;
-		uint256 maxMint;
-		uint256 buyWlWithLazy;
-		uint256 maxWlAddressMint;
-		uint256 maxMintPerWallet;
-		address wlToken;
-	}
+    struct LazyDetails {
+        address lazyToken;
+        uint256 lazyBurnPerc;
+        IBurnableHTS lazySCT;
+    }
 
-	struct LazyDetails {
-		address lazyToken;
-		uint256 lazyBurnPerc;
-		IBurnableHTS lazySCT;
-	}
+    // to avoid serialisation related default causing odd behaviour
+    // implementing custom object as a wrapper
+    struct NFTFeeObject {
+        uint32 numerator;
+        uint32 denominator;
+        uint32 fallbackfee;
+        address account;
+    }
 
-	// to avoid serialisation related default causing odd behaviour
-	// implementing custom object as a wrapper
-	struct NFTFeeObject {
-		uint32 numerator;
-		uint32 denominator;
-		uint32 fallbackfee;
-		address account;
-	}
+    MintTiming private mintTiming;
+    MintEconomics private mintEconomics;
 
-	MintTiming private _mintTiming;
-	MintEconomics private _mintEconomics;
+    address private token;
+    address private prngGenerator;
 
-	address private _token;
-	address private _prngGenerator;
+    enum ContractEventType {
+        INITIALISE,
+        REFUND,
+        PAUSE,
+        UNPAUSE,
+        LAZY_PMT,
+        WL_PURCHASE_TOKEN,
+        WL_PURCHASE_LAZY,
+        WL_ADD,
+        WL_REMOVE,
+        RESET_CONTRACT,
+        RESET_INC_TOKEN,
+        UPDATE_WL_TOKEN,
+        UPDATE_WL_LAZY_BUY,
+        UPDATE_WL_ONLY,
+        UPDATE_WL_MAX,
+        UPDATE_WL_DISCOUNT,
+        UPDATE_MAX_MINT,
+        UPDATE_MAX_WALLET_MINT,
+        UPDATE_COOLDOWN,
+        UPDATE_MINT_PRICE,
+        UPDATE_MINT_PRICE_LAZY,
+        UPDATE_LAZY_BURN_PERCENTAGE,
+        UPDATE_LAZY_FROM_CONTRACT,
+        UPDATE_CID,
+        UPDATE_MINT_START_TIME,
+        UPDATE_REFUND_WINDOW
+    }
 
-	enum ContractEventType {
-		INITIALISE, 
-		REFUND,
-		PAUSE,
-		UNPAUSE,
-		LAZY_PMT,
-		WL_PURCHASE_TOKEN,
-		WL_PURCHASE_LAZY,
-		WL_ADD,
-		WL_REMOVE,
-		RESET_CONTRACT,
-		RESET_INC_TOKEN,
-		UPDATE_WL_TOKEN,
-		UPDATE_WL_LAZY_BUY,
-		UPDATE_WL_ONLY,
-		UPDATE_WL_MAX,
-		UPDATE_WL_DISCOUNT,
-		UPDATE_MAX_MINT,
-		UPDATE_MAX_WALLET_MINT,
-		UPDATE_COOLDOWN,
-		UPDATE_MINT_PRICE,
-		UPDATE_MINT_PRICE_LAZY,
-		UPDATE_LAZY_BURN_PERCENTAGE,
-		UPDATE_LAZY_FROM_CONTRACT,
-		UPDATE_CID,
-		UPDATE_MINT_START_TIME,
-		UPDATE_REFUND_WINDOW
-	}
-	
-	event MinterContractMessage(
-		ContractEventType eventType,
-		address indexed msgAddress,
-		uint256 msgNumeric
-	);
+    event MinterContractMessage(
+        ContractEventType _eventType,
+        address indexed _msgAddress,
+        uint256 _msgNumeric
+    );
 
-	event MintEvent(
-		address indexed msgAddress,
-		bool mintType,
-		uint256 indexed serial,
-		string metadata
-	);
+    event MintEvent(
+        address indexed _msgAddress,
+        bool _mintType,
+        uint256 indexed _serial,
+        string _metadata
+    );
 
-	event BurnEvent(
-		address indexed burnerAddress,
-		int64[] serials,
-		uint64 newSupply
-	);
+    event BurnEvent(
+        address indexed _burnerAddress,
+        int64[] _serials,
+        uint64 _newSupply
+    );
 
-	/// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
-	constructor(
-		address lsct, 
-		address lazy,
-		uint256 lazyBurnPerc
-	) {
-		_lazyDetails = LazyDetails(lazy, lazyBurnPerc, IBurnableHTS(lsct));
+    /// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
+	/// @param lazy the address of the Lazy Token
+	/// @param lazyBurnPerc the percentage of Lazy to burn on each mint
+    constructor(address lsct, address lazy, uint256 lazyBurnPerc) {
+        lazyDetails = LazyDetails(lazy, lazyBurnPerc, IBurnableHTS(lsct));
 
-		uint256 responseCode = IHRC719(_lazyDetails.lazyToken).associate();
-		if (responseCode.toInt256().toInt32() != HederaResponseCodes.SUCCESS) {
-			revert AssociationFailed();
-		}
+        uint256 responseCode = IHRC719(lazyDetails.lazyToken).associate();
+        if (responseCode.toInt256().toInt32() != HederaResponseCodes.SUCCESS) {
+            revert AssociationFailed();
+        }
 
-		_mintEconomics = MintEconomics(false, 0, 0, 0, 20, 0, 0, 0, address(0));
-		_mintTiming = MintTiming(0, 0, true, 0, 0, false);
-		_token = address(0);
-		_batchSize = 10;
-	}
+        mintEconomics = MintEconomics(false, 0, 0, 0, 20, 0, 0, 0, address(0));
+        mintTiming = MintTiming(0, 0, true, 0, 0, false);
+        batchSize = 10;
+    }
 
-	// Supply the contract with token details and metadata
-	// Once basic integrity checks are done the token will mint and the address will be returned
-	/// @param name token name
-    /// @param symbol token symbol
-    /// @param memo token longer form description as a string
-	/// @param cid root cid for the metadata files
-	/// @param maxIssuance 0 or less to size based off metadata else will override
-    /// @return createdTokenAddress the address of the new token
-	function initialiseNFTMint (
-		string memory name,
-        string memory symbol,
-        string memory memo,
-		string memory cid,
-		NFTFeeObject[] memory royalties,
-		int64 maxIssuance
-	)
-		external
-		payable
-		onlyOwner
-	returns (address createdTokenAddress, uint256 maxSupply) {
-		if(_token != address(0)) revert NotReset(_token);
-		if(bytes(memo).length > 100) revert MemoTooLong();
-		if(royalties.length > 10) revert TooManyFees();
+    // Supply the contract with token details and _metadata
+    // Once basic integrity checks are done the token will mint and the address will be returned
+    /// @param _name token name
+    /// @param _symbol token symbol
+    /// @param _memo token longer form description as a string
+    /// @param _cid root _cid for the _metadata files
+    /// @param _maxIssuance 0 or less to size based off _metadata else will override
+    /// @return _createdTokenAddress the address of the new token
+    function initialiseNFTMint(
+        string memory _name,
+        string memory _symbol,
+        string memory _memo,
+        string memory _cid,
+        NFTFeeObject[] memory _royalties,
+        int64 _maxIssuance
+    )
+        external
+        payable
+        onlyOwner
+        returns (address _createdTokenAddress, uint256 _maxSupply)
+    {
+        if (token != address(0)) revert NotReset(token);
+        if (bytes(_memo).length > 100) revert MemoTooLong();
+        if (_royalties.length > 10) revert TooManyFees();
 
-		_cid = cid;
+        cid = _cid;
 
-		// instantiate the list of keys we'll use for token create
+        // instantiate the list of keys we'll use for token create
         IHederaTokenService.TokenKey[]
-            memory keys = new IHederaTokenService.TokenKey[](1);
+            memory _keys = new IHederaTokenService.TokenKey[](1);
 
-        keys[0] = getSingleKey(KeyType.SUPPLY, KeyValueType.CONTRACT_ID, address(this));
+        _keys[0] = getSingleKey(
+            KeyType.SUPPLY,
+            KeyValueType.CONTRACT_ID,
+            address(this)
+        );
 
-		IHederaTokenService.HederaToken memory token;
-		token.name = name;
-        token.symbol = symbol;
-        token.memo = memo;
-        token.treasury = address(this);
-        token.tokenKeys = keys;
-		token.tokenSupplyType = true;
-		if (maxIssuance > 0) {
-			// check that there is not already too much metadats in the contract
-			if(_metadata.length > maxIssuance.toUint256()) revert TooMuchMetadata();
-			token.maxSupply = maxIssuance;
-		} 
-		else {
-			if(_metadata.length == 0) revert EmptyMetadata();
-        	token.maxSupply = _metadata.length.toInt256().toInt64();
-		}
-		_maxSupply = SafeCast.toUint256(token.maxSupply);
-		// create the expiry schedule for the token using ExpiryHelper
-        token.expiry = createAutoRenewExpiry(
+        IHederaTokenService.HederaToken memory _token;
+        _token.name = _name;
+        _token.symbol = _symbol;
+        _token.memo = _memo;
+        _token.treasury = address(this);
+        _token.tokenKeys = _keys;
+        _token.tokenSupplyType = true;
+        if (_maxIssuance > 0) {
+            // check that there is not already too much metadats in the contract
+            if (metadata.length > _maxIssuance.toUint256())
+                revert TooMuchMetadata();
+            _token.maxSupply = _maxIssuance;
+        } else {
+            if (metadata.length == 0) revert EmptyMetadata();
+            _token.maxSupply = metadata.length.toInt256().toInt64();
+        }
+        maxSupply = SafeCast.toUint256(_token.maxSupply);
+        // create the expiry schedule for the token using ExpiryHelper
+        _token.expiry = createAutoRenewExpiry(
             address(this),
             HederaTokenService.defaultAutoRenewPeriod
         );
 
-		// translate fee objects to avoid oddities from serialisation of default/empty values
-		IHederaTokenService.RoyaltyFee[] memory fees = new IHederaTokenService.RoyaltyFee[](royalties.length);
+        // translate fee objects to avoid oddities from serialisation of default/empty values
+        IHederaTokenService.RoyaltyFee[]
+            memory _fees = new IHederaTokenService.RoyaltyFee[](
+                _royalties.length
+            );
 
-		for (uint256 f = 0; f < royalties.length; f++) {
-			IHederaTokenService.RoyaltyFee memory fee;
-			fee.numerator = royalties[f].numerator;
-			fee.denominator = royalties[f].denominator;
-			fee.feeCollector = royalties[f].account;
+        uint256 _length = _royalties.length;
+        for (uint256 f = 0; f < _length; ) {
+            IHederaTokenService.RoyaltyFee memory _fee;
+            _fee.numerator = _royalties[f].numerator;
+            _fee.denominator = _royalties[f].denominator;
+            _fee.feeCollector = _royalties[f].account;
 
-			if (royalties[f].fallbackfee != 0) {
-				fee.amount = royalties[f].fallbackfee;
-				fee.useHbarsForPayment = true;
-			}
+            if (_royalties[f].fallbackfee != 0) {
+                _fee.amount = _royalties[f].fallbackfee;
+                _fee.useHbarsForPayment = true;
+            }
 
-			fees[f] = fee;
-		}
+            _fees[f] = _fee;
 
-		(int32 responseCode, address tokenAddress) = HederaTokenService.createNonFungibleTokenWithCustomFees(
-			token,
-			new IHederaTokenService.FixedFee[](0),
-			fees);
+            unchecked {
+                ++f;
+            }
+        }
+
+        (int32 responseCode, address tokenAddress) = HederaTokenService
+            .createNonFungibleTokenWithCustomFees(
+                _token,
+                new IHederaTokenService.FixedFee[](0),
+                _fees
+            );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
             revert FailedToMint();
         }
 
-		_token = tokenAddress;
-		maxSupply = _maxSupply;
+        token = tokenAddress;
+        // set the return values
+        _maxSupply = maxSupply;
+        _createdTokenAddress = token;
 
-		emit MinterContractMessage(ContractEventType.INITIALISE, _token, maxSupply);
+        emit MinterContractMessage(
+            ContractEventType.INITIALISE,
+            token,
+            _maxSupply
+        );
+    }
 
-		createdTokenAddress = _token;
-	}
+    /// @param _numberToMint the number of serials to mint
+	/// @return _serials the serials minted
+	/// @return _metadataForMint the metadata for the minted serials
+    function mintNFT(
+        uint256 _numberToMint
+    )
+        external
+        payable
+        nonReentrant
+        returns (int64[] memory _serials, bytes[] memory _metadataForMint)
+    {
+        if (_numberToMint == 0) revert BadQuantity(_numberToMint);
+        if (
+            mintTiming.mintStartTime != 0 &&
+            mintTiming.mintStartTime > block.timestamp
+        ) revert NotOpen();
+        if (mintTiming.mintPaused) revert Paused();
+        if (_numberToMint > metadata.length) revert MintedOut();
+        if (_numberToMint > mintEconomics.maxMint) revert MaxMintExceeded();
 
-	/// @param numberToMint the number of serials to mint
-	function mintNFT(uint256 numberToMint) external payable nonReentrant returns (int64[] memory serials, bytes[] memory metadataForMint) {
-		if(numberToMint == 0) revert BadQuantity(numberToMint);
-		if(_mintTiming.mintStartTime != 0 && _mintTiming.mintStartTime > block.timestamp) revert NotOpen();
-		if(_mintTiming.mintPaused) revert Paused();
-		if(numberToMint > _metadata.length) revert MintedOut();
-		if(numberToMint > _mintEconomics.maxMint) revert MaxMintExceeded();
+        bool isWlMint = false;
+        // Design decision: WL max mint per wallet takes priority
+        // over max mint per wallet
+        if (mintTiming.wlOnly) {
+            if (
+                !MinterLibrary.checkWhitelistConditions(
+                    whitelistedAddressQtyMap,
+                    mintEconomics.maxWlAddressMint
+                )
+            ) revert NotWL();
+            // only check the qty if there is a limit at contract level
+            if (mintEconomics.maxWlAddressMint > 0) {
+                // we know the address is in the list to get here.
+                uint256 wlMintsRemaining = whitelistedAddressQtyMap.get(
+                    msg.sender
+                );
+                if (wlMintsRemaining < _numberToMint) revert NotEnoughWLSlots();
+                whitelistedAddressQtyMap.set(
+                    msg.sender,
+                    wlMintsRemaining -= _numberToMint
+                );
+            }
+            isWlMint = true;
+        } else if (mintEconomics.maxMintPerWallet > 0) {
+            (bool found, uint256 numPreviouslyMinted) = addressToNumMintedMap
+                .tryGet(msg.sender);
+            if (!found) {
+                numPreviouslyMinted = 0;
+            }
 
-		bool isWlMint = false;
-		// Design decision: WL max mint per wallet takes priority 
-		// over max mint per wallet
-		if (_mintTiming.wlOnly) {
-			if(!MinterLibrary.checkWhitelistConditions(_whitelistedAddressQtyMap, _mintEconomics.maxWlAddressMint)) revert NotWL();
-			// only check the qty if there is a limit at contract level
-			if (_mintEconomics.maxWlAddressMint > 0) {
-				// we know the address is in the list to get here.
-				uint256 wlMintsRemaining = _whitelistedAddressQtyMap.get(msg.sender);
-				if(wlMintsRemaining < numberToMint) revert NotEnoughWLSlots();
-				_whitelistedAddressQtyMap.set(msg.sender, wlMintsRemaining -= numberToMint);
-			}
-			isWlMint = true;
-		}
-		else if (_mintEconomics.maxMintPerWallet > 0) {
-			(bool found, uint256 numPreviouslyMinted) = _addressToNumMintedMap.tryGet(msg.sender);
-			if (!found) {
-				numPreviouslyMinted = 0;
-			}
-		
-			if((numPreviouslyMinted + numberToMint) >
-					_mintEconomics.maxMintPerWallet) revert MaxMintPerWalletExceeded();
-		}
+            if (
+                (numPreviouslyMinted + _numberToMint) >
+                mintEconomics.maxMintPerWallet
+            ) revert MaxMintPerWalletExceeded();
+        }
 
-		//calculate cost
-		(uint256 hbarCost, uint256 lazyCost) = getCostInternal(isWlMint);
-		uint256 totalHbarCost = numberToMint * hbarCost;
-		uint256 totalLazyCost = numberToMint * lazyCost;
+        //calculate cost
+        (uint256 hbarCost, uint256 lazyCost) = getCostInternal(isWlMint);
+        uint256 totalHbarCost = _numberToMint * hbarCost;
+        uint256 totalLazyCost = _numberToMint * lazyCost;
 
-		// take the payment
-		if (totalLazyCost > 0) {
-			takeLazyPayment(totalLazyCost, 
-				_mintEconomics.lazyFromContract ? address(this) : msg.sender);
-		}
+        // take the payment
+        if (totalLazyCost > 0) {
+            takeLazyPayment(
+                totalLazyCost,
+                mintEconomics.lazyFromContract ? address(this) : msg.sender
+            );
+        }
 
-		if (totalHbarCost > 0) {
-			if(msg.value < totalHbarCost) revert NotEnoughHbar();
-		}
+        if (totalHbarCost > 0) {
+            if (msg.value < totalHbarCost) revert NotEnoughHbar();
+        }
 
-		// pop the metadata
-		metadataForMint = MinterLibrary.selectMetdataToMint(_metadata, numberToMint, _cid, _prngGenerator);
+        // pop the _metadata
+        _metadataForMint = MinterLibrary.selectMetdataToMint(
+            metadata,
+            _numberToMint,
+            cid,
+            prngGenerator
+        );
 
-		int64[] memory mintedSerials = new int64[](numberToMint);
-		for (uint256 outer = 0; outer < numberToMint; outer += _batchSize) {
-			uint256 batchSize = (numberToMint - outer) >= _batchSize ? _batchSize : (numberToMint - outer);
-			bytes[] memory batchMetadataForMint = new bytes[](batchSize);
-			for (uint256 inner = 0; ((outer + inner) < numberToMint) && (inner < _batchSize); inner++) {
-				batchMetadataForMint[inner] = metadataForMint[inner + outer];
-			}
+        int64[] memory mintedSerials = new int64[](_numberToMint);
+        for (uint256 outer = 0; outer < _numberToMint; outer += batchSize) {
+            uint256 thisBatch = (_numberToMint - outer) >= batchSize
+                ? batchSize
+                : (_numberToMint - outer);
+            bytes[] memory batchMetadataForMint = new bytes[](thisBatch);
+            for (
+                uint256 inner = 0;
+                ((outer + inner) < _numberToMint) && (inner < thisBatch);
+                inner++
+            ) {
+                batchMetadataForMint[inner] = _metadataForMint[inner + outer];
+            }
 
-			(int32 responseCode, , int64[] memory serialNumbers) 
-				= mintToken(_token, 0, batchMetadataForMint);
+            (int32 responseCode, , int64[] memory serialNumbers) = mintToken(
+                token,
+                0,
+                batchMetadataForMint
+            );
 
-			if (responseCode != HederaResponseCodes.SUCCESS) {
-				revert FailedNFTMint();
-			}
+            if (responseCode != HederaResponseCodes.SUCCESS) {
+                revert FailedNFTMint();
+            }
 
-			
-			// transfer the token to the user
-			address[] memory senderList = new address[](serialNumbers.length);
-			address[] memory receiverList = new address[](serialNumbers.length);
-			uint256 length = serialNumbers.length;
-			for (uint256 s = 0 ; s < length; ) {
-				emitMintEvent(isWlMint, serialNumbers[s], batchMetadataForMint[s]);
-				senderList[s] = address(this);
-				receiverList[s] = msg.sender;
-				mintedSerials[s + outer] = serialNumbers[s];
-				_serialMintTimeMap.set(SafeCast.toUint256(serialNumbers[s]), block.timestamp);
+            // transfer the token to the user
+            address[] memory senderList = new address[](serialNumbers.length);
+            address[] memory receiverList = new address[](serialNumbers.length);
+            uint256 length = serialNumbers.length;
+            for (uint256 s = 0; s < length; ) {
+                emitMintEvent(
+                    isWlMint,
+                    serialNumbers[s],
+                    batchMetadataForMint[s]
+                );
+                senderList[s] = address(this);
+                receiverList[s] = msg.sender;
+                mintedSerials[s + outer] = serialNumbers[s];
+                serialMintTimeMap.set(
+                    SafeCast.toUint256(serialNumbers[s]),
+                    block.timestamp
+                );
 
-				unchecked {
-					++s;
-				}
-			}
+                unchecked {
+                    ++s;
+                }
+            }
 
-			responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
+            responseCode = transferNFTs(
+                token,
+                senderList,
+                receiverList,
+                serialNumbers
+            );
 
-			if (responseCode != HederaResponseCodes.SUCCESS) {
-				revert NFTTransferFailed();
-			}
-		}
-		
-		_mintTiming.lastMintTime = block.timestamp;
-		_walletMintTimeMap.set(msg.sender, block.timestamp);
+            if (responseCode != HederaResponseCodes.SUCCESS) {
+                revert NFTTransferFailed();
+            }
+        }
 
-		if (isWlMint) {
-			(bool wlFound, uint256 wlNumPreviouslyMinted) = _wlAddressToNumMintedMap.tryGet(msg.sender);
-			if (wlFound) {
-				_wlAddressToNumMintedMap.set(msg.sender, wlNumPreviouslyMinted + numberToMint);
-			}
-			else {
-				_wlAddressToNumMintedMap.set(msg.sender, numberToMint);
-			}
-		}
+        mintTiming.lastMintTime = block.timestamp;
+        walletMintTimeMap.set(msg.sender, block.timestamp);
 
-		// track all minters in case max mint per wallet required
-		(bool numMintfound, uint256 totalNumPreviouslyMinted) = _addressToNumMintedMap.tryGet(msg.sender);
-		if (numMintfound) {
-			_addressToNumMintedMap.set(msg.sender, totalNumPreviouslyMinted + numberToMint);
-		}
-		else {
-			_addressToNumMintedMap.set(msg.sender, numberToMint);
-		}
+        if (isWlMint) {
+            (
+                bool wlFound,
+                uint256 wlNumPreviouslyMinted
+            ) = wlAddressToNumMintedMap.tryGet(msg.sender);
+            if (wlFound) {
+                wlAddressToNumMintedMap.set(
+                    msg.sender,
+                    wlNumPreviouslyMinted + _numberToMint
+                );
+            } else {
+                wlAddressToNumMintedMap.set(msg.sender, _numberToMint);
+            }
+        }
 
-		_totalMinted += numberToMint;
+        // track all minters in case max mint per wallet required
+        (
+            bool numMintfound,
+            uint256 totalNumPreviouslyMinted
+        ) = addressToNumMintedMap.tryGet(msg.sender);
+        if (numMintfound) {
+            addressToNumMintedMap.set(
+                msg.sender,
+                totalNumPreviouslyMinted + _numberToMint
+            );
+        } else {
+            addressToNumMintedMap.set(msg.sender, _numberToMint);
+        }
 
-		serials = mintedSerials;
-		
-	}
+        totalMinted += _numberToMint;
 
-	/// Use HTS to transfer FT - add the burn
-    /// @param amount Non-negative value to take as pmt. a negative value will result in a failure.
+        _serials = mintedSerials;
+    }
+
+    /// Use HTS to transfer FT - add the burn
+    /// @param _amount Non-negative value to take as pmt. a negative value will result in a failure.
+    /// @param _payer the address of the payer
+	/// @return _responseCode the response code from the HTS
     function takeLazyPayment(
-        uint256 amount,
-		address payer
-    )
-		internal 
-	returns (int256 responseCode) {
-		// check the payer has the required amount && the allowance is in place
-		if(IERC721(_lazyDetails.lazyToken).balanceOf(payer) < amount) revert NotEnoughLazy();
+        uint256 _amount,
+        address _payer
+    ) internal returns (int256 _responseCode) {
+        // check the payer has the required amount && the allowance is in place
+        if (IERC721(lazyDetails.lazyToken).balanceOf(_payer) < _amount)
+            revert NotEnoughLazy();
 
-		if (payer != address(this)) {
-			bool success = IERC20(_lazyDetails.lazyToken).transferFrom(payer, address(this), amount);
-			if (!success) {
-				revert FailedToPayLazy();
-			}
-		}
+        if (_payer != address(this)) {
+            bool success = IERC20(lazyDetails.lazyToken).transferFrom(
+                _payer,
+                address(this),
+                _amount
+            );
+            if (!success) {
+                revert FailedToPayLazy();
+            }
+        }
 
-		uint256 burnAmt = (amount * _lazyDetails.lazyBurnPerc) / 100;
+        uint256 burnAmt = (_amount * lazyDetails.lazyBurnPerc) / 100;
 
-		// This is a safe cast to uint32 as max value is >> max supply of Lazy
-		
-		if (burnAmt > 0) {
-			responseCode = _lazyDetails.lazySCT.burn(_lazyDetails.lazyToken, SafeCast.toUint32(burnAmt));
-			if (responseCode != HederaResponseCodes.SUCCESS) {
-				revert BurnFailed();
-        	}
-		}
-        emit MinterContractMessage(ContractEventType.LAZY_PMT, payer, amount);
+        // This is a safe cast to uint32 as max value is >> max supply of Lazy
+
+        if (burnAmt > 0) {
+            _responseCode = lazyDetails.lazySCT.burn(
+                lazyDetails.lazyToken,
+                SafeCast.toUint32(burnAmt)
+            );
+            if (_responseCode != HederaResponseCodes.SUCCESS) {
+                revert BurnFailed();
+            }
+        }
+        emit MinterContractMessage(ContractEventType.LAZY_PMT, _payer, _amount);
     }
 
-	function getCostInternal(bool wl) internal view returns (uint256 hbarCost, uint256 lazyCost) {
-		if (wl) {
-			hbarCost = (_mintEconomics.mintPriceHbar * (100 - _mintEconomics.wlDiscount)) / 100;
-			lazyCost = (_mintEconomics.mintPriceLazy * (100 - _mintEconomics.wlDiscount)) / 100;
-		}
-		else {
-			hbarCost = _mintEconomics.mintPriceHbar;
-			lazyCost = _mintEconomics.mintPriceLazy;
-		}
-	}
-
-	// function to asses the cost to mint for a user
-	// currently flat cost, eventually dynamic on holdings
-	/// @return hbarCost
-	/// @return lazyCost
-    function getCost() external view returns (uint256 hbarCost, uint256 lazyCost) {
-		(hbarCost, lazyCost) = getCostInternal(MinterLibrary.checkWhitelistConditions(_whitelistedAddressQtyMap, _mintEconomics.maxWlAddressMint));
+	/// @param _isWlMint boolean to indicate if the mint is a WL mint
+	/// @return _hbarCost the cost in Hbar
+	/// @return _lazyCost the cost in Lazy
+    function getCostInternal(
+        bool _isWlMint
+    ) internal view returns (uint256 _hbarCost, uint256 _lazyCost) {
+        if (_isWlMint) {
+            _hbarCost =
+                (mintEconomics.mintPriceHbar *
+                    (100 - mintEconomics.wlDiscount)) /
+                100;
+            _lazyCost =
+                (mintEconomics.mintPriceLazy *
+                    (100 - mintEconomics.wlDiscount)) /
+                100;
+        } else {
+            _hbarCost = mintEconomics.mintPriceHbar;
+            _lazyCost = mintEconomics.mintPriceLazy;
+        }
     }
 
-	/// Use HTS to retrieve LAZY
-    /// @param receiver The receiver of the transaction
-    /// @param amount Non-negative value to send. a negative value will result in a failure.
+    // function to asses the cost to mint for a user
+    // currently flat cost, eventually dynamic on holdings
+    /// @return _hbarCost
+    /// @return _lazyCost
+    function getCost()
+        external
+        view
+        returns (uint256 _hbarCost, uint256 _lazyCost)
+    {
+        (_hbarCost, _lazyCost) = getCostInternal(
+            MinterLibrary.checkWhitelistConditions(
+                whitelistedAddressQtyMap,
+                mintEconomics.maxWlAddressMint
+            )
+        );
+    }
+
+    /// Use HTS to retrieve LAZY
+    /// @param _receiver The receiver of the transaction
+    /// @param _amount Non-negative value to send. a negative value will result in a failure.
+	/// @return responseCode the response code from the HTS
     function retrieveLazy(
-        address receiver,
-        int64 amount
-    )
-		external
-		onlyOwner 
-	returns (int32 responseCode) {
-		if(block.timestamp < (_mintTiming.lastMintTime + _mintTiming.refundWindow)) revert LazyCooldown();
+        address _receiver,
+        int64 _amount
+    ) external onlyOwner returns (int32 responseCode) {
+        if (
+            block.timestamp <
+            (mintTiming.lastMintTime + mintTiming.refundWindow)
+        ) revert LazyCooldown();
 
         responseCode = HederaTokenService.transferToken(
-            _lazyDetails.lazyToken,
+            lazyDetails.lazyToken,
             address(this),
-            receiver,
-            amount
+            _receiver,
+            _amount
         );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
@@ -477,446 +580,652 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         }
     }
 
-	/// @return wlSpotsPurchased number of spots purchased
-	function buyWlWithLazy() external returns (uint256 wlSpotsPurchased) {
-		if(_mintEconomics.buyWlWithLazy == 0) revert WLPurchaseFailed();
+    /// @return _wlSpotsPurchased number of spots purchased
+    function buyWlWithLazy() external returns (uint256 _wlSpotsPurchased) {
+        if (mintEconomics.buyWlWithLazy == 0) revert WLPurchaseFailed();
 
-		wlSpotsPurchased = _whitelistedAddressQtyMap.contains(msg.sender) ?
-			_whitelistedAddressQtyMap.get(msg.sender) + _mintEconomics.maxWlAddressMint :
-				_mintEconomics.maxWlAddressMint;
+        _wlSpotsPurchased = whitelistedAddressQtyMap.contains(msg.sender)
+            ? whitelistedAddressQtyMap.get(msg.sender) +
+                mintEconomics.maxWlAddressMint
+            : mintEconomics.maxWlAddressMint;
 
-		_whitelistedAddressQtyMap.set(msg.sender, wlSpotsPurchased);
-		takeLazyPayment(_mintEconomics.buyWlWithLazy, msg.sender);
-		emit MinterContractMessage(ContractEventType.WL_PURCHASE_LAZY, msg.sender, wlSpotsPurchased);
-	}
+        whitelistedAddressQtyMap.set(msg.sender, _wlSpotsPurchased);
+        takeLazyPayment(mintEconomics.buyWlWithLazy, msg.sender);
+        emit MinterContractMessage(
+            ContractEventType.WL_PURCHASE_LAZY,
+            msg.sender,
+            _wlSpotsPurchased
+        );
+    }
 
-	/// @return wlSpotsPurchased number of sports purchased
-	function buyWlWithTokens(uint256[] memory serials) external returns (uint256 wlSpotsPurchased) {
-		if(_mintEconomics.wlToken == address(0)) revert NoWLToken();
+	/// @param _serials array of serials to use for purchase
+    /// @return _wlSpotsPurchased number of sports purchased
+    function buyWlWithTokens(
+        uint256[] memory _serials
+    ) external returns (uint256 _wlSpotsPurchased) {
+        if (mintEconomics.wlToken == address(0)) revert NoWLToken();
 
-		for (uint8 i = 0; i < serials.length; i++) {
-			// check no double dipping
-			if(_wlSerialsUsed.contains(serials[i])) revert WLTokenUsed();
-			// check user owns the token
-			if(IERC721(_mintEconomics.wlToken).ownerOf(serials[i]) != msg.sender) revert NotTokenOwner();
-			_wlSerialsUsed.add(serials[i]);
-			emit MinterContractMessage(ContractEventType.WL_PURCHASE_TOKEN, msg.sender, serials[i]);
-		}
+        for (uint8 i = 0; i < _serials.length; i++) {
+            // check no double dipping
+            if (wlSerialsUsed.contains(_serials[i])) revert WLTokenUsed();
+            // check user owns the token
+            if (
+                IERC721(mintEconomics.wlToken).ownerOf(_serials[i]) !=
+                msg.sender
+            ) revert NotTokenOwner();
+            wlSerialsUsed.add(_serials[i]);
+            emit MinterContractMessage(
+                ContractEventType.WL_PURCHASE_TOKEN,
+                msg.sender,
+                _serials[i]
+            );
+        }
 
-		wlSpotsPurchased = _whitelistedAddressQtyMap.contains(msg.sender) ?
-			_whitelistedAddressQtyMap.get(msg.sender) + (_mintEconomics.maxWlAddressMint * serials.length) :
-				(_mintEconomics.maxWlAddressMint * serials.length);
-		_whitelistedAddressQtyMap.set(msg.sender, wlSpotsPurchased);
-	}
+        _wlSpotsPurchased = whitelistedAddressQtyMap.contains(msg.sender)
+            ? whitelistedAddressQtyMap.get(msg.sender) +
+                (mintEconomics.maxWlAddressMint * _serials.length)
+            : (mintEconomics.maxWlAddressMint * _serials.length);
+        whitelistedAddressQtyMap.set(msg.sender, _wlSpotsPurchased);
+    }
 
-	// Transfer hbar out of the contract
-	// using OZ sendValue()
+    // Transfer hbar out of the contract
+    // using OZ sendValue()
     /// @param receiverAddress address in EVM format of the reciever of the hbar
     /// @param amount number of tokens to send (in long form adjusted for decimal)
-    function transferHbar(address payable receiverAddress, uint256 amount)
-        external
-        onlyOwner
-    {
-		if(block.timestamp < (_mintTiming.lastMintTime + _mintTiming.refundWindow)) revert HbarCooldown();
+    function transferHbar(
+        address payable receiverAddress,
+        uint256 amount
+    ) external onlyOwner {
+        if (
+            block.timestamp <
+            (mintTiming.lastMintTime + mintTiming.refundWindow)
+        ) revert HbarCooldown();
         // throws error on failure
         //receiverAddress.transfer(amount);
-		Address.sendValue(receiverAddress, amount);
+        Address.sendValue(receiverAddress, amount);
     }
 
-	// Add an address to the allowance WL
-    /// @param newAddresses array of addresses to add
-    function addToWhitelist(address[] memory newAddresses) external onlyOwner {
-		for (uint256 a = 0 ; a < newAddresses.length; a++ ){
-			bool result = _whitelistedAddressQtyMap.set(newAddresses[a], _mintEconomics.maxWlAddressMint);
-			emit MinterContractMessage(
-				ContractEventType.WL_ADD,
-				newAddresses[a],
-				result ? 1 : 0
-			);
-		}
+    // Add an address to the allowance WL
+    /// @param _newAddresses array of addresses to add
+    function addToWhitelist(address[] memory _newAddresses) external onlyOwner {
+        uint256 _length = _newAddresses.length;
+        for (uint256 a = 0; a < _length; ) {
+            bool result = whitelistedAddressQtyMap.set(
+                _newAddresses[a],
+                mintEconomics.maxWlAddressMint
+            );
+            emit MinterContractMessage(
+                ContractEventType.WL_ADD,
+                _newAddresses[a],
+                result ? 1 : 0
+            );
+
+            unchecked {
+                ++a;
+            }
+        }
     }
 
-	// Remove an address to the allowance WL
-    /// @param oldAddresses the address to remove
-    function removeFromWhitelist(address[] memory oldAddresses) external onlyOwner {
-		for (uint256 a = 0 ; a < oldAddresses.length; a++ ){
-			bool result = _whitelistedAddressQtyMap.remove(oldAddresses[a]);
-			emit MinterContractMessage(
-				ContractEventType.WL_REMOVE,
-				oldAddresses[a],
-				result ? 1 : 0
-			);
-		}
+    // Remove an address to the allowance WL
+    /// @param _oldAddresses the address to remove
+    function removeFromWhitelist(
+        address[] memory _oldAddresses
+    ) external onlyOwner {
+        uint256 _length = _oldAddresses.length;
+        for (uint256 a = 0; a < _length; ) {
+            bool result = whitelistedAddressQtyMap.remove(_oldAddresses[a]);
+            emit MinterContractMessage(
+                ContractEventType.WL_REMOVE,
+                _oldAddresses[a],
+                result ? 1 : 0
+            );
+
+            unchecked {
+                ++a;
+            }
+        }
     }
 
-	// clear the whole WL
-	/// @return numAddressesRemoved how many WL entries were removed. 
-	function clearWhitelist() external onlyOwner returns(uint256 numAddressesRemoved) {
-		numAddressesRemoved = MinterLibrary.clearWhitelist(_whitelistedAddressQtyMap);
-	}
+    // clear the whole WL
+    /// @return _numAddressesRemoved how many WL entries were removed.
+    function clearWhitelist()
+        external
+        onlyOwner
+        returns (uint256 _numAddressesRemoved)
+    {
+        _numAddressesRemoved = MinterLibrary.clearWhitelist(
+            whitelistedAddressQtyMap
+        );
+    }
 
-	// function to allow the burning of NFTs (as long as no fallback fee)
-	// NFTs transfered to the SC and then burnt with contract as supply key
-	/// @param serialNumbers array of serials to burn
-	/// @return newTotalSupply the new total supply of the NFT
-	function burnNFTs(int64[] memory serialNumbers) external returns (uint64 newTotalSupply) {
-		if(serialNumbers.length > 10) revert MaxSerials();
-		// need to transfer back to treasury to burn
-		address[] memory senderList = new address[](serialNumbers.length);
-		address[] memory receiverList = new address[](serialNumbers.length);
-		for (uint256 s = 0 ; s < serialNumbers.length; s++) {
-			senderList[s] = msg.sender;
-			receiverList[s] = address(this);
-		}
+    // function to allow the burning of NFTs (as long as no fallback fee)
+    // NFTs transfered to the SC and then burnt with contract as supply key
+    /// @param _serialNumbers array of serials to burn
+    /// @return _newTotalSupply the new total supply of the NFT
+    function burnNFTs(
+        int64[] memory _serialNumbers
+    ) external returns (uint64 _newTotalSupply) {
+        if (_serialNumbers.length > 10) revert MaxSerials();
+        // need to transfer back to treasury to burn
+        address[] memory senderList = new address[](_serialNumbers.length);
+        address[] memory receiverList = new address[](_serialNumbers.length);
+        uint256 _length = _serialNumbers.length;
+        for (uint256 s = 0; s < _length; ) {
+            senderList[s] = msg.sender;
+            receiverList[s] = address(this);
 
-		// Need to check if this allows approval based transfers, else move it to 'stake' code
-		int32 responseCode = transferNFTs(_token, senderList, receiverList, serialNumbers);
-		// emit events for each transfer
+            unchecked {
+                ++s;
+            }
+        }
 
-		if (responseCode != HederaResponseCodes.SUCCESS) {
-			revert NFTTransferFailed();
-		}
+        // Need to check if this allows approval based transfers, else move it to 'stake' code
+        int32 responseCode = transferNFTs(
+            token,
+            senderList,
+            receiverList,
+            _serialNumbers
+        );
+        // emit events for each transfer
 
-		(responseCode, newTotalSupply) = burnToken(_token, 0, serialNumbers);
-		// emit events for burn
-		emit BurnEvent(msg.sender, serialNumbers, newTotalSupply);
+        if (responseCode != HederaResponseCodes.SUCCESS) {
+            revert NFTTransferFailed();
+        }
 
-		if (responseCode != HederaResponseCodes.SUCCESS) {
+        (responseCode, _newTotalSupply) = burnToken(token, 0, _serialNumbers);
+        // emit events for burn
+        emit BurnEvent(msg.sender, _serialNumbers, _newTotalSupply);
+
+        if (responseCode != HederaResponseCodes.SUCCESS) {
             revert BurnFailed();
         }
-	}
-
-	// unsigned ints so no ability to set a negative cost.
-	/// @param hbarCost in *tinybar*
-	/// @param lazyCost adjusted for the decimal of 1. 
-	function updateCost(uint256 hbarCost, uint256 lazyCost) external onlyOwner {
-		if (_mintEconomics.mintPriceHbar != hbarCost) {
-			_mintEconomics.mintPriceHbar = hbarCost;
-			emit MinterContractMessage(ContractEventType.UPDATE_MINT_PRICE, msg.sender, _mintEconomics.mintPriceHbar);
-		}
-
-		if (_mintEconomics.mintPriceLazy != lazyCost) {
-			_mintEconomics.mintPriceLazy = lazyCost;
-			emit MinterContractMessage(ContractEventType.UPDATE_MINT_PRICE_LAZY, msg.sender, _mintEconomics.mintPriceLazy);
-		}
-	}
-
-	/// @param mintPaused boolean to pause (true) or release (false)
-	/// @return changed indicative of whether a change was made
-	function updatePauseStatus(bool mintPaused) external onlyOwner returns (bool changed) {
-		changed = _mintTiming.mintPaused == mintPaused ? false : true;
-		if (changed) emit MinterContractMessage(mintPaused ? ContractEventType.PAUSE : ContractEventType.UNPAUSE, msg.sender, mintPaused ? 1 : 0);
-		_mintTiming.mintPaused = mintPaused;
-	}
-
-	/// @param wlOnly boolean to lock mint to WL only
-	/// @return changed indicative of whether a change was made
-	function updateWlOnlyStatus(bool wlOnly) external onlyOwner returns (bool changed) {
-		changed = _mintTiming.wlOnly == wlOnly ? false : true;
-		if (changed) emit MinterContractMessage(ContractEventType.UPDATE_WL_ONLY, msg.sender, wlOnly ? 1 : 0);
-		_mintTiming.wlOnly = wlOnly;
-	}
-
-	/// @param prng address of the new PRNG Generator
-	function updatePrng(address prng) external onlyOwner {
-		_prngGenerator = prng;
-	}
-
-	/// @param lazyAmt int amount of Lazy (adjusted for decimals)
-	function setBuyWlWithLazy(uint256 lazyAmt) external onlyOwner returns (bool changed) {
-		changed = _mintEconomics.buyWlWithLazy == lazyAmt ? false : true;
-		if (changed) emit MinterContractMessage(ContractEventType.UPDATE_WL_LAZY_BUY, msg.sender, lazyAmt);
-		_mintEconomics.buyWlWithLazy = lazyAmt;
-	}
-
-	/// @param maxMint int of how many a WL address can mint
-	function setMaxWlAddressMint(uint256 maxMint) external onlyOwner returns (bool changed) {
-		changed = _mintEconomics.maxWlAddressMint == maxMint ? false : true;
-		if (changed) emit MinterContractMessage(ContractEventType.UPDATE_WL_MAX, msg.sender, maxMint);
-		_mintEconomics.maxWlAddressMint = maxMint;
-	}
-	
-	/// @param lazyFromContract boolean to pay (true) or release (false)
-	/// @return changed indicative of whether a change was made
-	function updateContractPaysLazy(bool lazyFromContract) external onlyOwner returns (bool changed) {
-		changed = _mintEconomics.lazyFromContract == lazyFromContract ? false : true;
-		if (changed) emit MinterContractMessage(ContractEventType.UPDATE_LAZY_FROM_CONTRACT, msg.sender, lazyFromContract ? 1 : 0);
-		_mintEconomics.lazyFromContract = lazyFromContract;
-	}
-
-	/// @param startTime new start time in seconds
-    function updateMintStartTime(uint256 startTime) external onlyOwner {
-        _mintTiming.mintStartTime = startTime;
-		emit MinterContractMessage(ContractEventType.UPDATE_MINT_START_TIME, msg.sender, startTime);
     }
 
-	/// @param batchSize updated minting batch just in case
-    function updateBatchSize(uint256 batchSize) external onlyOwner returns (bool changed) {
-		if((batchSize == 0) || (batchSize > 10)) revert BadArguments();
-		changed = _batchSize == batchSize ? false : true;
-    	_batchSize = batchSize;
+    // unsigned ints so no ability to set a negative cost.
+    /// @param _hbarCost in *tinybar*
+    /// @param _lazyCost adjusted for the decimal of 1.
+    function updateCost(
+        uint256 _hbarCost,
+        uint256 _lazyCost
+    ) external onlyOwner {
+        if (mintEconomics.mintPriceHbar != _hbarCost) {
+            mintEconomics.mintPriceHbar = _hbarCost;
+            emit MinterContractMessage(
+                ContractEventType.UPDATE_MINT_PRICE,
+                msg.sender,
+                mintEconomics.mintPriceHbar
+            );
+        }
+
+        if (mintEconomics.mintPriceLazy != _lazyCost) {
+            mintEconomics.mintPriceLazy = _lazyCost;
+            emit MinterContractMessage(
+                ContractEventType.UPDATE_MINT_PRICE_LAZY,
+                msg.sender,
+                mintEconomics.mintPriceLazy
+            );
+        }
     }
 
-	/// @param lbp new Lazy SC Treasury address
-    function updateLazyBurnPercentage(uint256 lbp) external onlyOwner {
-        _lazyDetails.lazyBurnPerc = lbp;
-		emit MinterContractMessage(ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE, msg.sender, lbp);
+    /// @param _mintPaused boolean to pause (true) or release (false)
+    /// @return _changed indicative of whether a change was made
+    function updatePauseStatus(
+        bool _mintPaused
+    ) external onlyOwner returns (bool _changed) {
+        _changed = mintTiming.mintPaused == _mintPaused ? false : true;
+        if (_changed)
+            emit MinterContractMessage(
+                _mintPaused
+                    ? ContractEventType.PAUSE
+                    : ContractEventType.UNPAUSE,
+                msg.sender,
+                _mintPaused ? 1 : 0
+            );
+        mintTiming.mintPaused = _mintPaused;
     }
 
-	/// @param maxMint new max mint (0 = uncapped)
-    function updateMaxMint(uint256 maxMint) external onlyOwner {
-        _mintEconomics.maxMint = maxMint;
-		emit MinterContractMessage(ContractEventType.UPDATE_MAX_MINT, msg.sender, maxMint);
+    /// @param _wlOnly boolean to lock mint to WL only
+    /// @return _changed indicative of whether a change was made
+    function updateWlOnlyStatus(
+        bool _wlOnly
+    ) external onlyOwner returns (bool _changed) {
+        _changed = mintTiming.wlOnly == _wlOnly ? false : true;
+        if (_changed)
+            emit MinterContractMessage(
+                ContractEventType.UPDATE_WL_ONLY,
+                msg.sender,
+                _wlOnly ? 1 : 0
+            );
+        mintTiming.wlOnly = _wlOnly;
     }
 
-	/// @param wlDiscount as percentage
-    function updateWlDiscount(uint256 wlDiscount) external onlyOwner {
-        _mintEconomics.wlDiscount = wlDiscount;
-		emit MinterContractMessage(ContractEventType.UPDATE_WL_DISCOUNT, msg.sender, wlDiscount);
+    /// @param _prng address of the new PRNG Generator
+    function updatePrng(address _prng) external onlyOwner {
+        prngGenerator = _prng;
     }
 
-	/// @param cooldownPeriod cooldown period as seconds
-    function updateCooldown(uint256 cooldownPeriod) external onlyOwner {
-        _mintTiming.cooldownPeriod = cooldownPeriod;
-		emit MinterContractMessage(ContractEventType.UPDATE_COOLDOWN, msg.sender, cooldownPeriod);
+    /// @param _lazyAmt int amount of Lazy (adjusted for decimals)
+    function setBuyWlWithLazy(
+        uint256 _lazyAmt
+    ) external onlyOwner returns (bool _changed) {
+        _changed = mintEconomics.buyWlWithLazy == _lazyAmt ? false : true;
+        if (_changed)
+            emit MinterContractMessage(
+                ContractEventType.UPDATE_WL_LAZY_BUY,
+                msg.sender,
+                _lazyAmt
+            );
+        mintEconomics.buyWlWithLazy = _lazyAmt;
     }
 
-	/// @param refundWindow refund period in seconds / cap on withdrawals
-    function updateRefundWindow(uint256 refundWindow) external onlyOwner {
-        _mintTiming.refundWindow = refundWindow;
-		emit MinterContractMessage(ContractEventType.UPDATE_REFUND_WINDOW, msg.sender, refundWindow);
+    /// @param _maxMint int of how many a WL address can mint
+    function setMaxWlAddressMint(
+        uint256 _maxMint
+    ) external onlyOwner returns (bool _changed) {
+        _changed = mintEconomics.maxWlAddressMint == _maxMint ? false : true;
+        if (_changed)
+            emit MinterContractMessage(
+                ContractEventType.UPDATE_WL_MAX,
+                msg.sender,
+                _maxMint
+            );
+        mintEconomics.maxWlAddressMint = _maxMint;
     }
 
-	/// @param lsct new Lazy SC Treasury address
-    function updateLSCT(address lsct) external onlyOwner {
-        _lazyDetails.lazySCT = IBurnableHTS(lsct);
+    /// @param _lazyFromContract boolean to pay (true) or release (false)
+    /// @return _changed indicative of whether a change was made
+    function updateContractPaysLazy(
+        bool _lazyFromContract
+    ) external onlyOwner returns (bool _changed) {
+        _changed = mintEconomics.lazyFromContract == _lazyFromContract
+            ? false
+            : true;
+        if (_changed)
+            emit MinterContractMessage(
+                ContractEventType.UPDATE_LAZY_FROM_CONTRACT,
+                msg.sender,
+                _lazyFromContract ? 1 : 0
+            );
+        mintEconomics.lazyFromContract = _lazyFromContract;
     }
 
-	/// @return lsct the address set for the current lazy SC Treasury
-    function getLSCT() external view returns (address lsct) {
-    	lsct = address(_lazyDetails.lazySCT);
+    /// @param _startTime new start time in seconds
+    function updateMintStartTime(uint256 _startTime) external onlyOwner {
+        mintTiming.mintStartTime = _startTime;
+        emit MinterContractMessage(
+            ContractEventType.UPDATE_MINT_START_TIME,
+            msg.sender,
+            _startTime
+        );
     }
 
-	/// @param lazy new Lazy FT address
-    function updateLazyToken(address lazy) external onlyOwner {
-        _lazyDetails.lazyToken = lazy;
+    /// @param _batchSize updated minting batch just in case
+    function updateBatchSize(
+        uint256 _batchSize
+    ) external onlyOwner returns (bool _changed) {
+        if ((_batchSize == 0) || (_batchSize > 10)) revert BadArguments();
+        _changed = batchSize == _batchSize ? false : true;
+        batchSize = _batchSize;
     }
 
-	function updateWlToken(address wlToken) external onlyOwner {
-        _mintEconomics.wlToken = wlToken;
-		emit MinterContractMessage(ContractEventType.UPDATE_WL_TOKEN, wlToken, 0);
+    /// @param _lbp new Lazy SC Treasury address
+    function updateLazyBurnPercentage(uint256 _lbp) external onlyOwner {
+        lazyDetails.lazyBurnPerc = _lbp;
+        emit MinterContractMessage(
+            ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE,
+            msg.sender,
+            _lbp
+        );
     }
 
-	function updateMaxMintPerWallet(uint256 max) external onlyOwner {
-        _mintEconomics.maxMintPerWallet = max;
-		emit MinterContractMessage(ContractEventType.UPDATE_MAX_WALLET_MINT, msg.sender, max);
+    /// @param _maxMint new max mint (0 = uncapped)
+    function updateMaxMint(uint256 _maxMint) external onlyOwner {
+        mintEconomics.maxMint = _maxMint;
+        emit MinterContractMessage(
+            ContractEventType.UPDATE_MAX_MINT,
+            msg.sender,
+            _maxMint
+        );
     }
 
-	/// @param cid new cid
-    function updateCID(string memory cid) external onlyOwner {
-        _cid = cid;
-		emit MinterContractMessage(ContractEventType.UPDATE_CID, msg.sender, 0);
+    /// @param _wlDiscount as percentage
+    function updateWlDiscount(uint256 _wlDiscount) external onlyOwner {
+        mintEconomics.wlDiscount = _wlDiscount;
+        emit MinterContractMessage(
+            ContractEventType.UPDATE_WL_DISCOUNT,
+            msg.sender,
+            _wlDiscount
+        );
     }
 
-	/// @param metadata new metadata array
-    function updateMetadataArray(string[] memory metadata, uint256 startIndex) external onlyOwner {
-		// enforce consistency of the metadata list
-		if((startIndex + metadata.length) > _metadata.length) revert TooMuchMetadata();
-		uint256 index = 0;
-		for (uint256 i = startIndex; i < (startIndex + metadata.length); ) {
-			_metadata[i] = metadata[index];
-			index++;
-			unchecked {
-				++i;
-			}
-		}
+    /// @param _cooldownPeriod cooldown period as seconds
+    function updateCooldown(uint256 _cooldownPeriod) external onlyOwner {
+        mintTiming.cooldownPeriod = _cooldownPeriod;
+        emit MinterContractMessage(
+            ContractEventType.UPDATE_COOLDOWN,
+            msg.sender,
+            _cooldownPeriod
+        );
     }
 
-	// method to push metadata end points up
-	function addMetadata(string[] memory metadata) external onlyOwner returns (uint256 totalLoaded) {
-		if (_token != address(0)) {
-			if((_totalMinted + _metadata.length + metadata.length) > _maxSupply) revert TooMuchMetadata();
-		}
-		for (uint256 i = 0; i < metadata.length; ) {
-			_metadata.push(metadata[i]);
-
-			unchecked {
-				++i;
-			}
-		}
-		totalLoaded = _metadata.length;
-	}
-
-	// Helper method to strip storage requirements
-	// boolean toggle to remove the token ID if full reset
-	/// @param removeToken reset token to zero address
-	/// @param batch allow for batched reset
-	function resetContract(bool removeToken, uint256 batch) external onlyOwner {
-		if (removeToken) {
-			_token = address(0);
-			_totalMinted = 0;
-		}
-		MinterLibrary.resetContract(
-			_addressToNumMintedMap, 
-			_metadata, 
-			_walletMintTimeMap, 
-			_wlAddressToNumMintedMap, 
-			_serialMintTimeMap, 
-			_wlSerialsUsed,
-			batch);
-
-		emit MinterContractMessage(
-			removeToken ? ContractEventType.RESET_INC_TOKEN : ContractEventType.RESET_CONTRACT, 
-			msg.sender, 
-			batch);
-	}
-
-	/// @return metadataList of metadata unminted
-	// no point in obfuscating the ability to view unminted metadata
-	// technical workarounds are trivial.
-    function getMetadataArray(uint256 startIndex, uint256 endIndex) 
-		external view 
-		returns (string[] memory metadataList) 
-	{
-		if(endIndex <= startIndex) revert BadArguments();
-		if(endIndex > _metadata.length) revert TooMuchMetadata();
-		metadataList = new string[](endIndex - startIndex);
-		uint256 index = 0;
-        for (uint256 i = startIndex; i < endIndex; ) {
-			metadataList[index] = _metadata[i];
-			index++;
-			unchecked {
-				++i;
-			}
-		}
+    /// @param _refundWindow refund period in seconds / cap on withdrawals
+    function updateRefundWindow(uint256 _refundWindow) external onlyOwner {
+        mintTiming.refundWindow = _refundWindow;
+        emit MinterContractMessage(
+            ContractEventType.UPDATE_REFUND_WINDOW,
+            msg.sender,
+            _refundWindow
+        );
     }
 
-	/// @return token the address for the NFT to be minted
-    function getNFTTokenAddress() external view returns (address token) {
-    	token = _token;
+    /// @param _lsct new Lazy SC Treasury address
+    function updateLSCT(address _lsct) external onlyOwner {
+        lazyDetails.lazySCT = IBurnableHTS(_lsct);
     }
 
-	/// @return lazy the address set for Lazy FT token
-    function getLazyToken() external view returns (address lazy) {
-    	lazy = _lazyDetails.lazyToken;
+    /// @return _lsct the address set for the current lazy SC Treasury
+    function getLSCT() external view returns (address _lsct) {
+        _lsct = address(lazyDetails.lazySCT);
     }
 
-	/// @return numMinted helper function to check how many a wallet has minted
-	function getNumberMintedByAddress() external view returns(uint256 numMinted) {
-		bool found;
-		uint256 numPreviouslyMinted;
-		(found, numPreviouslyMinted) = _addressToNumMintedMap.tryGet(msg.sender);
-		if (found) {
-			numMinted = numPreviouslyMinted;
-		}
-		else {
-			numMinted = 0;
-		}
-	}
-
-	// Likely only viable with smaller mints
-	/// @return walletList list of wallets who minted
-	/// @return numMintedList lst of number minted
-	function getNumberMintedByAllAddresses() external view onlyOwner returns(address[] memory walletList, uint256[] memory numMintedList) {
-		walletList = new address[](_addressToNumMintedMap.length());
-		numMintedList = new uint256[](_addressToNumMintedMap.length());
-		for (uint256 a = 0; a < _addressToNumMintedMap.length(); ) {
-			(walletList[a], numMintedList[a]) = _addressToNumMintedMap.at(a);
-			unchecked {
-				++a;
-			}
-		}
-	}
-
-	/// @return wlNumMinted helper function to check how many a wallet has minted
-	function getNumberMintedByWlAddress() external view returns(uint256 wlNumMinted) {
-		bool found;
-		uint256 numPreviouslyMinted;
-		(found, numPreviouslyMinted) = _wlAddressToNumMintedMap.tryGet(msg.sender);
-		if (found) {
-			wlNumMinted = numPreviouslyMinted;
-		}
-		else {
-			wlNumMinted = 0;
-		}
-	}
-
-	// Likely only viable with smaller mints
-	// else gather via events emitted.
-	// TODO: Create a batched retrieval
-	/// @return wlWalletList list of wallets who minted
-	/// @return wlNumMintedList lst of number minted
-	function getNumberMintedByAllWlAddresses() external view returns(address[] memory wlWalletList, uint256[] memory wlNumMintedList) {
-		(wlWalletList, wlNumMintedList) = MinterLibrary.getNumberMintedByAllWlAddressesBatch(_wlAddressToNumMintedMap, 0, _wlAddressToNumMintedMap.length());
-	}
-
-	function getNumberMintedByAllWlAddressesBatch(uint256 offset, uint256 batchSize) external view returns(address[] memory wlWalletList, uint256[] memory wlNumMintedList) {
-		(wlWalletList, wlNumMintedList) = MinterLibrary.getNumberMintedByAllWlAddressesBatch(_wlAddressToNumMintedMap, offset, batchSize);
-	}
-
-	/// @return remainingMint number of NFTs left to mint
-    function getRemainingMint() external view returns (uint256 remainingMint) {
-    	remainingMint = _metadata.length;
+    /// @param _lazy new Lazy FT address
+    function updateLazyToken(address _lazy) external onlyOwner {
+        lazyDetails.lazyToken = _lazy;
     }
 
-	/// @return batchSize the size for mint/transfer
-    function getBatchSize() external view returns (uint256 batchSize) {
-    	batchSize = _batchSize;
+    function updateWlToken(address _wlToken) external onlyOwner {
+        mintEconomics.wlToken = _wlToken;
+        emit MinterContractMessage(
+            ContractEventType.UPDATE_WL_TOKEN,
+            _wlToken,
+            0
+        );
     }
 
-	/// @return lazyBurn percentage of lazy to brun each interaction
-    function getLazyBurnPercentage() external view returns (uint256 lazyBurn) {
-    	lazyBurn = _lazyDetails.lazyBurnPerc;
+    function updateMaxMintPerWallet(uint256 _max) external onlyOwner {
+        mintEconomics.maxMintPerWallet = _max;
+        emit MinterContractMessage(
+            ContractEventType.UPDATE_MAX_WALLET_MINT,
+            msg.sender,
+            _max
+        );
     }
 
-	/// Check the current Whitelist for minting
-    /// @return wl an array of addresses on WL
-	/// @return wlQty an array of the number of mints allowed
+    /// @param _cid new _cid
+    function updateCID(string memory _cid) external onlyOwner {
+        cid = _cid;
+        emit MinterContractMessage(ContractEventType.UPDATE_CID, msg.sender, 0);
+    }
+
+    /// @param _metadata new _metadata array
+    function updateMetadataArray(
+        string[] memory _metadata,
+        uint256 _startIndex
+    ) external onlyOwner {
+        // enforce consistency of the _metadata list
+        if ((_startIndex + _metadata.length) > metadata.length)
+            revert TooMuchMetadata();
+        uint256 index = 0;
+        for (uint256 i = _startIndex; i < (_startIndex + _metadata.length); ) {
+            metadata[i] = _metadata[index];
+            index++;
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    // method to push _metadata end points up
+    function addMetadata(
+        string[] memory _metadata
+    ) external onlyOwner returns (uint256 _totalLoaded) {
+        if (token != address(0)) {
+            if ((totalMinted + metadata.length + _metadata.length) > maxSupply)
+                revert TooMuchMetadata();
+        }
+        for (uint256 i = 0; i < _metadata.length; ) {
+            metadata.push(_metadata[i]);
+
+            unchecked {
+                ++i;
+            }
+        }
+        _totalLoaded = metadata.length;
+    }
+
+    // Helper method to strip storage requirements
+    // boolean toggle to remove the token ID if full reset
+    /// @param _removeToken reset token to zero address
+    /// @param _batch allow for batched reset
+    function resetContract(
+        bool _removeToken,
+        uint256 _batch
+    ) external onlyOwner {
+        if (_removeToken) {
+            token = address(0);
+            totalMinted = 0;
+        }
+        MinterLibrary.resetContract(
+            addressToNumMintedMap,
+            metadata,
+            walletMintTimeMap,
+            wlAddressToNumMintedMap,
+            serialMintTimeMap,
+            wlSerialsUsed,
+            _batch
+        );
+
+        emit MinterContractMessage(
+            _removeToken
+                ? ContractEventType.RESET_INC_TOKEN
+                : ContractEventType.RESET_CONTRACT,
+            msg.sender,
+            _batch
+        );
+    }
+
+    /// @return _metadataList of _metadata unminted
+    // no point in obfuscating the ability to view unminted _metadata
+    // technical workarounds are trivial.
+    function getMetadataArray(
+        uint256 _startIndex,
+        uint256 _endIndex
+    ) external view returns (string[] memory _metadataList) {
+        if (_endIndex <= _startIndex) revert BadArguments();
+        if (_endIndex > metadata.length) revert TooMuchMetadata();
+        _metadataList = new string[](_endIndex - _startIndex);
+        uint256 index = 0;
+        for (uint256 i = _startIndex; i < _endIndex; ) {
+            _metadataList[index] = metadata[i];
+            index++;
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /// @return _token the address for the NFT to be minted
+    function getNFTTokenAddress() external view returns (address _token) {
+        _token = token;
+    }
+
+    /// @return _lazy the address set for Lazy FT token
+    function getLazyToken() external view returns (address _lazy) {
+        _lazy = lazyDetails.lazyToken;
+    }
+
+    /// @return _numMinted helper function to check how many a wallet has minted
+    function getNumberMintedByAddress()
+        external
+        view
+        returns (uint256 _numMinted)
+    {
+        bool found;
+        uint256 numPreviouslyMinted;
+        (found, numPreviouslyMinted) = addressToNumMintedMap.tryGet(msg.sender);
+        if (found) {
+            _numMinted = numPreviouslyMinted;
+        } else {
+            _numMinted = 0;
+        }
+    }
+
+    // Likely only viable with smaller mints
+    /// @return _walletList list of wallets who minted
+    /// @return _numMintedList lst of number minted
+    function getNumberMintedByAllAddresses()
+        external
+        view
+        onlyOwner
+        returns (address[] memory _walletList, uint256[] memory _numMintedList)
+    {
+        _walletList = new address[](addressToNumMintedMap.length());
+        _numMintedList = new uint256[](addressToNumMintedMap.length());
+        uint256 _length = addressToNumMintedMap.length();
+        for (uint256 a = 0; a < _length; ) {
+            (_walletList[a], _numMintedList[a]) = addressToNumMintedMap.at(a);
+            unchecked {
+                ++a;
+            }
+        }
+    }
+
+    /// @return _wlNumMinted helper function to check how many a wallet has minted
+    function getNumberMintedByWlAddress()
+        external
+        view
+        returns (uint256 _wlNumMinted)
+    {
+        bool found;
+        uint256 numPreviouslyMinted;
+        (found, numPreviouslyMinted) = wlAddressToNumMintedMap.tryGet(
+            msg.sender
+        );
+        if (found) {
+            _wlNumMinted = numPreviouslyMinted;
+        } else {
+            _wlNumMinted = 0;
+        }
+    }
+
+    // Likely only viable with smaller mints
+    // else gather via events emitted.
+    // TODO: Create a batched retrieval
+    /// @return _wlWalletList list of wallets who minted
+    /// @return _wlNumMintedList lst of number minted
+    function getNumberMintedByAllWlAddresses()
+        external
+        view
+        returns (
+            address[] memory _wlWalletList,
+            uint256[] memory _wlNumMintedList
+        )
+    {
+        (_wlWalletList, _wlNumMintedList) = MinterLibrary
+            .getNumberMintedByAllWlAddressesBatch(
+                wlAddressToNumMintedMap,
+                0,
+                wlAddressToNumMintedMap.length()
+            );
+    }
+
+    function getNumberMintedByAllWlAddressesBatch(
+        uint256 _offset,
+        uint256 _batchSize
+    )
+        external
+        view
+        returns (
+            address[] memory _wlWalletList,
+            uint256[] memory _wlNumMintedList
+        )
+    {
+        (_wlWalletList, _wlNumMintedList) = MinterLibrary
+            .getNumberMintedByAllWlAddressesBatch(
+                wlAddressToNumMintedMap,
+                _offset,
+                _batchSize
+            );
+    }
+
+    /// @return _remainingMint number of NFTs left to mint
+    function getRemainingMint() external view returns (uint256 _remainingMint) {
+        _remainingMint = metadata.length;
+    }
+
+    /// @return _batchSize the size for mint/transfer
+    function getBatchSize() external view returns (uint256 _batchSize) {
+        _batchSize = batchSize;
+    }
+
+    /// @return _lazyBurn percentage of lazy to brun each interaction
+    function getLazyBurnPercentage() external view returns (uint256 _lazyBurn) {
+        _lazyBurn = lazyDetails.lazyBurnPerc;
+    }
+
+    /// Check the current Whitelist for minting
+    /// @return _wl an array of addresses on WL
+    /// @return _wlQty an array of the number of mints allowed
     function getWhitelist()
         external
         view
-        returns (address[] memory wl, uint256[] memory wlQty)
+        returns (address[] memory _wl, uint256[] memory _wlQty)
     {
-        wl = new address[](_whitelistedAddressQtyMap.length());
-		wlQty = new uint256[](_whitelistedAddressQtyMap.length());
-		
-		for (uint256 a = 0; a < _whitelistedAddressQtyMap.length(); ) {
-			(wl[a], wlQty[a]) = _whitelistedAddressQtyMap.at(a);
-			unchecked {
-				++a;
-			}
-		}
+        uint256 _length = whitelistedAddressQtyMap.length();
+        _wl = new address[](_length);
+        _wlQty = new uint256[](_length);
+
+        for (uint256 a = 0; a < _length; ) {
+            (_wl[a], _wlQty[a]) = whitelistedAddressQtyMap.at(a);
+            unchecked {
+                ++a;
+            }
+        }
     }
 
-	/// @return mintEconomics basic struct with mint economics details
-	function getMintEconomics() external view returns (MintEconomics memory mintEconomics){
-		mintEconomics = _mintEconomics;
-	}
+    /// @return _mintEconomics basic struct with mint economics details
+    function getMintEconomics()
+        external
+        view
+        returns (MintEconomics memory _mintEconomics)
+    {
+        _mintEconomics = mintEconomics;
+    }
 
-	/// @return mintTiming basic struct with mint economics details
-	function getMintTiming() external view returns (MintTiming memory mintTiming){
-		mintTiming = _mintTiming;
-	}
+    /// @return _mintTiming basic struct with mint economics details
+    function getMintTiming()
+        external
+        view
+        returns (MintTiming memory _mintTiming)
+    {
+        _mintTiming = mintTiming;
+    }
 
     // Check if the address is in the WL
     /// @param addressToCheck the address to check in WL
-    /// @return inWl if in the WL
-	/// @return qty the number of WL mints (0 = unbounded)
-    function isAddressWL(address addressToCheck) external view returns (bool inWl, uint256 qty) {
-		(inWl, qty) = _whitelistedAddressQtyMap.tryGet(addressToCheck);
+    /// @return _inWl if in the WL
+    /// @return _qty the number of WL mints (0 = unbounded)
+    function isAddressWL(
+        address addressToCheck
+    ) external view returns (bool _inWl, uint256 _qty) {
+        (_inWl, _qty) = whitelistedAddressQtyMap.tryGet(addressToCheck);
     }
 
-	/// Stack too deep - so split out
-	function emitMintEvent(
-		bool isWlMint,
-		int64 serial,
-		bytes memory metadata
-	) internal {
-		emit MintEvent(msg.sender, isWlMint, serial.toUint256(), string(metadata));
-	}
+    /// Stack too deep - so split out
+    function emitMintEvent(
+        bool _isWlMint,
+        int64 _serial,
+        bytes memory _metadata
+    ) internal {
+        emit MintEvent(
+            msg.sender,
+            _isWlMint,
+            _serial.toUint256(),
+            string(_metadata)
+        );
+    }
 
-	receive() external payable { }
+    receive() external payable {}
 
-    fallback() external payable { }
-
+    fallback() external payable {}
 }

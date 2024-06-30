@@ -4,10 +4,12 @@ Will mint test $LAZY when needed.
 Refactored post Hedera Solidity Security Change
 
 ## on-click mint
+[non random metadata]
 ~700k for singular mint.
+~860k for two mints
 ~7,400k for 19 mints
 
-Estimate 400k base gas + 370 per mint (?)
+Estimate 600k base gas (per 10 mints) + 325 per mint (?)
 
 ## on gas
 $0.000,000,0569 per gwei

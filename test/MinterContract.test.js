@@ -2176,7 +2176,7 @@ describe('Test out WL functions...', function() {
 		}
 
 		// mirror node can take a few seconds to update
-		await sleep(4000);
+		await sleep(5000);
 
 		// call getWhitelist from the mirror node
 		const encodedCommand = minterIface.encodeFunctionData('getWhitelist');
@@ -2191,7 +2191,10 @@ describe('Test out WL functions...', function() {
 
 		let wl = minterIface.decodeFunctionResult('getWhitelist', result);
 
-		expect(wl[0].length == 0).to.be.true;
+		if (wl[0].length != 0) {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// by default unable to buy in with LAZY - check assumption
 		client.setOperator(aliceId, alicePK);
@@ -3075,7 +3078,7 @@ describe('Test out refund functions...', function() {
 			contractId,
 			minterIface,
 			client,
-			1_200_000,
+			1_000_000,
 			'mintNFT',
 			[2],
 			new Hbar(cost * 2),
@@ -3089,8 +3092,10 @@ describe('Test out refund functions...', function() {
 
 		console.log('Mint (2) tx:', result[2]?.transactionId?.toString());
 
-		// call getNumberMintedByAllAddresses from the mirror node
-		const encodedCommand = minterIface.encodeFunctionData('getNumberMintedByAllAddresses');
+		await sleep(5000);
+
+		// call totalMinted from the mirror node
+		const encodedCommand = minterIface.encodeFunctionData('totalMinted');
 
 		result = await readOnlyEVMFromMirrorNode(
 			env,
@@ -3100,17 +3105,7 @@ describe('Test out refund functions...', function() {
 			false,
 		);
 
-		const minted = minterIface.decodeFunctionResult('getNumberMintedByAllAddresses', result);
-
-
-		const walletList = minted[0];
-		const numMints = minted[1];
-		let totalMinted = 0;
-
-		// gather total minted
-		for (let w = 0; w < walletList.length; w++) {
-			totalMinted += Number(numMints[w]);
-		}
+		const totalMinted = minterIface.decodeFunctionResult('totalMinted', result);
 
 		// Alice now burns her NFTs
 		const serialsAsNum = [];
@@ -3137,7 +3132,11 @@ describe('Test out refund functions...', function() {
 			fail();
 		}
 		// check supply is now 2 less
-		expect(totalMinted == (Number(result[1][0]) + 2)).to.be.true;
+
+		if (Number(totalMinted[0]) != (Number(result[1][0]) + 2)) {
+			console.log('Error:', totalMinted, result);
+			fail();
+		}
 	});
 
 	it.skip('Enable refund (& burn), mint then refund - hbar', async function() {
