@@ -697,7 +697,7 @@ interface IHederaTokenService {
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
     function freezeToken(address token, address account)
         external
-        returns (int64 responseCode);
+        returns (int32 responseCode);
 
     /// Operation to unfreeze token account
     /// @param token The token address
@@ -705,7 +705,7 @@ interface IHederaTokenService {
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
     function unfreezeToken(address token, address account)
         external
-        returns (int64 responseCode);
+        returns (int32 responseCode);
 
     /// Operation to grant kyc to token account
     /// @param token The token address

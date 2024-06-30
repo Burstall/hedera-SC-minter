@@ -185,7 +185,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
     /// @return tokenAddress the created token's address
     function createNonFungibleToken(IHederaTokenService.HederaToken memory token) nonEmptyExpiry(token)
-    internal returns (int responseCode, address tokenAddress) {
+    internal returns (int32 responseCode, address tokenAddress) {
         (bool success, bytes memory result) = precompileAddress.call{value : msg.value}(
             abi.encodeWithSelector(IHederaTokenService.createNonFungibleToken.selector, token));
         (responseCode, tokenAddress) = success ? abi.decode(result, (int32, address)) : (HederaResponseCodes.UNKNOWN, address(0));
@@ -342,7 +342,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
     /// @param token The token address
     /// @param account The account address to be frozen
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
-    function freezeToken(address token, address account) internal returns (int64 responseCode){
+    function freezeToken(address token, address account) internal returns (int32 responseCode){
         (bool success, bytes memory result) = precompileAddress.call(
             abi.encodeWithSelector(IHederaTokenService.freezeToken.selector, token, account));
         (responseCode) = success ? abi.decode(result, (int32)) : HederaResponseCodes.UNKNOWN;
@@ -352,7 +352,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
     /// @param token The token address
     /// @param account The account address to be unfrozen
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
-    function unfreezeToken(address token, address account) internal returns (int64 responseCode){
+    function unfreezeToken(address token, address account) internal returns (int32 responseCode){
         (bool success, bytes memory result) = precompileAddress.call(
             abi.encodeWithSelector(IHederaTokenService.unfreezeToken.selector, token, account));
         (responseCode) = success ? abi.decode(result, (int32)) : HederaResponseCodes.UNKNOWN;
