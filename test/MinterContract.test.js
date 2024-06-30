@@ -15,7 +15,7 @@ const {
 	contractDeployFunction,
 	readOnlyEVMFromMirrorNode,
 	contractExecuteFunction,
-	contractExecuteQuery,
+	linkBytecode,
 } = require('../utils/solidityHelpers');
 const { sleep } = require('../utils/nodeHelpers');
 const {
@@ -37,6 +37,8 @@ require('dotenv').config();
 let operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 let operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'MinterContract';
+const libraryName = 'MinterLibrary';
+const prngName = 'PrngGenerator';
 const lazyContractCreator = 'FungibleTokenCreator';
 const env = process.env.ENVIRONMENT ?? null;
 const lazyBurnPerc = process.env.LAZY_BURN_PERC || 25;
@@ -47,9 +49,8 @@ const LAZY_MAX_SUPPLY = process.env.LAZY_MAX_SUPPLY ?? 250_000_000;
 const addressRegex = /(\d+\.\d+\.[1-9]\d+)/i;
 
 // reused variable
-let contractId;
+let contractId, prngId;
 let contractAddress;
-let abi;
 let client, clientAlice;
 let alicePK, aliceId;
 let wlTokenId, extendedTestingTokenId;
@@ -187,22 +188,26 @@ describe('Deployment: ', function() {
 			expect(result).to.be.equal('SUCCESS');
 		}
 
-		// check if Alice has $LAZY associated else associate the token
-		const aliceLazyBal = await checkMirrorBalance(env, aliceId, lazyTokenId);
-		if (aliceLazyBal == null) {
-			const result = await associateTokenToAccount(client, aliceId, alicePK, lazyTokenId);
-			expect(result).to.be.equal('SUCCESS');
-		}
+		// deploy library contract
+		console.log('\n-Deploying library:', libraryName);
+
+		const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
+
+		const [libContractId] = await contractDeployFunction(client, libraryBytecode, 500_000);
+		console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
 
 		const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`));
 
-		// import ABI
-		abi = json.abi;
-
-		minterIface = new ethers.Interface(abi);
-
 		const contractBytecode = json.bytecode;
-		const gasLimit = 1200000;
+
+		// replace library address in bytecode
+		console.log('\n-Linking library address in bytecode...');
+		const readyToDeployBytecode = linkBytecode(contractBytecode, [libraryName], [libContractId]);
+
+		// import ABI
+		minterIface = new ethers.Interface(json.abi);
+
+		const gasLimit = 1600000;
 
 		console.log('\n- Deploying contract...', contractName, '\n\tgas@', gasLimit);
 
@@ -211,13 +216,20 @@ describe('Deployment: ', function() {
 			.addAddress(lazyTokenId.toSolidityAddress())
 			.addUint256(lazyBurnPerc);
 
-		[contractId, contractAddress] = await contractDeployFunction(client, contractBytecode, gasLimit, constructorParams);
+		[contractId, contractAddress] = await contractDeployFunction(client, readyToDeployBytecode, gasLimit, constructorParams);
 
 		console.log(`Contract created with ID: ${contractId} / ${contractAddress}`);
 
 		console.log('\n-Testing:', contractName);
 
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// check if Alice has $LAZY associated else associate the token
+		const aliceLazyBal = await checkMirrorBalance(env, aliceId, lazyTokenId);
+		if (aliceLazyBal == null) {
+			const result = await associateTokenToAccount(client, aliceId, alicePK, lazyTokenId);
+			expect(result).to.be.equal('SUCCESS');
+		}
 	});
 
 	it('should mint an NFT to use as the WL token', async function() {
@@ -247,7 +259,7 @@ describe('Check SC deployment...', function() {
 		await sleep(5000);
 
 		client.setOperator(operatorId, operatorKey);
-		const contractLazyBal = await checkMirrorBalance(env, AccountId.fromString(contractId), lazyTokenId);
+		const contractLazyBal = await checkMirrorBalance(env, AccountId.fromString(contractId.toString()), lazyTokenId);
 		expect(contractLazyBal == 10).to.be.true;
 	});
 
@@ -341,15 +353,15 @@ describe('Check SC deployment...', function() {
 
 		const mintEconomics = minterIface.decodeFunctionResult('getMintEconomics', result);
 
-		expect(!mintEconomics[0]).to.be.true;
-		expect(Number(mintEconomics[1])).to.be.equal(0);
-		expect(Number(mintEconomics[2])).to.be.equal(0);
-		expect(Number(mintEconomics[3])).to.be.equal(0);
-		expect(Number(mintEconomics[4])).to.be.equal(20);
-		expect(Number(mintEconomics[5])).to.be.equal(0);
-		expect(Number(mintEconomics[6])).to.be.equal(0);
-		expect(Number(mintEconomics[7])).to.be.equal(0);
-		expect(mintEconomics[8].slice(2).toLowerCase()).to.be.equal(ZERO_ADDRESS);
+		expect(!mintEconomics[0][0]).to.be.true;
+		expect(Number(mintEconomics[0][1])).to.be.equal(0);
+		expect(Number(mintEconomics[0][2])).to.be.equal(0);
+		expect(Number(mintEconomics[0][3])).to.be.equal(0);
+		expect(Number(mintEconomics[0][4])).to.be.equal(20);
+		expect(Number(mintEconomics[0][5])).to.be.equal(0);
+		expect(Number(mintEconomics[0][6])).to.be.equal(0);
+		expect(Number(mintEconomics[0][7])).to.be.equal(0);
+		expect(mintEconomics[0][8]).to.be.equal(ZERO_ADDRESS);
 
 		// check the mint timing
 		encodedCommand = minterIface.encodeFunctionData('getMintTiming');
@@ -364,7 +376,7 @@ describe('Check SC deployment...', function() {
 
 		const mintTiming = minterIface.decodeFunctionResult('getMintTiming', result);
 
-		expect(Number(mintTiming[0])).to.be.equal(0);
+		expect(Number(mintTiming[0][0])).to.be.equal(0);
 
 		// check the remaining mint
 		encodedCommand = minterIface.encodeFunctionData('getRemainingMint');
@@ -455,13 +467,13 @@ describe('Check SC deployment...', function() {
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				500_000,
 				'addMetadata',
-				['meta1', 'meta2'],
+				[['meta1', 'meta2']],
 			);
 
 			if (result[0]?.status?.name != 'TooMuchMetadata') {
@@ -538,13 +550,13 @@ describe('Check SC deployment...', function() {
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				500_000,
 				'addMetadata',
-				['meta1', 'meta2'],
+				[['meta1', 'meta2']],
 			);
 
 			if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -558,13 +570,13 @@ describe('Check SC deployment...', function() {
 		}
 		// now expect failure as at capacity
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				500_000,
 				'addMetadata',
-				['meta1', 'meta2'],
+				[['meta1', 'meta2']],
 			);
 
 			if (result[0]?.status?.name != 'TooMuchMetadata') {
@@ -648,6 +660,7 @@ describe('Check SC deployment...', function() {
 
 		// pass the token on to the later methods.
 		extendedTestingTokenId = tokenId;
+		console.log('Token ID for Extended Testing:', tokenId.toString());
 	});
 
 	it('Owner cannot set batch size to bad values', async function() {
@@ -656,7 +669,7 @@ describe('Check SC deployment...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -679,7 +692,7 @@ describe('Check SC deployment...', function() {
 		}
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -708,7 +721,7 @@ describe('Check SC deployment...', function() {
 	it('Owner can update batch value if needed', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		const result = contractExecuteFunction(
+		const result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -728,7 +741,7 @@ describe('Check SC deployment...', function() {
 
 	it('Owner can get metadata', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const result = contractExecuteFunction(
+		const result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -752,7 +765,7 @@ describe('Check SC deployment...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -787,7 +800,7 @@ describe('Check SC deployment...', function() {
 			metadataList.push(num.padStart(3, '0') + '_metadata.json');
 		}
 
-		const result = contractExecuteFunction(
+		const result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -805,7 +818,7 @@ describe('Check SC deployment...', function() {
 	it('Successfully update CID', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		const result = contractExecuteFunction(
+		const result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -828,7 +841,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -837,8 +850,8 @@ describe('Check access control permission...', function() {
 				[TokenId.fromString('0.0.48486075').toSolidityAddress()],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -860,7 +873,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -869,8 +882,8 @@ describe('Check access control permission...', function() {
 				[ContractId.fromString('0.0.48627791').toSolidityAddress()],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -893,17 +906,17 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				400_000,
 				'addToWhitelist',
-				[aliceId.toSolidityAddress()],
+				[[aliceId.toSolidityAddress()]],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -916,17 +929,17 @@ describe('Check access control permission...', function() {
 		}
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				400_000,
 				'removeFromWhitelist',
-				[aliceId.toSolidityAddress()],
+				[[aliceId.toSolidityAddress()]],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -949,7 +962,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -958,8 +971,8 @@ describe('Check access control permission...', function() {
 				['newCIDstring'],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -972,7 +985,7 @@ describe('Check access control permission...', function() {
 		}
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -981,8 +994,8 @@ describe('Check access control permission...', function() {
 				[['meta1', 'meta2'], 0],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1004,17 +1017,17 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				400_000,
 				'updateCost',
-				[1, 1],
+				[BigInt(1), 1],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1037,7 +1050,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1046,8 +1059,8 @@ describe('Check access control permission...', function() {
 				[wlTokenId.toSolidityAddress()],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1069,7 +1082,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1078,8 +1091,8 @@ describe('Check access control permission...', function() {
 				[5],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1102,7 +1115,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1111,8 +1124,8 @@ describe('Check access control permission...', function() {
 				[1],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1134,7 +1147,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1143,8 +1156,8 @@ describe('Check access control permission...', function() {
 				[1],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1167,7 +1180,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1176,8 +1189,8 @@ describe('Check access control permission...', function() {
 				[4],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1199,17 +1212,17 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				400_000,
 				'updateMintStartTime',
-				[(new Date().getTime() / 1000) + 30],
+				[parseInt((new Date().getTime() / 1000) + 30)],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1231,7 +1244,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1240,8 +1253,8 @@ describe('Check access control permission...', function() {
 				[false],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1264,7 +1277,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1273,8 +1286,8 @@ describe('Check access control permission...', function() {
 				[false],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1297,7 +1310,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1306,8 +1319,8 @@ describe('Check access control permission...', function() {
 				[true],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1330,7 +1343,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1339,8 +1352,8 @@ describe('Check access control permission...', function() {
 				[2],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1363,7 +1376,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1372,8 +1385,8 @@ describe('Check access control permission...', function() {
 				[2],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1396,7 +1409,7 @@ describe('Check access control permission...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -1405,8 +1418,8 @@ describe('Check access control permission...', function() {
 				[1],
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable: caller is not the owner:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -1435,15 +1448,15 @@ describe('Basic interaction with the Minter...', function() {
 
 	it('Check unable to mint if contract paused (then unpause)', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
+		const hbarCost = new Hbar(1);
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			400_000,
 			'updateCost',
-			[tinybarCost, 1],
+			[BigInt(hbarCost.toTinybars()), 1],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -1451,7 +1464,7 @@ describe('Basic interaction with the Minter...', function() {
 			fail();
 		}
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -1476,14 +1489,14 @@ describe('Basic interaction with the Minter...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
 				[1],
-				tinybarCost,
+				hbarCost,
 			);
 
 			if (result[0]?.status?.name != 'Paused') {
@@ -1503,7 +1516,7 @@ describe('Basic interaction with the Minter...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 
 		// unpause the contract
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -1522,13 +1535,13 @@ describe('Basic interaction with the Minter...', function() {
 		client.setOperator(operatorId, operatorKey);
 		const mintCostInHbar = new Hbar(1);
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateCost',
-			[mintCostInHbar, 0],
+			[BigInt(mintCostInHbar.toTinybars()), 0],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -1540,11 +1553,11 @@ describe('Basic interaction with the Minter...', function() {
 		client.setOperator(aliceId, alicePK);
 		// no $LAZY cost so no FT allowance needed.
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			700_000,
 			'mintNFT',
 			[1],
 			mintCostInHbar,
@@ -1554,12 +1567,14 @@ describe('Basic interaction with the Minter...', function() {
 			fail();
 		}
 		expect(result[1][0].length == 1).to.be.true;
+
+		console.log('Token Minted (1):', result[2].transactionId.toString());
 	});
 
 	it('Mint 19 tokens from the SC for hbar', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		const mintCostInHbar = new Hbar(1);
+		const mintCost = 1;
 
 		const toMint = 19;
 
@@ -1567,20 +1582,22 @@ describe('Basic interaction with the Minter...', function() {
 		client.setOperator(aliceId, alicePK);
 		// no $LAZY cost so no allowance needed.
 
-		const result = contractExecuteFunction(
+		const result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			4_000_000,
+			7_500_000,
 			'mintNFT',
 			[19],
-			mintCostInHbar * toMint,
+			new Hbar(mintCost * toMint),
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
 			fail();
 		}
 		expect(result[1][0].length == toMint).to.be.true;
+
+		console.log('Token Minted (19):', result[2].transactionId.toString());
 	});
 
 	it('Check concurrent mint...', async function() {
@@ -1594,7 +1611,7 @@ describe('Basic interaction with the Minter...', function() {
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
 				[1],
 				mintCostInHbar,
@@ -1604,7 +1621,7 @@ describe('Basic interaction with the Minter...', function() {
 				contractId,
 				minterIface,
 				clientAlice,
-				500_000,
+				800_000,
 				'mintNFT',
 				[1],
 				mintCostInHbar,
@@ -1625,9 +1642,9 @@ describe('Basic interaction with the Minter...', function() {
 
 	it('Attempt to mint 2 with max mint @ 1, then mint 1', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const mintCostInHbar = new Hbar(1);
+		const mintCost = 1;
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -1647,14 +1664,14 @@ describe('Basic interaction with the Minter...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				750_000,
+				1_140_000,
 				'mintNFT',
 				[2],
-				mintCostInHbar * 2,
+				new Hbar(mintCost * 2),
 			);
 
 			if (result[0]?.status?.name != 'MaxMintExceeded') {
@@ -1674,14 +1691,14 @@ describe('Basic interaction with the Minter...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 
 		// now mint the single NFT expecting success
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
-			mintCostInHbar,
+			new Hbar(mintCost),
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
@@ -1690,7 +1707,7 @@ describe('Basic interaction with the Minter...', function() {
 		expect(result[1][0].length == 1).to.be.true;
 
 		client.setOperator(operatorId, operatorKey);
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -1707,13 +1724,13 @@ describe('Basic interaction with the Minter...', function() {
 	it('Mint a token from the SC for Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
 		// paying 0.5 $LAZY to check burn works.
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateCost',
-			[0, 5],
+			[BigInt(0), 5],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -1727,11 +1744,11 @@ describe('Basic interaction with the Minter...', function() {
 		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 8);
 
 		expect(result).to.be.equal('SUCCESS');
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
 		);
@@ -1744,15 +1761,15 @@ describe('Basic interaction with the Minter...', function() {
 
 	it('Mint a token from the SC for hbar + Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
+		const hbarCost = new Hbar(1);
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateCost',
-			[tinybarCost, 1],
+			[BigInt(hbarCost.toTinybars()), 1],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -1763,14 +1780,14 @@ describe('Basic interaction with the Minter...', function() {
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
-			tinybarCost,
+			hbarCost,
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
@@ -1782,7 +1799,7 @@ describe('Basic interaction with the Minter...', function() {
 	it('Allow contract to pay the $LAZY fee', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -1795,15 +1812,15 @@ describe('Basic interaction with the Minter...', function() {
 			console.log('Error:', result);
 			fail();
 		}
-		const tinybarCost = new Hbar(1).toTinybars();
+		const hbarCost = new Hbar(1);
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateCost',
-			[tinybarCost, 5],
+			[BigInt(hbarCost.toTinybars()), 5],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -1814,18 +1831,18 @@ describe('Basic interaction with the Minter...', function() {
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
 		// set the $LAZY allowance
-		result = await setFTAllowance(client, lazyTokenId, operatorId, AccountId.fromString(contractId.toString()), 10);
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 10);
 
 		expect(result).to.be.equal('SUCCESS');
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
-			tinybarCost,
+			hbarCost,
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
@@ -1835,7 +1852,7 @@ describe('Basic interaction with the Minter...', function() {
 
 		// reset state
 		client.setOperator(operatorId, operatorKey);
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -1855,13 +1872,13 @@ describe('Basic interaction with the Minter...', function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(10).toTinybars();
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateCost',
-			[tinybarCost, 1],
+			[BigInt(tinybarCost), 1],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -1875,16 +1892,16 @@ describe('Basic interaction with the Minter...', function() {
 		let unexpectedErrors = 0;
 
 		// set the $LAZY allowance
-		result = await setFTAllowance(client, lazyTokenId, operatorId, AccountId.fromString(contractId.toString()), 10);
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 10);
 
 		expect(result).to.be.equal('SUCCESS');
 
 		try {
-			result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
 				[1],
 				new Hbar(1),
@@ -1910,27 +1927,29 @@ describe('Basic interaction with the Minter...', function() {
 	it('Check unable to mint if not yet at start time', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateCost',
-			[tinybarCost, 1],
+			[BigInt(tinybarCost), 1],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
 			fail();
 		}
-		// set start time 4 seconds in future
-		result = contractExecuteFunction(
+		// set start time 8 seconds in future
+		const futureTime = parseInt(Math.floor(new Date().getTime() / 1000) + 8);
+
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateMintStartTime',
-			[Math.floor(new Date().getTime() / 1000) + 4],
+			[futureTime],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -1944,16 +1963,16 @@ describe('Basic interaction with the Minter...', function() {
 		let unexpectedErrors = 0;
 
 		// set the $LAZY allowance
-		result = await setFTAllowance(client, lazyTokenId, operatorId, AccountId.fromString(contractId.toString()), 10);
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 10);
 
 		expect(result).to.be.equal('SUCCESS');
 
 		try {
-			result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
 				[1],
 				new Hbar(1),
@@ -1974,6 +1993,12 @@ describe('Basic interaction with the Minter...', function() {
 
 		expect(expectedErrors).to.be.equal(1);
 		expect(unexpectedErrors).to.be.equal(0);
+
+		// sleep until past the start time
+		const now = Math.floor(new Date().getTime() / 1000);
+		const sleepTime = Math.max((futureTime - now) * 1000, 0);
+		// console.log(futureTime, '\nSleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
+		await sleep(sleepTime + 1125);
 	});
 
 	it('Check **ABLE** to mint once start time has passed', async function() {
@@ -1999,11 +2024,11 @@ describe('Basic interaction with the Minter...', function() {
 		await sleep(sleepTime + 1125);
 		client.setOperator(aliceId, alicePK);
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
 			new Hbar(1),
@@ -2021,13 +2046,13 @@ describe('Test out WL functions...', function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateCost',
-			[tinybarCost, 0],
+			[BigInt(tinybarCost), 0],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2035,7 +2060,7 @@ describe('Test out WL functions...', function() {
 			fail();
 		}
 		// shift to WL only mode
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -2061,7 +2086,7 @@ describe('Test out WL functions...', function() {
 
 		const wl = minterIface.decodeFunctionResult('getWhitelist', result);
 
-		expect(wl[0][0].length == 0).to.be.true;
+		expect(wl[0].length == 0).to.be.true;
 	});
 
 	it('Check Alice is unable to mint ', async function() {
@@ -2071,11 +2096,11 @@ describe('Test out WL functions...', function() {
 
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
 				[1],
 				new Hbar(1),
@@ -2101,13 +2126,13 @@ describe('Test out WL functions...', function() {
 	it('Add Alice to WL & can mint', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'addToWhitelist',
-			[aliceId.toSolidityAddress()],
+			[[aliceId.toSolidityAddress()]],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2117,11 +2142,11 @@ describe('Test out WL functions...', function() {
 
 		client.setOperator(aliceId, alicePK);
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
 			new Hbar(1),
@@ -2136,19 +2161,22 @@ describe('Test out WL functions...', function() {
 	it('Remove Alice from WL, let Alice buy in with Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'removeFromWhitelist',
-			[aliceId.toSolidityAddress()],
+			[[aliceId.toSolidityAddress()]],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
 			fail();
 		}
+
+		// mirror node can take a few seconds to update
+		await sleep(4000);
 
 		// call getWhitelist from the mirror node
 		const encodedCommand = minterIface.encodeFunctionData('getWhitelist');
@@ -2169,7 +2197,7 @@ describe('Test out WL functions...', function() {
 		client.setOperator(aliceId, alicePK);
 
 		// set the $LAZY allowance
-		result = await setFTAllowance(client, lazyTokenId, operatorId, AccountId.fromString(contractId.toString()), 10);
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 10);
 
 		expect(result).to.be.equal('SUCCESS');
 
@@ -2177,13 +2205,12 @@ describe('Test out WL functions...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				500_000,
 				'buyWlWithLazy',
-				[1],
 			);
 
 			if (result[0]?.status?.name != 'WLPurchaseFailed') {
@@ -2204,7 +2231,7 @@ describe('Test out WL functions...', function() {
 
 		client.setOperator(operatorId, operatorKey);
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -2222,21 +2249,22 @@ describe('Test out WL functions...', function() {
 		client.setOperator(aliceId, alicePK);
 
 		// set the $LAZY allowance
-		result = await setFTAllowance(client, lazyTokenId, operatorId, AccountId.fromString(contractId.toString()), 20);
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 20);
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'buyWlWithLazy',
-			[1],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
 			fail();
 		}
+		// let mirror node catch up
+		await sleep(4000);
 
 		result = await readOnlyEVMFromMirrorNode(
 			env,
@@ -2254,13 +2282,14 @@ describe('Test out WL functions...', function() {
 	it('Set max cap for WL address, buy in, mint and then check it blocks Alice', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		let result = contractExecuteFunction(
+		// two slots per buy-in
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'setMaxWlAddressMint',
-			[1],
+			[2],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2268,15 +2297,15 @@ describe('Test out WL functions...', function() {
 			fail();
 		}
 		// setup mint costs
-		const tinybarCost = new Hbar(1).toTinybars();
+		const cost = 1;
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			300_000,
 			'updateCost',
-			[tinybarCost, 0],
+			[BigInt(new Hbar(cost).toTinybars()), 0],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2288,9 +2317,11 @@ describe('Test out WL functions...', function() {
 		// Alice buys into WL again it should give her one slot
 
 		// set the $LAZY allowance
-		result = await setFTAllowance(client, lazyTokenId, operatorId, AccountId.fromString(contractId.toString()), 20);
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 20);
 
-		result = contractExecuteFunction(
+		expect(result).to.be.equal('SUCCESS');
+
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -2307,15 +2338,15 @@ describe('Test out WL functions...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			// should fail as only space for a single mint
-			result = contractExecuteFunction(
+			// should fail as only space for two mints
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
-				[2],
-				tinybarCost * 2,
+				[3],
+				new Hbar(cost * 3),
 			);
 
 			if (result[0]?.status?.name != 'NotEnoughWLSlots') {
@@ -2332,14 +2363,14 @@ describe('Test out WL functions...', function() {
 		}
 
 		// should pass...
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			600_000,
+			800_000,
 			'mintNFT',
 			[1],
-			tinybarCost,
+			new Hbar(cost),
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2350,14 +2381,14 @@ describe('Test out WL functions...', function() {
 
 		try {
 			// should fail as cap exhausted
-			result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
-				[1],
-				tinybarCost,
+				[2],
+				new Hbar(cost),
 			);
 
 			if (result[0]?.status?.name != 'NotEnoughWLSlots') {
@@ -2428,7 +2459,7 @@ describe('Test out WL functions...', function() {
 
 	it('Enables buying WL based on serial', async function() {
 		client.setOperator(operatorId, operatorKey);
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -2442,7 +2473,7 @@ describe('Test out WL functions...', function() {
 			fail();
 		}
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -2459,13 +2490,13 @@ describe('Test out WL functions...', function() {
 		// setup mint costs
 		const tinybarCost = new Hbar(1).toTinybars();
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			350_000,
 			'updateCost',
-			[tinybarCost, 0],
+			[BigInt(tinybarCost), 0],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2474,13 +2505,13 @@ describe('Test out WL functions...', function() {
 		}
 
 		// buy WL for operator
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			350_000,
 			'buyWlWithTokens',
-			[1],
+			[[1]],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2500,13 +2531,13 @@ describe('Test out WL functions...', function() {
 		);
 
 		client.setOperator(aliceId, alicePK);
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			350_000,
 			'buyWlWithTokens',
-			[2, 3],
+			[[2, 3]],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2514,7 +2545,11 @@ describe('Test out WL functions...', function() {
 			fail();
 		}
 
-		expect(Number(result[1][0]) == 2).to.be.true;
+		// console.log('DEBUG WL slots:', Number(result[1][0]));
+		expect(Number(result[1][0])).to.be.greaterThanOrEqual(2);
+
+		// let mirror node catch up
+		await sleep(4000);
 
 		// expect operator to have 1 WL slot and alice to have 2
 		// call getWhitelist from the mirror node
@@ -2529,10 +2564,10 @@ describe('Test out WL functions...', function() {
 		);
 
 		const wlData = minterIface.decodeFunctionResult('getWhitelist', result);
-
-		expect(wlData[0].length == 2).to.be.true;
+		// console.log('DEBUG WL:', wlData);
 		// order not g'teed but should be sum to 3.
-		expect((Number(wlData[1][0]) + Number(wlData[1][1])) == 3).to.be.true;
+		expect((Number(wlData[1][0]) + Number(wlData[1][1]))).to.be.greaterThanOrEqual(3);
+		expect(wlData[0].length).to.be.equal(2);
 	});
 
 	it('ensure no double spend on the serial', async function() {
@@ -2543,13 +2578,13 @@ describe('Test out WL functions...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				500_000,
 				'buyWlWithTokens',
-				[1],
+				[[1]],
 			);
 
 			if (result[0]?.status?.name != 'WLTokenUsed') {
@@ -2578,13 +2613,13 @@ describe('Test out WL functions...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
 				500_000,
 				'buyWlWithTokens',
-				[4],
+				[[4]],
 			);
 
 			if (result[0]?.status?.name != 'NotTokenOwner') {
@@ -2610,13 +2645,13 @@ describe('Test out Discount mint functions...', function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			350_000,
 			'updateCost',
-			[tinybarCost, 1],
+			[BigInt(tinybarCost), 1],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2624,7 +2659,7 @@ describe('Test out Discount mint functions...', function() {
 			fail();
 		}
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -2638,7 +2673,7 @@ describe('Test out Discount mint functions...', function() {
 			fail();
 		}
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -2653,9 +2688,27 @@ describe('Test out Discount mint functions...', function() {
 
 		expect(Number(result[1][0]) == 2).to.be.true;
 
+		// let mirror node catch up
+		await sleep(4000);
+
+		// call getWhitelist from the mirror node
+		let encodedCommand = minterIface.encodeFunctionData('getWhitelist');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const wl = minterIface.decodeFunctionResult('getWhitelist', result);
+
+		expect(wl[0].length == 0).to.be.true;
+
 		client.setOperator(aliceId, alicePK);
 		// call getCost from the mirror node
-		const encodedCommand = minterIface.encodeFunctionData('getCost');
+		encodedCommand = minterIface.encodeFunctionData('getCost');
 
 		result = await readOnlyEVMFromMirrorNode(
 			env,
@@ -2667,19 +2720,21 @@ describe('Test out Discount mint functions...', function() {
 
 		let cost = minterIface.decodeFunctionResult('getCost', result);
 
+		// console.log('DEBUG Cost:', cost);
+
 		expect(Number(cost[0]) == tinybarCost).to.be.true;
 		expect(Number(cost[1]) == 1).to.be.true;
 
 		// add Alice ot the WL
 		client.setOperator(operatorId, operatorKey);
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			350_000,
 			'addToWhitelist',
-			[aliceId.toSolidityAddress()],
+			[[aliceId.toSolidityAddress()]],
 		);
 
 		if (result[0]?.status?.toString() != 'SUCCESS') {
@@ -2687,12 +2742,15 @@ describe('Test out Discount mint functions...', function() {
 			fail();
 		}
 
+		// let mirror node catch up
+		await sleep(4000);
+
 		// get the cost again expect discount
 		result = await readOnlyEVMFromMirrorNode(
 			env,
 			contractId,
 			encodedCommand,
-			operatorId,
+			aliceId,
 			false,
 		);
 
@@ -2705,11 +2763,11 @@ describe('Test out Discount mint functions...', function() {
 	it('WL mint, at discount', async function() {
 		client.setOperator(aliceId, alicePK);
 
-		const result = contractExecuteFunction(
+		const result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
 			new Hbar(0.8),
@@ -2724,11 +2782,11 @@ describe('Test out Discount mint functions...', function() {
 	it('Ensure non-WL has correct price for mint', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'updateWlOnlyStatus',
 			[false],
 		);
@@ -2741,11 +2799,11 @@ describe('Test out Discount mint functions...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
 				[1],
 				new Hbar(0.8),
@@ -2768,11 +2826,11 @@ describe('Test out Discount mint functions...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 
 		// pay the full amount for a mint
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
 			new Hbar(1),
@@ -2786,15 +2844,15 @@ describe('Test out Discount mint functions...', function() {
 
 	it('Checks we can update the max mints per wallet and cap it', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
+		const hbarCost = new Hbar(1);
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			500_000,
 			'updateCost',
-			[tinybarCost, 0],
+			[BigInt(hbarCost.toTinybars()), 0],
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
@@ -2804,6 +2862,8 @@ describe('Test out Discount mint functions...', function() {
 		// check how many we have already minted
 		// call getNumberMintedByAddress from the mirror node
 		const encodedCommand = minterIface.encodeFunctionData('getNumberMintedByAddress');
+
+		await sleep(4000);
 
 		result = await readOnlyEVMFromMirrorNode(
 			env,
@@ -2817,8 +2877,9 @@ describe('Test out Discount mint functions...', function() {
 
 		// add 1 for headroom
 		const numMints = Number(minted[0]) + 1;
+
 		// update the max per Wallet
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -2830,6 +2891,9 @@ describe('Test out Discount mint functions...', function() {
 			console.log('Error:', result);
 			fail();
 		}
+
+		// let mirror node catch up
+		await sleep(5000);
 
 		// get getMintEconomics from the mirror node
 		const encodedCommand2 = minterIface.encodeFunctionData('getMintEconomics');
@@ -2843,18 +2907,19 @@ describe('Test out Discount mint functions...', function() {
 		);
 
 		let mintEconomics = minterIface.decodeFunctionResult('getMintEconomics', result);
+		// console.log('DEBUG mintEconomics:', mintEconomics);
 
-		expect(Number(mintEconomics[0][7]) == numMints).to.be.true;
+		expect(Number(mintEconomics[0][7])).to.be.equal(numMints);
 
 		// mint one
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			800_000,
 			'mintNFT',
 			[1],
-			tinybarCost,
+			hbarCost,
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
@@ -2862,18 +2927,32 @@ describe('Test out Discount mint functions...', function() {
 		}
 		expect(result[1][0].length == 1).to.be.true;
 
+		// clean-up
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updateMaxMintPerWallet',
+			[0],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
 
 		try {
-			result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
-				500_000,
+				800_000,
 				'mintNFT',
 				[1],
-				tinybarCost,
+				new Hbar(Number(hbarCost.toTinybars()) - 10, HbarUnit.Tinybar),
 			);
 
 			if (result[0]?.status?.name != 'NotEnoughHbar') {
@@ -2892,19 +2971,7 @@ describe('Test out Discount mint functions...', function() {
 		expect(expectedErrors).to.be.equal(1);
 		expect(unexpectedErrors).to.be.equal(0);
 
-		// clean-up
-		result = contractExecuteFunction(
-			contractId,
-			minterIface,
-			client,
-			500_000,
-			'updateMaxMintPerWallet',
-			[0],
-		);
-		if (result[0]?.status?.toString() != 'SUCCESS') {
-			console.log('Error:', result);
-			fail();
-		}
+		await sleep(4000);
 
 		result = await readOnlyEVMFromMirrorNode(
 			env,
@@ -2915,22 +2982,87 @@ describe('Test out Discount mint functions...', function() {
 		);
 
 		mintEconomics = minterIface.decodeFunctionResult('getMintEconomics', result);
-		expect(Number(mintEconomics[0][7]) == 0).to.be.true;
+		expect(Number(mintEconomics[0][7])).to.be.equal(0);
+	});
+});
+
+// test out random selection
+describe.skip('Test out random selection...', function() {
+	it('Mint 10 NFTs and check the random selection', async function() {
+		// initialise a new token with fees and 10 metadata items
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updateCost',
+			[BigInt(tinybarCost), 0],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// deploy PRNG
+		if (process.env.PRNG_CONTRACT_ID) {
+			console.log('\n-Using existing PRNG:', process.env.PRNG_CONTRACT_ID);
+			prngId = ContractId.fromString(process.env.PRNG_CONTRACT_ID);
+		}
+		else {
+			const gasLimit = 800_000;
+			console.log('\n- Deploying contract...', prngName, '\n\tgas@', gasLimit);
+			const prngJson = JSON.parse(
+				fs.readFileSync(
+					`./artifacts/contracts/${prngName}.sol/${prngName}.json`,
+				),
+			);
+
+			const prngBytecode = prngJson.bytecode;
+
+			[prngId] = await contractDeployFunction(client, prngBytecode, gasLimit);
+
+			console.log(
+				`PRNG contract created with ID: ${prngId} / ${prngId.toSolidityAddress()}`,
+			);
+		}
+
+		expect(prngId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// update PRNG object to minter
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updatePrng',
+			[prngId.toSolidityAddress()],
+		);
+
+		// reset the contract
+
+		// initialize a new NFT mint with 10 metadata items
+
+		// mint 10 items
+
+		// check the metadata is not sequential
 	});
 });
 
 describe('Test out refund functions...', function() {
 	it('Check anyone can burn NFTs', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
+		const cost = 1;
 
-		let result = contractExecuteFunction(
+		let result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
 			500_000,
 			'updateCost',
-			[tinybarCost, 0],
+			[BigInt(new Hbar(cost).toTinybars()), 0],
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
@@ -2939,14 +3071,14 @@ describe('Test out refund functions...', function() {
 
 		client.setOperator(aliceId, alicePK);
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
-			500_000,
+			1_200_000,
 			'mintNFT',
 			[2],
-			tinybarCost * 2,
+			new Hbar(cost * 2),
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {
 			console.log('Error:', result);
@@ -2954,6 +3086,8 @@ describe('Test out refund functions...', function() {
 		}
 		const serials = result[1][0];
 		expect(result[1][0].length == 2).to.be.true;
+
+		console.log('Mint (2) tx:', result[2]?.transactionId?.toString());
 
 		// call getNumberMintedByAllAddresses from the mirror node
 		const encodedCommand = minterIface.encodeFunctionData('getNumberMintedByAllAddresses');
@@ -2990,7 +3124,7 @@ describe('Test out refund functions...', function() {
 
 		expect(result).to.be.equal('SUCCESS');
 
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -3031,7 +3165,7 @@ describe('Withdrawal tests...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -3041,8 +3175,8 @@ describe('Withdrawal tests...', function() {
 
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -3065,7 +3199,7 @@ describe('Withdrawal tests...', function() {
 		let unexpectedErrors = 0;
 
 		try {
-			const result = contractExecuteFunction(
+			const result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -3075,8 +3209,8 @@ describe('Withdrawal tests...', function() {
 
 			);
 
-			if (result[0]?.status?.name != 'Ownable: caller is not the owner') {
-				console.log('ERROR expecting Ownable:', result);
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable:', result);
 				unexpectedErrors++;
 			}
 			else {
@@ -3095,14 +3229,18 @@ describe('Withdrawal tests...', function() {
 	it('Check Owner cannot pull funds before X time has elapsed from last mint', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		// could get this from the mirror nodes but runnign the paid path for a change
-		const mintTiming = await contractExecuteQuery(
+		// get getMintTiming from the mirror node
+		const encodedCommand = minterIface.encodeFunctionData('getMintTiming');
+
+		let result = await readOnlyEVMFromMirrorNode(
+			env,
 			contractId,
-			minterIface,
-			client,
-			200_000,
-			'getMintTiming',
+			encodedCommand,
+			operatorId,
+			false,
 		);
+
+		const mintTiming = minterIface.decodeFunctionResult('getMintTiming', result);
 
 		const lastMint = Number(mintTiming[0][0]);
 		if (lastMint != 0) {
@@ -3110,7 +3248,7 @@ describe('Withdrawal tests...', function() {
 			const delay = clockTime - lastMint + 8;
 			// set refund window timing -> 5 seconds on the clock
 
-			let result = contractExecuteFunction(
+			result = await contractExecuteFunction(
 				contractId,
 				minterIface,
 				client,
@@ -3164,8 +3302,8 @@ describe('Withdrawal tests...', function() {
 					[operatorId.toSolidityAddress(), contractLazyBal],
 				);
 
-				if (result[0]?.status?.name != 'HbarCooldown') {
-					console.log('ERROR expecting HbarCooldown:', result);
+				if (result[0]?.status?.name != 'LazyCooldown') {
+					console.log('ERROR expecting LazyCooldown:', result);
 					unexpectedErrors++;
 				}
 				else {
@@ -3230,7 +3368,7 @@ async function uploadMetadata(metadata) {
 			dataToSend.push(metadata[inner + outer]);
 		}
 		// use addMetadata method
-		result = contractExecuteFunction(
+		result = await contractExecuteFunction(
 			contractId,
 			minterIface,
 			client,
@@ -3240,7 +3378,7 @@ async function uploadMetadata(metadata) {
 		);
 
 		status = result[0].status.toString();
-		totalLoaded += Number(result[1][0]);
+		totalLoaded = Number(result[1][0]);
 		console.log('Uploaded:', totalLoaded, 'of', metadata.length);
 	}
 

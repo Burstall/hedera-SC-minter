@@ -259,6 +259,10 @@ async function contractExecuteFunction(contractId, iface, client, gasLim, fcnNam
 	catch (err) {
 		if (flagError) console.log('ERROR: Contract Transaction Failed');
 
+		if (!err?.contractFunctionResult?.errorMessage) {
+			console.log('NO CONTRACT ERROR MESSAGE:', contractExecuteTx?.transactionId?.toString(), err);
+		}
+
 		return [(parseError(iface, err.contractFunctionResult.errorMessage))];
 	}
 
@@ -311,7 +315,7 @@ async function contractExecuteFunction(contractId, iface, client, gasLim, fcnNam
 function linkBytecode(bytecode, libNameArray, libAddressArray) {
 	for (let i = 0; i < libNameArray.length; i++) {
 		const libName = libNameArray[i];
-		const libAddress = libAddressArray[i].toSolidityAddress();
+		const libAddress = typeof libAddressArray[i] == 'object' ? libAddressArray[i].toSolidityAddress() : libAddressArray[i];
 
 		const nameToHash = `contracts/${libName}.sol:${libName}`;
 

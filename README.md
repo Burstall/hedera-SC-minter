@@ -4,7 +4,10 @@ Will mint test $LAZY when needed.
 Refactored post Hedera Solidity Security Change
 
 ## on-click mint
-Need to assess gas post refactor 
+~700k for singular mint.
+~7,400k for 19 mints
+
+Estimate 400k base gas + 370 per mint (?)
 
 ## on gas
 $0.000,000,0569 per gwei
