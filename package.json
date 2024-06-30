@@ -17,20 +17,24 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@eslint/eslintrc": "^3.1.0",
     "@hashgraph/sdk": "^2.19.0",
     "abi-decoder": "^2.4.0",
     "axios": "^1.2.0",
     "dotenv": "^16.0.3",
+    "ethers": "^6.13.1",
+    "hardhat-contract-sizer": "^2.10.0",
     "readline-sync": "^1.4.10"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^2.0.0",
+    "@eslint/js": "^9.5.0",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomiclabs/hardhat-web3": "^2.0.0",
-    "@openzeppelin/contracts": "^4.8.0",
-    "chai": "^4.3.7",
-    "eslint": "^8.29.0",
+    "@openzeppelin/contracts": "^4.9.6",
+    "chai": "^4.4.1",
+    "eslint": "^9.5.0",
+    "globals": "^15.6.0",
     "hardhat": "^2.12.3",
-    "solhint": "^3.3.7",
-    "web3": "^1.8.1"
+    "solhint": "^5.0.1"
   }
 }

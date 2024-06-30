@@ -83,11 +83,14 @@ const main = async () => {
 		}
 		else if (env.toUpperCase() == 'MAIN') {
 			client = Client.forMainnet();
-			client.setMirrorNetwork('mainnet-public.mirrornode.hedera.com:443');
 			console.log('deploying in *MAINNET*');
 		}
+		else if (env.toUpperCase() == 'PREVIEW') {
+			client = Client.forPreviewnet();
+			console.log('deploying in *PREVIEWNET*');
+		}
 		else {
-			console.log('ERROR: Must specify either MAIN or TEST as environment in .env file');
+			console.log('ERROR: Must specify either MAIN or TEST or PREVIEW as environment in .env file');
 			return;
 		}
 

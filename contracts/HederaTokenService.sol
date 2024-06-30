@@ -43,7 +43,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
     /// @return newTotalSupply The new supply of tokens. For NFTs it is the total count of NFTs
     /// @return serialNumbers If the token is an NFT the newly generate serial numbers, otherwise empty.
     function mintToken(address token, uint64 amount, bytes[] memory metadata) internal
-    returns (int responseCode, uint64 newTotalSupply, int64[] memory serialNumbers)
+    returns (int32 responseCode, uint64 newTotalSupply, int64[] memory serialNumbers)
     {
         (bool success, bytes memory result) = precompileAddress.call(
             abi.encodeWithSelector(IHederaTokenService.mintToken.selector,
@@ -64,7 +64,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
     /// @return newTotalSupply The new supply of tokens. For NFTs it is the total count of NFTs
     function burnToken(address token, uint64 amount, int64[] memory serialNumbers) internal
-    returns (int responseCode, uint64 newTotalSupply)
+    returns (int32 responseCode, uint64 newTotalSupply)
     {
         (bool success, bytes memory result) = precompileAddress.call(
             abi.encodeWithSelector(IHederaTokenService.burnToken.selector,
@@ -201,7 +201,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
         IHederaTokenService.HederaToken memory token,
         IHederaTokenService.FixedFee[] memory fixedFees,
         IHederaTokenService.RoyaltyFee[] memory royaltyFees) nonEmptyExpiry(token)
-    internal returns (int responseCode, address tokenAddress) {
+    internal returns (int32 responseCode, address tokenAddress) {
         (bool success, bytes memory result) = precompileAddress.call{value : msg.value}(
             abi.encodeWithSelector(IHederaTokenService.createNonFungibleTokenWithCustomFees.selector,
             token, fixedFees, royaltyFees));
@@ -454,7 +454,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
     /// @param receiver the receiver of the nft sent by the same index at sender
     /// @param serialNumber the serial number of the nft sent by the same index at sender
     function transferNFTs(address token, address[] memory sender, address[] memory receiver, int64[] memory serialNumber)
-    internal returns (int responseCode)
+    internal returns (int32 responseCode)
     {
         (bool success, bytes memory result) = precompileAddress.call(
             abi.encodeWithSelector(IHederaTokenService.transferNFTs.selector,
@@ -470,7 +470,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
     /// @param receiver The receiver of the transaction
     /// @param amount Non-negative value to send. a negative value will result in a failure.
     function transferToken(address token, address sender, address receiver, int64 amount) internal
-    returns (int responseCode)
+    returns (int32 responseCode)
     {
         (bool success, bytes memory result) = precompileAddress.call(
             abi.encodeWithSelector(IHederaTokenService.transferToken.selector,

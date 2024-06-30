@@ -36,6 +36,10 @@ const main = async () => {
 		client = Client.forMainnet();
 		console.log('interacting in *MAINNET*');
 	}
+	else if (env.toUpperCase() == 'PREVIEW') {
+		client = Client.forPreviewnet();
+		console.log('interacting in *PREVIEWNET*');
+	}
 	else {
 		console.log('ERROR: Must specify either MAIN or TEST as environment in .env file');
 		return;

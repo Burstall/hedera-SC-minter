@@ -2,54 +2,60 @@ const {
 	Client,
 	AccountId,
 	PrivateKey,
-	AccountCreateTransaction,
 	Hbar,
-	ContractCreateFlow,
-	AccountInfoQuery,
-	TransferTransaction,
-	ContractInfoQuery,
 	ContractFunctionParameters,
 	HbarUnit,
-	ContractExecuteTransaction,
 	TokenId,
 	ContractId,
-	ContractCallQuery,
-	TokenAssociateTransaction,
-	CustomRoyaltyFee,
-	CustomFixedFee,
-	TokenCreateTransaction,
-	TokenType,
-	TokenSupplyType,
-	TokenMintTransaction,
-	NftId,
 } = require('@hashgraph/sdk');
 const fs = require('fs');
-const Web3 = require('web3');
-const web3 = new Web3();
 const { expect } = require('chai');
 const { describe, it } = require('mocha');
+const {
+	contractDeployFunction,
+	readOnlyEVMFromMirrorNode,
+	contractExecuteFunction,
+	linkBytecode,
+} = require('../utils/solidityHelpers');
+const { sleep, hex_to_ascii } = require('../utils/nodeHelpers');
+const {
+	accountCreator,
+	associateTokenToAccount,
+	mintNFT,
+	setFTAllowance,
+	setNFTAllowanceAll,
+	sweepHbar,
+	sendNFT,
+} = require('../utils/hederaHelpers');
+const { checkMirrorBalance, checkMirrorHbarBalance } = require('../utils/hederaMirrorHelpers');
+const { fail } = require('assert');
+const { ethers } = require('ethers');
 
 require('dotenv').config();
 
 // Get operator from .env file
-const operatorKey = PrivateKey.fromString(process.env.PRIVATE_KEY);
-const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
+let operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
+let operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'MinterContract';
+const libraryName = 'MinterLibrary';
+const prngName = 'PrngGenerator';
+const lazyContractCreator = 'FungibleTokenCreator';
 const env = process.env.ENVIRONMENT ?? null;
-const lazyContractId = ContractId.fromString(process.env.LAZY_CONTRACT);
-const lazyTokenId = TokenId.fromString(process.env.LAZY_TOKEN);
 const lazyBurnPerc = process.env.LAZY_BURN_PERC || 25;
 const MINT_PAYMENT = process.env.MINT_PAYMENT || 50;
+const LAZY_DECIMAL = process.env.LAZY_DECIMALS ?? 1;
+const LAZY_MAX_SUPPLY = process.env.LAZY_MAX_SUPPLY ?? 250_000_000;
 
 const addressRegex = /(\d+\.\d+\.[1-9]\d+)/i;
 
 // reused variable
-let contractId;
+let contractId, prngId;
 let contractAddress;
-let abi;
 let client, clientAlice;
 let alicePK, aliceId;
-let tokenId, wlTokenId;
+let wlTokenId, extendedTestingTokenId;
+let lazyTokenId, lazySCT;
+let minterIface, lazyIface;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -76,8 +82,29 @@ describe('Deployment: ', function() {
 			clientAlice = Client.forMainnet();
 			console.log('testing in *MAINNET*');
 		}
+		else if (env.toUpperCase() == 'PREVIEW') {
+			client = Client.forPreviewnet();
+			clientAlice = Client.forPreviewnet();
+			console.log('testing in *PREVIEWNET*');
+		}
+		else if (env.toUpperCase() == 'LOCAL') {
+			const node = { '127.0.0.1:50211': new AccountId(3) };
+			client = Client.forNetwork(node).setMirrorNetwork('127.0.0.1:5600');
+			console.log('testing in *LOCAL*');
+			const rootId = AccountId.fromString('0.0.2');
+			const rootKey = PrivateKey.fromStringECDSA(
+				'302e020100300506032b65700422042091132178e72057a1d7528025956fe39b0b847f200ab59b2fdd367017f3087137',
+			);
+
+			// create an operator account on the local node and use this for testing as operator
+			client.setOperator(rootId, rootKey);
+			operatorKey = PrivateKey.generateED25519();
+			operatorId = await accountCreator(client, operatorKey, 1000);
+		}
 		else {
-			console.log('ERROR: Must specify either MAIN or TEST as environment in .env file');
+			console.log(
+				'ERROR: Must specify either MAIN or TEST or PREVIEW or LOCAL as environment in .env file',
+			);
 			return;
 		}
 
@@ -85,98 +112,318 @@ describe('Deployment: ', function() {
 		// deploy the contract
 		console.log('\n-Using Operator:', operatorId.toString());
 
+		// create Alice account
+		alicePK = PrivateKey.generateED25519();
+		aliceId = await accountCreator(client, alicePK, 200);
+		console.log('Alice account ID:', aliceId.toString(), '\nkey:', alicePK.toString());
+		clientAlice.setOperator(aliceId, alicePK);
+
+		// check if a $LAZY FT has been specified else deploy one
+		const lazyJson = JSON.parse(
+			fs.readFileSync(
+				`./artifacts/contracts/${lazyContractCreator}.sol/${lazyContractCreator}.json`,
+			),
+		);
+
+		// import ABIs
+		lazyIface = new ethers.Interface(lazyJson.abi);
+
+		const lazyContractBytecode = lazyJson.bytecode;
+
+		if (process.env.LAZY_SCT_CONTRACT_ID && process.env.LAZY_TOKEN_ID) {
+			console.log(
+				'\n-Using existing LAZY SCT:',
+				process.env.LAZY_SCT_CONTRACT_ID,
+			);
+			lazySCT = ContractId.fromString(process.env.LAZY_SCT_CONTRACT_ID);
+
+			lazyTokenId = TokenId.fromString(process.env.LAZY_TOKEN_ID);
+			console.log('\n-Using existing LAZY Token ID:', lazyTokenId.toString());
+		}
+		else {
+			const gasLimit = 800_000;
+
+			console.log(
+				'\n- Deploying contract...',
+				lazyContractCreator,
+				'\n\tgas@',
+				gasLimit,
+			);
+
+			[lazySCT] = await contractDeployFunction(client, lazyContractBytecode, gasLimit);
+
+			console.log(
+				`Lazy Token Creator contract created with ID: ${lazySCT} / ${lazySCT.toSolidityAddress()}`,
+			);
+
+			expect(lazySCT.toString().match(addressRegex).length == 2).to.be.true;
+
+			// mint the $LAZY FT
+			await mintLazy(
+				'Test_Lazy',
+				'TLazy',
+				'Test Lazy FT',
+				LAZY_MAX_SUPPLY * 10 ** LAZY_DECIMAL,
+				LAZY_DECIMAL,
+				LAZY_MAX_SUPPLY * 10 ** LAZY_DECIMAL,
+				30,
+			);
+			console.log('$LAZY Token minted:', lazyTokenId.toString());
+		}
+
+		expect(lazySCT.toString().match(addressRegex).length == 2).to.be.true;
+		expect(lazyTokenId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// check if operator has $LAZY tokens on hand else draw down from the Lazy SCT
+		const operatorLazyBal = await checkMirrorBalance(env, operatorId, lazyTokenId);
+		if (!operatorLazyBal || operatorLazyBal < 50) {
+			// check if operatorLazyBal is null, if so associate the token
+			if (operatorLazyBal == null) {
+				const result = await associateTokenToAccount(client, operatorId, operatorKey, lazyTokenId);
+				expect(result).to.be.equal('SUCCESS');
+			}
+
+			// pull down some $LAZY from the Lazy SCT
+			const result = await sendLazy(operatorId, 50);
+			expect(result).to.be.equal('SUCCESS');
+		}
+
+		// deploy library contract
+		console.log('\n-Deploying library:', libraryName);
+
+		const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
+
+		const [libContractId] = await contractDeployFunction(client, libraryBytecode, 500_000);
+		console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
+
 		const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`));
 
-		// import ABI
-		abi = json.abi;
-
 		const contractBytecode = json.bytecode;
-		const gasLimit = 1200000;
+
+		// replace library address in bytecode
+		console.log('\n-Linking library address in bytecode...');
+		const readyToDeployBytecode = linkBytecode(contractBytecode, [libraryName], [libContractId]);
+
+		// import ABI
+		minterIface = new ethers.Interface(json.abi);
+
+		const gasLimit = 1600000;
 
 		console.log('\n- Deploying contract...', contractName, '\n\tgas@', gasLimit);
 
-		await contractDeployFcn(contractBytecode, gasLimit);
+		const constructorParams = new ContractFunctionParameters()
+			.addAddress(lazySCT.toSolidityAddress())
+			.addAddress(lazyTokenId.toSolidityAddress())
+			.addUint256(lazyBurnPerc);
+
+		[contractId, contractAddress] = await contractDeployFunction(client, readyToDeployBytecode, gasLimit, constructorParams);
 
 		console.log(`Contract created with ID: ${contractId} / ${contractAddress}`);
 
 		console.log('\n-Testing:', contractName);
 
-		// create Alice account
-		alicePK = PrivateKey.generateED25519();
-		aliceId = await accountCreator(alicePK, 200);
-		console.log('Alice account ID:', aliceId.toString(), '\nkey:', alicePK.toString());
-		clientAlice.setOperator(aliceId, alicePK);
-
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// check if Alice has $LAZY associated else associate the token
+		const aliceLazyBal = await checkMirrorBalance(env, aliceId, lazyTokenId);
+		if (aliceLazyBal == null) {
+			const result = await associateTokenToAccount(client, aliceId, alicePK, lazyTokenId);
+			expect(result).to.be.equal('SUCCESS');
+		}
 	});
 
 	it('should mint an NFT to use as the WL token', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const [rewardMintResult, rewardMintedTokenId] = await mintNFTBySDK('MinterContractWL ');
-		wlTokenId = rewardMintedTokenId;
-		expect(rewardMintResult == 'SUCCESS').to.be.true;
+		const result = await mintNFT(client, operatorId, 'MinterContractWL ' + new Date().toISOString(), 'MCWL', 10, 75);
+		wlTokenId = result[1];
+		console.log('\n- NFT minted @', wlTokenId.toString());
+		expect(result[0]).to.be.equal('SUCCESS');
 
+		// associate the WL token for Alice
+		const result2 = await associateTokenToAccount(client, aliceId, alicePK, wlTokenId);
+		expect(result2).to.be.equal('SUCCESS');
 	});
 
 	it('Ensure Alice & Contract are a little LAZY (send some to prime the pumps)', async function() {
-		// send 2 $LAZY
-		let result = await ftTansferFcn(operatorId, aliceId, 20, lazyTokenId);
+		client.setOperator(operatorId, operatorKey);
+		let result = await sendLazy(AccountId.fromString(contractId.toString()), 10);
 		expect(result).to.be.equal('SUCCESS');
-		result = await ftTansferFcn(operatorId, contractId, 10, lazyTokenId);
+		result = await sendLazy(aliceId, 20);
 		expect(result).to.be.equal('SUCCESS');
 	});
 });
 
 describe('Check SC deployment...', function() {
 	it('Check Lazy token was associated by constructor', async function() {
+		// let mirror node catch up
+		await sleep(5000);
+
 		client.setOperator(operatorId, operatorKey);
-		const [contractLazyBal] = await getContractBalance(contractId);
+		const contractLazyBal = await checkMirrorBalance(env, AccountId.fromString(contractId.toString()), lazyTokenId);
 		expect(contractLazyBal == 10).to.be.true;
 	});
 
 	it('Check linkage to Lazy token / LSCT is correct', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const addressLSCT = await getSetting('getLSCT', 'lsct');
-		expect(ContractId.fromSolidityAddress(addressLSCT).toString() == lazyContractId.toString()).to.be.true;
 
-		const addressLazy = await getSetting('getLazyToken', 'lazy');
-		expect(TokenId.fromSolidityAddress(addressLazy).toString() == lazyTokenId.toString()).to.be.true;
+		let encodedCommand = minterIface.encodeFunctionData('getLSCT');
+
+		let result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const addressLSCT = minterIface.decodeFunctionResult('getLSCT', result);
+		expect(addressLSCT[0].slice(2).toLowerCase()).to.be.equal(lazySCT.toSolidityAddress());
+
+		// now check the lazy token with getLazyToken
+		encodedCommand = minterIface.encodeFunctionData('getLazyToken');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const addressLazyToken = minterIface.decodeFunctionResult('getLazyToken', result);
+		expect(addressLazyToken[0].slice(2).toLowerCase()).to.be.equal(lazyTokenId.toSolidityAddress());
 	});
 
 	it('Check default values are set in Constructor', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const batchSize = await getSetting('getBatchSize', 'batchSize');
-		expect(Number(batchSize) == 10).to.be.true;
-		const lazyBurn = await getSetting('getLazyBurnPercentage', 'lazyBurn');
-		expect(Number(lazyBurn) == lazyBurnPerc).to.be.true;
-		const [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
-		expect(Number(hbarCost) == 0 && Number(lazyCost) == 0).to.be.true;
-		const mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
-		expect(!mintEconomics[0] &&
-			mintEconomics[1] == 0 &&
-			mintEconomics[2] == 0 &&
-			mintEconomics[3] == 0 &&
-			mintEconomics[4] == 20 &&
-			mintEconomics[5] == 0 &&
-			mintEconomics[6] == 0 &&
-			mintEconomics[7] == 0 &&
-			mintEconomics[8] == ZERO_ADDRESS).to.be.true;
-		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
-		expect(mintTiming[0] == 0 &&
-			mintTiming[1] == 0 &&
-			mintTiming[2] &&
-			mintTiming[3] == 0 &&
-			mintTiming[4] == 0 &&
-			mintTiming[5] == false).to.be.true;
-		const remainingMint = await getSetting('getRemainingMint', 'remainingMint');
-		expect(Number(remainingMint) == 0).to.be.true;
-		const numMinted = await getSetting('getNumberMintedByAddress', 'numMinted');
-		expect(Number(numMinted) == 0).to.be.true;
-		const wlNumMinted = await getSetting('getNumberMintedByWlAddress', 'wlNumMinted');
-		expect(Number(wlNumMinted) == 0).to.be.true;
+		// check the default values
+		let encodedCommand = minterIface.encodeFunctionData('getBatchSize');
+
+		let result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const batchSize = minterIface.decodeFunctionResult('getBatchSize', result);
+		expect(Number(batchSize[0])).to.be.equal(10);
+
+		// check the lazy burn percentage
+		encodedCommand = minterIface.encodeFunctionData('getLazyBurnPercentage');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const lazyBurn = minterIface.decodeFunctionResult('getLazyBurnPercentage', result);
+		expect(Number(lazyBurn[0])).to.be.equal(lazyBurnPerc);
+
+		// check the cost
+		encodedCommand = minterIface.encodeFunctionData('getCost');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const [hbarCost, lazyCost] = minterIface.decodeFunctionResult('getCost', result);
+
+		expect(Number(hbarCost)).to.be.equal(0);
+		expect(Number(lazyCost)).to.be.equal(0);
+
+		// check the mint economics
+		encodedCommand = minterIface.encodeFunctionData('getMintEconomics');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const mintEconomics = minterIface.decodeFunctionResult('getMintEconomics', result);
+
+		expect(!mintEconomics[0][0]).to.be.true;
+		expect(Number(mintEconomics[0][1])).to.be.equal(0);
+		expect(Number(mintEconomics[0][2])).to.be.equal(0);
+		expect(Number(mintEconomics[0][3])).to.be.equal(0);
+		expect(Number(mintEconomics[0][4])).to.be.equal(20);
+		expect(Number(mintEconomics[0][5])).to.be.equal(0);
+		expect(Number(mintEconomics[0][6])).to.be.equal(0);
+		expect(Number(mintEconomics[0][7])).to.be.equal(0);
+		expect(mintEconomics[0][8]).to.be.equal(ZERO_ADDRESS);
+
+		// check the mint timing
+		encodedCommand = minterIface.encodeFunctionData('getMintTiming');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const mintTiming = minterIface.decodeFunctionResult('getMintTiming', result);
+
+		expect(Number(mintTiming[0][0])).to.be.equal(0);
+
+		// check the remaining mint
+		encodedCommand = minterIface.encodeFunctionData('getRemainingMint');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const remainingMint = minterIface.decodeFunctionResult('getRemainingMint', result);
+
+		expect(Number(remainingMint[0])).to.be.equal(0);
+
+		// check the number minted
+		encodedCommand = minterIface.encodeFunctionData('getNumberMintedByAddress');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const numMinted = minterIface.decodeFunctionResult('getNumberMintedByAddress', result);
+
+		expect(Number(numMinted[0])).to.be.equal(0);
+
+		// check the number minted by WL
+		encodedCommand = minterIface.encodeFunctionData('getNumberMintedByWlAddress');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const wlNumMinted = minterIface.decodeFunctionResult('getNumberMintedByWlAddress', result);
+
+		expect(Number(wlNumMinted[0])).to.be.equal(0);
 	});
 
-	// initialize the minter!
 	it('Initialise the minter for a token with no Fees to check it works', async function() {
 		const metadataList = ['metadata.json'];
 
@@ -187,41 +434,82 @@ describe('Check SC deployment...', function() {
 
 		const royaltyList = [];
 
-		const [result, tokenAddressSolidity] = await initialiseNFTMint(
-			'MC-test',
-			'MCt',
-			'MC testing memo',
-			'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
-			royaltyList,
-			0,
+		// execute the initialiseNFTMint function
+		const result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			1_000_000,
+			'initialiseNFTMint',
+			[
+				'MC-test',
+				'MCt',
+				'MC testing memo',
+				'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
+				royaltyList,
+				0,
+			],
+			MINT_PAYMENT,
 		);
 
-		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
-		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		const tokenId = TokenId.fromSolidityAddress(result[1][0]);
+		console.log('Token Created:', tokenId.toString(), 'tx:', result[2]?.transactionId?.toString());
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
-		expect(result).to.be.equal('SUCCESS');
 	});
 
 	it('Cannot add more metadata - given no capacity', async function() {
 		client.setOperator(operatorId, operatorKey);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
 		try {
-			const [result, resultObj] = await useSetterStringArray('addMetadata', ['meta1', 'meta2']);
-			expect(result).to.be.equal('SUCCESS');
-			expect(Number(resultObj['totalLoaded']) == 2).to.be.true;
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				500_000,
+				'addMetadata',
+				[['meta1', 'meta2']],
+			);
+
+			if (result[0]?.status?.name != 'TooMuchMetadata') {
+				console.log('ERROR expecting TooMuchMetadata:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Initialise the for a token wth additional headroom', async function() {
 		client.setOperator(operatorId, operatorKey);
 
-		// reset metadata
-		const outcome = await resetContract();
-		expect(outcome).to.be.equal('SUCCESS');
+		// reset metadata using resetContract
+		const reset = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'resetContract',
+			[true, 100],
+		);
+		if (reset[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', reset);
+			fail();
+		}
+
+		console.log('Contract Reset TX:', reset[2][0]?.transactionId?.toString());
+
 		const metadataList = ['metadata.json'];
 
 		// set metadata seperately
@@ -231,37 +519,81 @@ describe('Check SC deployment...', function() {
 
 		const royaltyList = [];
 
-		const [result, tokenAddressSolidity] = await initialiseNFTMint(
-			'MC-test',
-			'MCt',
-			'MC testing memo',
-			'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
-			royaltyList,
-			3,
+		// execute the initialiseNFTMint function
+		const newMint = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			1_000_000,
+			'initialiseNFTMint',
+			[
+				'MC-test',
+				'MCt',
+				'MC testing memo',
+				'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
+				royaltyList,
+				3,
+			],
+			MINT_PAYMENT,
 		);
 
-		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
-		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+		if (newMint[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', newMint);
+			fail();
+		}
+		const tokenId = TokenId.fromSolidityAddress(newMint[1][0]);
+		console.log('Token Created:', tokenId.toString());
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
-		expect(result).to.be.equal('SUCCESS');
 	});
 
 	it('Can add more metadata - given spare capacity', async function() {
 		client.setOperator(operatorId, operatorKey);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
 		try {
-			await useSetterStringArray('addMetadata', ['meta1', 'meta2']);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				500_000,
+				'addMetadata',
+				[['meta1', 'meta2']],
+			);
+
+			if (result[0]?.status?.toString() != 'SUCCESS') {
+				console.log('error adding metadata', result);
+				unexpectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
+		// now expect failure as at capacity
 		try {
-			await useSetterStringArray('addMetadata', ['meta1']);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				500_000,
+				'addMetadata',
+				[['meta1', 'meta2']],
+			);
+
+			if (result[0]?.status?.name != 'TooMuchMetadata') {
+				console.log('ERROR expecting TooMuchMetadata:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Re-initialise the minter for a token with **WITH FEES**', async function() {
@@ -269,8 +601,18 @@ describe('Check SC deployment...', function() {
 		client.setOperator(operatorId, operatorKey);
 
 		// reset metadata
-		const outcome = await resetContract();
-		expect(outcome).to.be.equal('SUCCESS');
+		const reset = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'resetContract',
+			[true, 10],
+		);
+		if (reset[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', reset);
+			fail();
+		}
 
 		const metadataList = [];
 
@@ -290,66 +632,164 @@ describe('Check SC deployment...', function() {
 
 		const royaltyList = [royalty1, royalty2];
 
-		const [result, tokenAddressSolidity, maxSupply] = await initialiseNFTMint(
-			'MC-test',
-			'MCt',
-			'MC testing memo',
-			'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/',
-			royaltyList,
-			0,
-			1600000,
+		const newMint = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			1_600_000,
+			'initialiseNFTMint',
+			[
+				'MC-test',
+				'MCt',
+				'MC testing memo',
+				'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/',
+				royaltyList,
+				0,
+			],
+			MINT_PAYMENT,
 		);
-		tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
-		console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
+
+		if (newMint[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', newMint);
+			fail();
+		}
+
+		const tokenId = TokenId.fromSolidityAddress(newMint[1][0]);
+		console.log('Token Created:', tokenId.toString(), ' / ', tokenId.toSolidityAddress());
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
-		expect(Number(maxSupply) == metadataList.length).to.be.true;
-		expect(result).to.be.equal('SUCCESS');
+		expect(Number(newMint[1][1]) == metadataList.length).to.be.true;
+
+		// pass the token on to the later methods.
+		extendedTestingTokenId = tokenId;
+		console.log('Token ID for Extended Testing:', tokenId.toString());
 	});
 
 	it('Owner cannot set batch size to bad values', async function() {
 		client.setOperator(operatorId, operatorKey);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('updateBatchSize', 0);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				300_000,
+				'updateBatchSize',
+				[0],
+			);
+
+			if (result[0]?.status?.name != 'BadArguments') {
+				console.log('ERROR expecting BadArguments:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
+
 		try {
-			await useSetterInts('updateBatchSize', 11);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				300_000,
+				'updateBatchSize',
+				[11],
+			);
+
+			if (result[0]?.status?.name != 'BadArguments') {
+				console.log('ERROR expecting BadArguments:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(2);
+
+		expect(expectedErrors).to.be.equal(2);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Owner can update batch value if needed', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const [status, resultObj] = await useSetterInts('updateBatchSize', 10);
-		expect(status).to.be.equal('SUCCESS');
-		expect(Boolean(resultObj['changed'])).to.be.false;
+
+		const result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateBatchSize',
+			[10],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		expect(Boolean(result[1][0])).to.be.false;
 
 	});
 
 	it('Owner can get metadata', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const [status, results] = await useSetterInts('getMetadataArray', 0, 10);
-		const metadataList = results['metadataList'];
+		const result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'getMetadataArray',
+			[0, 10],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		const metadataList = result[1][0];
 		expect(metadataList[0] == '001_metadata.json').to.be.true;
-		expect(status).to.be.equal('SUCCESS');
 	});
 
 	it('Fail to update metadata with bad offset', async function() {
 		client.setOperator(operatorId, operatorKey);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await updateMetadataAtOffset('updateMetadataArray', ['meta1', 'meta2'], 500);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateMetadataArray',
+				[['meta1', 'meta2'], 500],
+			);
+
+			if (result[0]?.status?.name != 'TooMuchMetadata') {
+				console.log('ERROR expecting TooMuchMetadata:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Successfully update metadata', async function() {
@@ -361,337 +801,832 @@ describe('Check SC deployment...', function() {
 			metadataList.push(num.padStart(3, '0') + '_metadata.json');
 		}
 
-		await updateMetadataAtOffset('updateMetadataArray', metadataList, 66, 2000000);
+		const result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			400_000,
+			'updateMetadataArray',
+			[metadataList, 66],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 	});
 
 	it('Successfully update CID', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const result = await useSetterString('updateCID', 'ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/');
-		expect(result).to.be.equal('SUCCESS');
+
+		const result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			400_000,
+			'updateCID',
+			['ipfs://bafybeibiedkt2qoulkexsl2nyz5vykgyjapc5td2fni322q6bzeogbp5ge/'],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 	});
 });
 
 describe('Check access control permission...', function() {
 	it('Check Alice cannot modify LAZY token ID', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// using a dummy value [check onece testnet resets if still passes]
-			await useSetterAddress('updateLazyToken', TokenId.fromString('0.0.48486075'));
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateLazyToken',
+				[TokenId.fromString('0.0.48486075').toSolidityAddress()],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify LSCT', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// using a dummy value [check onece testnet resets if still passes]
-			await useSetterAddress('updateLSCT', ContractId.fromString('0.0.48627791'));
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateLSCT',
+				[ContractId.fromString('0.0.48627791').toSolidityAddress()],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the WL', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterAddresses('addToWhitelist', [aliceId]);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'addToWhitelist',
+				[[aliceId.toSolidityAddress()]],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
 
 		try {
-			await useSetterAddresses('removeFromWhitelist', [aliceId]);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'removeFromWhitelist',
+				[[aliceId.toSolidityAddress()]],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(2);
+
+		expect(expectedErrors).to.be.equal(2);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the CID/metadata', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterString('updateCID', 'newCIDstring');
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateCID',
+				['newCIDstring'],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
 
 		try {
-			await updateMetadataAtOffset('updateMetadataArray', ['meta1', 'meta2'], 0);
-		}
-		catch (err) {
-			errorCount++;
-		}
-		expect(errorCount).to.be.equal(2);
-	});
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateMetadataArray',
+				[['meta1', 'meta2'], 0],
+			);
 
-	it('Check Alice cannot retrieve the unminted metadata', async function() {
-		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
-		try {
-			await getSetting('getMetadataArray', 'metadataList');
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(2);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the cost', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('updateCost', 1, 1);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateCost',
+				[BigInt(1), 1],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot update the wlToken', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterAddress('updateWlToken', wlTokenId.toSolidityAddress());
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateWlToken',
+				[wlTokenId.toSolidityAddress()],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the batch sizing', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('updateBatchSize', 5);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateBatchSize',
+				[5],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the Lazy Burn Precentage', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('updateLazyBurnPercentage', 1);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateLazyBurnPercentage',
+				[1],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the max mint', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('updateMaxMint', 1);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateMaxMint',
+				[1],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the cooldown timer', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('updateCooldown', 4);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateCooldown',
+				[4],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the start date', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('updateMintStartTime', (new Date().getTime() / 1000) + 30);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateMintStartTime',
+				[parseInt((new Date().getTime() / 1000) + 30)],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify the pause status', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// using a dummy value [check onece testnet resets if still passes]
-			await useSetterBool('updatePauseStatus', false);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updatePauseStatus',
+				[false],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot modify flag to spend lazy from contract', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// using a dummy value [check onece testnet resets if still passes]
-			await useSetterBool('updateContractPaysLazy', false);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateContractPaysLazy',
+				[false],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot turn on WL', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterBool('updateWlOnlyStatus', true);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateWlOnlyStatus',
+				[true],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot adjust max mint for WL addresses', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('setMaxWlAddressMint', 2);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'setMaxWlAddressMint',
+				[2],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot adjust max mints per wallet', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await useSetterInts('updateMaxMintPerWallet', 2);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'updateMaxMintPerWallet',
+				[2],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannot enable buying WL with $LAZY', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
-		try {
-			await useSetterInts('setBuyWlWithLazy', 1);
-		}
-		catch (err) {
-			errorCount++;
-		}
-		expect(errorCount).to.be.equal(1);
-	});
 
-	it('Check Alice cannot get details of who minted', async function() {
-		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await methodCallerNoArgs('getNumberMintedByAllAddresses');
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				400_000,
+				'setBuyWlWithLazy',
+				[1],
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		try {
-			await methodCallerNoArgs('getNumberMintedByAllWlAddresses');
-		}
-		catch (err) {
-			errorCount++;
-		}
-		expect(errorCount).to.be.equal(2);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 });
 
 describe('Basic interaction with the Minter...', function() {
 	it('Associate the token to Operator', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const result = await associateTokenToAccount(operatorId, tokenId);
+		let result = await associateTokenToAccount(client, operatorId, operatorKey, extendedTestingTokenId);
 		expect(result).to.be.equal('SUCCESS');
-		// Alice will use auto asociation
+		// no longer able to let the SC execute the association for Alice (due to security model shift)
+		result = await associateTokenToAccount(client, aliceId, alicePK, extendedTestingTokenId);
+		expect(result).to.be.equal('SUCCESS');
 	});
 
 	it('Check unable to mint if contract paused (then unpause)', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 1);
-		await useSetterBool('updatePauseStatus', true);
+		const hbarCost = new Hbar(1);
 
-		let errorCount = 0;
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			400_000,
+			'updateCost',
+			[BigInt(hbarCost.toTinybars()), 1],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			400_000,
+			'updatePauseStatus',
+			[true],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// need to set allowance of $LAZY to the SC to allow payment of the FT amount.
+		result = await setFTAllowance(client, lazyTokenId, operatorId, AccountId.fromString(contractId.toString()), 5);
+
+		expect(result).to.be.equal('SUCCESS');
+
+		// attempt to mint via the SC expecting failure as PAUSED.
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await mintNFT(1, tinybarCost);
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[1],
+				hbarCost,
+			);
+
+			if (result[0]?.status?.name != 'Paused') {
+				console.log('ERROR expecting Paused:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 
 		// unpause the contract
-		await useSetterBool('updatePauseStatus', false);
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			400_000,
+			'updatePauseStatus',
+			[false],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 	});
 
 	it('Mint a token from the SC for hbar', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 0);
+		const mintCostInHbar = new Hbar(1);
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateCost',
+			[BigInt(mintCostInHbar.toTinybars()), 0],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(1, tinybarCost);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+		// no $LAZY cost so no FT allowance needed.
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			700_000,
+			'mintNFT',
+			[1],
+			mintCostInHbar,
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
+
+		console.log('Token Minted (1):', result[2].transactionId.toString());
 	});
 
 	it('Mint 19 tokens from the SC for hbar', async function() {
 		client.setOperator(operatorId, operatorKey);
-		// unpause the contract
-		await useSetterBool('updatePauseStatus', false);
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 0);
+
+		const mintCost = 1;
 
 		const toMint = 19;
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(toMint, tinybarCost * toMint, client, 4000000);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == toMint).to.be.true;
+		// no $LAZY cost so no allowance needed.
+
+		const result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			7_500_000,
+			'mintNFT',
+			[19],
+			new Hbar(mintCost * toMint),
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == toMint).to.be.true;
+
+		console.log('Token Minted (19):', result[2].transactionId.toString());
 	});
 
 	it('Check concurrent mint...', async function() {
-		client.setOperator(operatorId, operatorKey);
-		// unpause the contract
-		await useSetterBool('updatePauseStatus', false);
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 0);
+		const mintCostInHbar = new Hbar(1);
+
 		let loop = 10;
 		const promiseList = [];
 		while (loop > 0) {
-			promiseList.push(mintNFT(1, tinybarCost, client));
+			client.setOperator(operatorId, operatorKey);
+			promiseList.push(contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[1],
+				mintCostInHbar,
+			));
 			await sleep(125);
-			promiseList.push(mintNFT(1, tinybarCost, clientAlice));
+			promiseList.push(contractExecuteFunction(
+				contractId,
+				minterIface,
+				clientAlice,
+				800_000,
+				'mintNFT',
+				[1],
+				mintCostInHbar,
+			));
 			await sleep(125);
 			loop--;
 		}
@@ -700,7 +1635,7 @@ describe('Basic interaction with the Minter...', function() {
 		await Promise.all(promiseList). then((results) => {
 			for (let i = 0; i < results.length; i++) {
 				const [, serialList] = results[i];
-				sumSerials += serialList.length;
+				sumSerials += serialList[0].length;
 			}
 		});
 		expect(sumSerials == 20).to.be.true;
@@ -708,123 +1643,402 @@ describe('Basic interaction with the Minter...', function() {
 
 	it('Attempt to mint 2 with max mint @ 1, then mint 1', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 0);
-		await useSetterInts('updateMaxMint', 1);
+		const mintCost = 1;
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			250_000,
+			'updateMaxMint',
+			[1],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await mintNFT(2, tinybarCost * 2);
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				1_140_000,
+				'mintNFT',
+				[2],
+				new Hbar(mintCost * 2),
+			);
+
+			if (result[0]?.status?.name != 'MaxMintExceeded') {
+				console.log('ERROR expecting MaxMintExceeded:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
 
-		// now mint the singleton
-		const [success, serials] = await mintNFT(1, tinybarCost);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
+
+		// now mint the single NFT expecting success
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			new Hbar(mintCost),
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
 
 		client.setOperator(operatorId, operatorKey);
-		await useSetterInts('updateMaxMint', 20);
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			250_000,
+			'updateMaxMint',
+			[20],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 	});
 
 	it('Mint a token from the SC for Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
 		// paying 0.5 $LAZY to check burn works.
-		await useSetterInts('updateCost', 0, 5);
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateCost',
+			[BigInt(0), 5],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(1, 0);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+		// will need an allowance now.
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 8);
+
+		expect(result).to.be.equal('SUCCESS');
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
 	});
 
 	it('Mint a token from the SC for hbar + Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 1);
+		const hbarCost = new Hbar(1);
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateCost',
+			[BigInt(hbarCost.toTinybars()), 1],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(1, tinybarCost);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			hbarCost,
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
 	});
 
 	it('Allow contract to pay the $LAZY fee', async function() {
 		client.setOperator(operatorId, operatorKey);
-		await useSetterBool('updateContractPaysLazy', true);
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 5);
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateContractPaysLazy',
+			[true],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		const hbarCost = new Hbar(1);
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateCost',
+			[BigInt(hbarCost.toTinybars()), 5],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(1, tinybarCost);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+		// set the $LAZY allowance
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 10);
+
+		expect(result).to.be.equal('SUCCESS');
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			hbarCost,
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
 
 		// reset state
 		client.setOperator(operatorId, operatorKey);
-		await useSetterBool('updateContractPaysLazy', false);
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateContractPaysLazy',
+			[false],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 	});
 
 
 	it('Check unable to mint if not enough funds', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(10).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 1);
-		// unpause the contract
-		await useSetterBool('updatePauseStatus', false);
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateCost',
+			[BigInt(tinybarCost), 1],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// let Alice mint to test it works for a 3rd party
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
+		// set the $LAZY allowance
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 10);
+
+		expect(result).to.be.equal('SUCCESS');
+
 		try {
-			await mintNFT(1, new Hbar(1).toTinybars);
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[1],
+				new Hbar(1),
+			);
+
+			if (result[0]?.status?.name != 'NotEnoughHbar') {
+				console.log('ERROR expecting NotEnoughHbar:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check unable to mint if not yet at start time', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 1);
-		// set start time 4 seconds in future
-		await useSetterInts('updateMintStartTime', Math.floor(new Date().getTime() / 1000) + 4);
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateCost',
+			[BigInt(tinybarCost), 1],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		// set start time 8 seconds in future
+		const futureTime = parseInt(Math.floor(new Date().getTime() / 1000) + 8);
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateMintStartTime',
+			[futureTime],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		// set the $LAZY allowance
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
+		// set the $LAZY allowance
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 10);
+
+		expect(result).to.be.equal('SUCCESS');
+
 		try {
-			await mintNFT(1, new Hbar(1).toTinybars);
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[1],
+				new Hbar(1),
+			);
+
+			if (result[0]?.status?.name != 'NotOpen') {
+				console.log('ERROR expecting NotOpen:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
+
+		// sleep until past the start time
+		const now = Math.floor(new Date().getTime() / 1000);
+		const sleepTime = Math.max((futureTime - now) * 1000, 0);
+		// console.log(futureTime, '\nSleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
+		await sleep(sleepTime + 1125);
 	});
 
 	it('Check **ABLE** to mint once start time has passed', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 1);
+
+		const encodedCommand = minterIface.encodeFunctionData('getMintTiming');
+
+		let result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const mintTiming = minterIface.decodeFunctionResult('getMintTiming', result);
+
 		// sleep to ensure past the start time
-		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
-		const mintStart = Number(mintTiming[1]);
+		const mintStart = Number(mintTiming[0][1]);
 		const now = Math.floor(new Date().getTime() / 1000);
 		const sleepTime = Math.max((mintStart - now) * 1000, 0);
 		// console.log(mintStart, '\nSleeping to wait for the mint to start...', sleepTime, '(milliseconds)');
 		await sleep(sleepTime + 1125);
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(1, tinybarCost);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			new Hbar(1),
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
 	});
 });
 
@@ -832,126 +2046,416 @@ describe('Test out WL functions...', function() {
 	it('Enable Adress Based WL, check WL empty', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 0);
-		// unpause the contract
-		await useSetterBool('updateWlOnlyStatus', true);
 
-		const wl = await getSetting('getWhitelist', 'wl');
-		expect(wl.length == 0).to.be.true;
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateCost',
+			[BigInt(tinybarCost), 0],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		// shift to WL only mode
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateWlOnlyStatus',
+			[true],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		const encodedCommand = minterIface.encodeFunctionData('getWhitelist');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const wl = minterIface.decodeFunctionResult('getWhitelist', result);
+
+		expect(wl[0].length == 0).to.be.true;
 	});
 
 	it('Check Alice is unable to mint ', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
+
 		try {
-			await mintNFT(1, new Hbar(1).toTinybars);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[1],
+				new Hbar(1),
+			);
+
+			if (result[0]?.status?.name != 'NotWL') {
+				console.log('ERROR expecting NotWL:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Add Alice to WL & can mint', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const result = await useSetterAddresses('addToWhitelist', [aliceId.toSolidityAddress()]);
-		expect(result == 'SUCCESS').to.be.true;
-		// now Alice should be able to mint
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'addToWhitelist',
+			[[aliceId.toSolidityAddress()]],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
 		client.setOperator(aliceId, alicePK);
-		const tinybarCost = new Hbar(1).toTinybars();
-		const [success, serials] = await mintNFT(1, tinybarCost);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			new Hbar(1),
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
 	});
 
 	it('Remove Alice from WL, let Alice buy in with Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const result = await useSetterAddresses('removeFromWhitelist', [aliceId.toSolidityAddress()]);
-		expect(result == 'SUCCESS').to.be.true;
-		let wl = await getSetting('getWhitelist', 'wl');
-		expect(wl.length == 0).to.be.true;
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'removeFromWhitelist',
+			[[aliceId.toSolidityAddress()]],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// mirror node can take a few seconds to update
+		await sleep(5000);
+
+		// call getWhitelist from the mirror node
+		const encodedCommand = minterIface.encodeFunctionData('getWhitelist');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		let wl = minterIface.decodeFunctionResult('getWhitelist', result);
+
+		if (wl[0].length != 0) {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// by default unable to buy in with LAZY - check assumption
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		// set the $LAZY allowance
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 10);
+
+		expect(result).to.be.equal('SUCCESS');
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			await methodCallerNoArgs('buyWlWithLazy', 500000);
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				500_000,
+				'buyWlWithLazy',
+			);
+
+			if (result[0]?.status?.name != 'WLPurchaseFailed') {
+				console.log('ERROR expecting WLPurchaseFailed:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 
 		client.setOperator(operatorId, operatorKey);
-		let [response] = await useSetterInts('setBuyWlWithLazy', 1);
-		expect(response == 'SUCCESS').to.be.true;
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'setBuyWlWithLazy',
+			[1],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// now Alice can buy that WL spot
 		client.setOperator(aliceId, alicePK);
-		[response] = await methodCallerNoArgs('buyWlWithLazy', 500000);
-		expect(response == 'SUCCESS').to.be.true;
 
-		wl = await getSetting('getWhitelist', 'wl');
-		expect(AccountId.fromSolidityAddress(wl[0]).toString() ==
-			aliceId.toString()).to.be.true;
+		// set the $LAZY allowance
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 20);
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'buyWlWithLazy',
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		// let mirror node catch up
+		await sleep(4000);
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		wl = minterIface.decodeFunctionResult('getWhitelist', result);
+
+		expect(wl[0][0].slice(2).toLowerCase() == aliceId.toSolidityAddress().toLowerCase()).to.be.true;
 	});
 
 	it('Set max cap for WL address, buy in, mint and then check it blocks Alice', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const [result] = await useSetterInts('setMaxWlAddressMint', 1);
-		expect(result == 'SUCCESS').to.be.true;
+
+		// two slots per buy-in
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'setMaxWlAddressMint',
+			[2],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 		// setup mint costs
-		const tinybarCost = new Hbar(1).toTinybars();
-		await useSetterInts('updateCost', tinybarCost, 0);
+		const cost = 1;
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'updateCost',
+			[BigInt(new Hbar(cost).toTinybars()), 0],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		client.setOperator(aliceId, alicePK);
 		// Alice buys into WL again it should give her one slot
-		const [response] = await methodCallerNoArgs('buyWlWithLazy', 500000);
-		expect(response == 'SUCCESS').to.be.true;
 
-		let errorCount = 0;
+		// set the $LAZY allowance
+		result = await setFTAllowance(client, lazyTokenId, aliceId, AccountId.fromString(contractId.toString()), 20);
+
+		expect(result).to.be.equal('SUCCESS');
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'buyWlWithLazy',
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// should fail as only space for a single mint
-			await mintNFT(2, tinybarCost * 2);
+			// should fail as only space for two mints
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[3],
+				new Hbar(cost * 3),
+			);
+
+			if (result[0]?.status?.name != 'NotEnoughWLSlots') {
+				console.log('ERROR expecting NotEnoughWLSlots:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
+
 		// should pass...
-		const [success, serials] = await mintNFT(1, tinybarCost);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			new Hbar(cost),
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
+
 		try {
 			// should fail as cap exhausted
-			await mintNFT(1, tinybarCost);
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[2],
+				new Hbar(cost),
+			);
+
+			if (result[0]?.status?.name != 'NotEnoughWLSlots') {
+				console.log('ERROR expecting NotEnoughWLSlots:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(2);
+		expect(expectedErrors).to.be.equal(2);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Owner can get WL / mint history', async function() {
 		client.setOperator(operatorId, operatorKey);
-		let [status, result] = await methodCallerNoArgs('getNumberMintedByAllAddresses', 600000);
-		expect(status == 'SUCCESS').to.be.true;
-		let walletList = result['walletList'];
-		let numMints = result['numMintedList'];
+		// call getNumberMintedByAllAddresses from the mirror node
+		const encodedCommand = minterIface.encodeFunctionData('getNumberMintedByAllAddresses');
+
+		let result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const minted = minterIface.decodeFunctionResult('getNumberMintedByAllAddresses', result);
+
+
+		let walletList = minted[0];
+		let numMints = minted[1];
 		let totalMinted = 0;
 
 		for (let w = 0; w < walletList.length; w++) {
-			console.log('Regular mint:', AccountId.fromSolidityAddress(walletList[w]).toString(), Number(numMints[w]));
+			console.log('Regular mint:', AccountId.fromEvmAddress(0, 0, walletList[w]).toString(), Number(numMints[w]));
 			totalMinted += Number(numMints[w]);
 		}
 
-		[status, result] = await methodCallerNoArgs('getNumberMintedByAllWlAddresses', 600000);
-		expect(status == 'SUCCESS').to.be.true;
-		walletList = result['wlWalletList'];
-		numMints = result['wlNumMintedList'];
+		// now call getNumberMintedByAllWlAddresses from the mirror node
+
+		const encodedCommand2 = minterIface.encodeFunctionData('getNumberMintedByAllWlAddresses');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand2,
+			operatorId,
+			false,
+		);
+
+		const wlMinted = minterIface.decodeFunctionResult('getNumberMintedByAllWlAddresses', result);
+
+		walletList = wlMinted[0];
+		numMints = wlMinted[1];
 		let totalWlMints = 0;
 
 		for (let w = 0; w < walletList.length; w++) {
-			console.log('WL mint:', AccountId.fromSolidityAddress(walletList[w]).toString(), Number(numMints[w]));
+			console.log('WL mint:', AccountId.fromEvmAddress(0, 0, walletList[w]).toString(), Number(numMints[w]));
 			totalWlMints += Number(numMints[w]);
 		}
 		expect(totalMinted > totalWlMints).to.be.true;
@@ -959,62 +2463,184 @@ describe('Test out WL functions...', function() {
 
 	it('Enables buying WL based on serial', async function() {
 		client.setOperator(operatorId, operatorKey);
-		await useSetterAddress('updateWlToken', wlTokenId);
-		let [status, result] = await methodCallerNoArgs('clearWhitelist', 300000);
-		// console.log('WL entries removed:', Number(result['numAddressesRemoved']));
-		expect(status == 'SUCCESS').to.be.true;
-		[status] = await useSetterInts('setMaxWlAddressMint', 1);
-		expect(status == 'SUCCESS').to.be.true;
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'updateWlToken',
+			[wlTokenId.toSolidityAddress()],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'setMaxWlAddressMint',
+			[1],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
 		// setup mint costs
 		const tinybarCost = new Hbar(1).toTinybars();
-		[status, result] = await useSetterInts('updateCost', tinybarCost, 0);
-		expect(status == 'SUCCESS').to.be.true;
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'updateCost',
+			[BigInt(tinybarCost), 0],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		// buy WL for operator
-		[status, result] = await useSetterInt256Array('buyWlWithTokens', [1]);
-		expect(status == 'SUCCESS').to.be.true;
-		expect(Number(result['wlSpotsPurchased']) == 1).to.be.true;
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'buyWlWithTokens',
+			[[1]],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		expect(Number(result[1][0]) == 1).to.be.true;
+
 		// send two NFTs to Alice to check she can buy WL with the serials
-		await transferNFTBySDK(operatorId, aliceId, wlTokenId, [2, 3]);
+		await sendNFT(
+			client,
+			operatorId,
+			aliceId,
+			wlTokenId,
+			[2, 3],
+		);
+
 		client.setOperator(aliceId, alicePK);
-		[status, result] = await useSetterInt256Array('buyWlWithTokens', [2, 3]);
-		expect(status == 'SUCCESS').to.be.true;
-		expect(Number(result['wlSpotsPurchased']) == 2).to.be.true;
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'buyWlWithTokens',
+			[[2, 3]],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// console.log('DEBUG WL slots:', Number(result[1][0]));
+		expect(Number(result[1][0])).to.be.greaterThanOrEqual(2);
+
+		// let mirror node catch up
+		await sleep(4000);
 
 		// expect operator to have 1 WL slot and alice to have 2
-		result = await getSettings('getWhitelist', 'wl', 'wlQty');
-		expect(result[0].length == 2).to.be.true;
+		// call getWhitelist from the mirror node
+		const encodedCommand = minterIface.encodeFunctionData('getWhitelist');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const wlData = minterIface.decodeFunctionResult('getWhitelist', result);
+		// console.log('DEBUG WL:', wlData);
 		// order not g'teed but should be sum to 3.
-		expect((Number(result[1][0]) + Number(result[1][1])) == 3).to.be.true;
+		expect((Number(wlData[1][0]) + Number(wlData[1][1]))).to.be.greaterThanOrEqual(3);
+		expect(wlData[0].length).to.be.equal(2);
 	});
 
 	it('ensure no double spend on the serial', async function() {
 		// attempt to buy WL for operator again using serial 1 - expect failure
 		client.setOperator(operatorId, operatorKey);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// should fail as already redeemed
-			await useSetterInt256Array('buyWlWithTokens', [1]);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				500_000,
+				'buyWlWithTokens',
+				[[1]],
+			);
+
+			if (result[0]?.status?.name != 'WLTokenUsed') {
+				console.log('ERROR expecting WLTokenUsed:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('ensure user must own the serial', async function() {
 		// attempt to buy WL for operator again using serial 1 - expect failure
 		client.setOperator(aliceId, alicePK);
 		// have Alice try and buy WL using serial 4 that she does not own.
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// should fail as already redeemed
-			await useSetterInt256Array('buyWlWithTokens', [4]);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				500_000,
+				'buyWlWithTokens',
+				[[4]],
+			);
+
+			if (result[0]?.status?.name != 'NotTokenOwner') {
+				console.log('ERROR expecting NotTokenOwner:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 });
 
@@ -1022,120 +2648,400 @@ describe('Test out Discount mint functions...', function() {
 	it('getCost method to check discount / non-discount cost', async function() {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
-		let [status, result] = await useSetterInts('updateCost', tinybarCost, 1);
-		expect(status == 'SUCCESS').to.be.true;
 
-		[status, result] = await useSetterInts('updateWlDiscount', 20);
-		expect(status == 'SUCCESS').to.be.true;
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'updateCost',
+			[BigInt(tinybarCost), 1],
+		);
 
-		[status, result] = await methodCallerNoArgs('clearWhitelist', 300000);
-		expect(Number(result['numAddressesRemoved']) == 2).to.be.true;
-		expect(status == 'SUCCESS').to.be.true;
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'updateWlDiscount',
+			[20],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'clearWhitelist',
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		expect(Number(result[1][0]) == 2).to.be.true;
+
+		// let mirror node catch up
+		await sleep(4000);
+
+		// call getWhitelist from the mirror node
+		let encodedCommand = minterIface.encodeFunctionData('getWhitelist');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const wl = minterIface.decodeFunctionResult('getWhitelist', result);
+
+		expect(wl[0].length == 0).to.be.true;
 
 		client.setOperator(aliceId, alicePK);
-		[status, result] = await methodCallerNoArgs('getCost', 300000);
-		expect(status == 'SUCCESS').to.be.true;
-		expect(Number(result['hbarCost']) == tinybarCost).to.be.true;
-		expect(Number(result['lazyCost']) == 1).to.be.true;
+		// call getCost from the mirror node
+		encodedCommand = minterIface.encodeFunctionData('getCost');
 
-		// could allow Alice to buy in for Lazy instead
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		let cost = minterIface.decodeFunctionResult('getCost', result);
+
+		// console.log('DEBUG Cost:', cost);
+
+		expect(Number(cost[0]) == tinybarCost).to.be.true;
+		expect(Number(cost[1]) == 1).to.be.true;
+
+		// add Alice ot the WL
 		client.setOperator(operatorId, operatorKey);
-		result = await useSetterAddresses('addToWhitelist', [aliceId.toSolidityAddress()]);
-		expect(result == 'SUCCESS').to.be.true;
 
-		client.setOperator(aliceId, alicePK);
-		[status, result] = await methodCallerNoArgs('getCost', 300000);
-		expect(status == 'SUCCESS').to.be.true;
-		expect(Number(result['hbarCost']) == new Hbar(0.8).toTinybars()).to.be.true;
-		expect(Number(result['lazyCost']) == 0).to.be.true;
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			350_000,
+			'addToWhitelist',
+			[[aliceId.toSolidityAddress()]],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// let mirror node catch up
+		await sleep(4000);
+
+		// get the cost again expect discount
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			aliceId,
+			false,
+		);
+
+		cost = minterIface.decodeFunctionResult('getCost', result);
+
+		expect(Number(cost[0]) == new Hbar(0.8).toTinybars()).to.be.true;
+		expect(Number(cost[1]) == 0).to.be.true;
 	});
 
 	it('WL mint, at discount', async function() {
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(1, new Hbar(0.8).toTinybars());
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
+
+		const result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			new Hbar(0.8),
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
 	});
 
 	it('Ensure non-WL has correct price for mint', async function() {
 		client.setOperator(operatorId, operatorKey);
-		await useSetterBool('updateWlOnlyStatus', false);
-		let errorCount = 0;
-		try {
-			const tinybarCost = new Hbar(0.8).toTinybars();
-			await mintNFT(1, tinybarCost);
-		}
-		catch (err) {
-			errorCount++;
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'updateWlOnlyStatus',
+			[false],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
 		}
 
-		const [success, serials] = await mintNFT(1, new Hbar(1).toTinybars());
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
-		expect(errorCount).to.be.equal(1);
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
+		try {
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[1],
+				new Hbar(0.8),
+			);
+
+			if (result[0]?.status?.name != 'NotEnoughHbar') {
+				console.log('ERROR expecting NotEnoughHbar:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
+		}
+		catch (err) {
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
+		}
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
+
+		// pay the full amount for a mint
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			new Hbar(1),
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		expect(result[1][0].length == 1).to.be.true;
 	});
 
 	it('Checks we can update the max mints per wallet and cap it', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
-		let [status, result] = await useSetterInts('updateCost', tinybarCost, 0);
-		expect(status == 'SUCCESS').to.be.true;
+		const hbarCost = new Hbar(1);
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updateCost',
+			[BigInt(hbarCost.toTinybars()), 0],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
 		// check how many we have already minted
-		[status, result] = await methodCallerNoArgs('getNumberMintedByAddress', 600000);
-		expect(status == 'SUCCESS').to.be.true;
+		// call getNumberMintedByAddress from the mirror node
+		const encodedCommand = minterIface.encodeFunctionData('getNumberMintedByAddress');
+
+		await sleep(4000);
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const minted = minterIface.decodeFunctionResult('getNumberMintedByAddress', result);
+
 		// add 1 for headroom
-		const numMints = Number(result['numMinted']) + 1;
-		// get the max per Wallet
-		await useSetterInts('updateMaxMintPerWallet', numMints);
-		let mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
-		expect(Number(mintEconomics[7]) == numMints).to.be.true;
+		const numMints = Number(minted[0]) + 1;
+
+		// update the max per Wallet
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updateMaxMintPerWallet',
+			[numMints],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// let mirror node catch up
+		await sleep(5000);
+
+		// get getMintEconomics from the mirror node
+		const encodedCommand2 = minterIface.encodeFunctionData('getMintEconomics');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand2,
+			operatorId,
+			false,
+		);
+
+		let mintEconomics = minterIface.decodeFunctionResult('getMintEconomics', result);
+		// console.log('DEBUG mintEconomics:', mintEconomics);
+
+		expect(Number(mintEconomics[0][7])).to.be.equal(numMints);
 
 		// mint one
-		const [success, serials] = await mintNFT(1, tinybarCost);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 1).to.be.true;
-
-		let errorCount = 0;
-		// second should fail
-		try {
-			await mintNFT(1, tinybarCost);
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFT',
+			[1],
+			hbarCost,
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
 		}
-		catch (err) {
-			errorCount++;
-		}
-
-		expect(errorCount).to.be.equal(1);
+		expect(result[1][0].length == 1).to.be.true;
 
 		// clean-up
-		await useSetterInts('updateMaxMintPerWallet', 0);
-		mintEconomics = await getSetting('getMintEconomics', 'mintEconomics');
-		expect(Number(mintEconomics[7]) == 0).to.be.true;
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updateMaxMintPerWallet',
+			[0],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
+		try {
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				800_000,
+				'mintNFT',
+				[1],
+				new Hbar(Number(hbarCost.toTinybars()) - 10, HbarUnit.Tinybar),
+			);
+
+			if (result[0]?.status?.name != 'NotEnoughHbar') {
+				console.log('ERROR expecting NotEnoughHbar:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
+		}
+		catch (err) {
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
+		}
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
+
+		await sleep(4000);
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand2,
+			operatorId,
+			false,
+		);
+
+		mintEconomics = minterIface.decodeFunctionResult('getMintEconomics', result);
+		expect(Number(mintEconomics[0][7])).to.be.equal(0);
 	});
 });
 
 describe('Test out refund functions...', function() {
 	it('Check anyone can burn NFTs', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
-		let [status, result] = await useSetterInts('updateCost', tinybarCost, 0);
-		expect(status == 'SUCCESS').to.be.true;
+		const cost = 1;
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updateCost',
+			[BigInt(new Hbar(cost).toTinybars()), 0],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 
 		client.setOperator(aliceId, alicePK);
-		const [success, serials] = await mintNFT(2, tinybarCost * 2);
-		expect(success == 'SUCCESS').to.be.true;
-		expect(serials.length == 2).to.be.true;
 
-		client.setOperator(operatorId, operatorKey);
-		[status, result] = await methodCallerNoArgs('getNumberMintedByAllAddresses', 600000);
-		expect(status == 'SUCCESS').to.be.true;
-		const walletList = result['walletList'];
-		const numMints = result['numMintedList'];
-		let totalMinted = 0;
-
-		// gather total minted
-		for (let w = 0; w < walletList.length; w++) {
-			totalMinted += Number(numMints[w]);
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			1_000_000,
+			'mintNFT',
+			[2],
+			new Hbar(cost * 2),
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
 		}
+		const serials = result[1][0];
+		expect(result[1][0].length == 2).to.be.true;
+
+		console.log('Mint (2) tx:', result[2]?.transactionId?.toString());
+
+		await sleep(5000);
+
+		// call totalMinted from the mirror node
+		const encodedCommand = minterIface.encodeFunctionData('totalMinted');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const totalMinted = minterIface.decodeFunctionResult('totalMinted', result);
 
 		// Alice now burns her NFTs
 		const serialsAsNum = [];
@@ -1143,86 +3049,382 @@ describe('Test out refund functions...', function() {
 			serialsAsNum.push(Number(serials[s]));
 		}
 		client.setOperator(aliceId, alicePK);
-		const [txStatus, txResObj] = await useSetterInt64Array('burnNFTs', serialsAsNum);
-		expect(txStatus == 'SUCCESS').to.be.true;
+
+		// set NFT allowance
+		result = await setNFTAllowanceAll(client, [extendedTestingTokenId], aliceId, AccountId.fromString(contractId.toString()));
+
+		expect(result).to.be.equal('SUCCESS');
+
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			750_000,
+			'burnNFTs',
+			[serialsAsNum],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
 		// check supply is now 2 less
-		expect(totalMinted == (Number(txResObj['newTotalSupply']) + 2)).to.be.true;
+
+		if (Number(totalMinted[0]) != (Number(result[1][0]) + 2)) {
+			console.log('Error:', totalMinted, result);
+			fail();
+		}
 	});
 
-	it('Enable refund (& burn), mint then refund - hbar', async function() {
+	it.skip('Enable refund (& burn), mint then refund - hbar', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 
-	it('Enable refund (& burn), mint then refund - lazy', async function() {
+	it.skip('Enable refund (& burn), mint then refund - lazy', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 
-	it('Shift to refund (hbar & lazy) but store NFT on refund', async function() {
+	it.skip('Shift to refund (hbar & lazy) but store NFT on refund', async function() {
 		expect.fail(0, 1, 'Not implemented');
 	});
 
-	it('Check Owner can withdraw NFTs exchanged for refund', async function() {
+	it.skip('Check Owner can withdraw NFTs exchanged for refund', async function() {
 		expect.fail(0, 1, 'Not implemented');
+	});
+});
+
+// test out random selection
+describe('Test out random selection...', function() {
+	it('Mint 10 NFTs and check the random selection', async function() {
+		// initialise a new token with fees and 10 metadata items
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updateCost',
+			[BigInt(tinybarCost), 0],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// deploy PRNG
+		if (process.env.PRNG_CONTRACT_ID) {
+			console.log('\n-Using existing PRNG:', process.env.PRNG_CONTRACT_ID);
+			prngId = ContractId.fromString(process.env.PRNG_CONTRACT_ID);
+		}
+		else {
+			const gasLimit = 800_000;
+			console.log('\n- Deploying contract...', prngName, '\n\tgas@', gasLimit);
+			const prngJson = JSON.parse(
+				fs.readFileSync(
+					`./artifacts/contracts/${prngName}.sol/${prngName}.json`,
+				),
+			);
+
+			const prngBytecode = prngJson.bytecode;
+
+			[prngId] = await contractDeployFunction(client, prngBytecode, gasLimit);
+
+			console.log(
+				`PRNG contract created with ID: ${prngId} / ${prngId.toSolidityAddress()}`,
+			);
+		}
+
+		expect(prngId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// update PRNG object to minter
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updatePrng',
+			[prngId.toSolidityAddress()],
+		);
+
+		// loop three times in batches of 60 to reset contract
+		for (let i = 0; i < 2; i++) {
+			// reset the contract
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				3_200_000,
+				'resetContract',
+				[i == 0 ? true : false, 100],
+			);
+			if (result[0]?.status?.toString() != 'SUCCESS') {
+				console.log('Error:', result);
+				fail();
+			}
+
+			console.log(`reset tx (${i + 1}):`, result[2]?.transactionId?.toString());
+		}
+
+		// create a string list for metadata form 0 to 9
+		const metadata = [];
+		for (let i = 0; i < 10; i++) {
+			metadata.push(i.toString());
+		}
+
+		// upload metadata
+		const [success, totalLoaded] = await uploadMetadata(metadata);
+		expect(success).to.be.equal('SUCCESS');
+		expect(totalLoaded == 10).to.be.true;
+
+		const royaltyList = [];
+		// initialize a new NFT mint with 10 metadata items
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			1_000_000,
+			'initialiseNFTMint',
+			[
+				'PRNG-test',
+				'PRNG',
+				'Random testing memo',
+				'ipfs://PRNG/',
+				royaltyList,
+				0,
+			],
+			MINT_PAYMENT,
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		const randomTokenId = TokenId.fromSolidityAddress(result[1][0]);
+		console.log('Token Created:', randomTokenId.toString());
+		expect(randomTokenId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// associate the new token to operator
+		result = await associateTokenToAccount(client, operatorId, operatorKey, randomTokenId);
+		expect(result).to.be.equal('SUCCESS');
+
+		// double check contract is unpaused
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			400_000,
+			'updatePauseStatus',
+			[false],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// mint 10 items
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			5_000_000,
+			'mintNFT',
+			[10],
+			new Hbar(10),
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		console.log('Mint (10) tx:', result[2]?.transactionId?.toString());
+
+		const metadataList = result[1][1];
+
+		expect(result[1][0].length == 10).to.be.true;
+
+
+		// check the metadata is not sequential
+		let sequential = true;
+		for (let i = (metadataList.length - 1); i >= 0; i--) {
+			const strFromHex = hex_to_ascii(metadataList[i]);
+			const lastCharAsNumber = Number(strFromHex.slice(-1));
+			// check last char is a number
+			if (isNaN(lastCharAsNumber)) {
+				console.log('Error - expecting number:', hex_to_ascii, 'from', strFromHex);
+				fail();
+			}
+			if (i != lastCharAsNumber) {
+				sequential = false;
+				break;
+			}
+		}
+		expect(sequential).to.be.false;
 	});
 });
 
 describe('Withdrawal tests...', function() {
 	it('Check Alice cannnot withdraw hbar', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// using a dummy value [check onece testnet resets if still passes]
-			await transferHbarFromContract(0.1);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				500_000,
+				'transferHbar',
+				[operatorId.toSolidityAddress(), 1],
+
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Alice cannnot withdraw Lazy', async function() {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
-			// try requesting a min lot
-			await retrieveLazyFromContract(aliceId, 1);
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				500_000,
+				'retrieveLazy',
+				[operatorId.toSolidityAddress(), 1],
+
+			);
+
+			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable:', result);
+				unexpectedErrors++;
+			}
+			else {
+				expectedErrors++;
+			}
 		}
 		catch (err) {
-			errorCount++;
+			console.log('Unxpected Error:', err);
+			unexpectedErrors++;
 		}
-		expect(errorCount).to.be.equal(1);
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 	it('Check Owner cannot pull funds before X time has elapsed from last mint', async function() {
 		client.setOperator(operatorId, operatorKey);
-		const mintTiming = await getSetting('getMintTiming', 'mintTiming');
-		const lastMint = Number(mintTiming[0]);
+
+		// get getMintTiming from the mirror node
+		const encodedCommand = minterIface.encodeFunctionData('getMintTiming');
+
+		let result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const mintTiming = minterIface.decodeFunctionResult('getMintTiming', result);
+
+		const lastMint = Number(mintTiming[0][0]);
 		if (lastMint != 0) {
 			const clockTime = Math.floor(new Date().getTime() / 1000);
 			const delay = clockTime - lastMint + 8;
 			// set refund window timing -> 5 seconds on the clock
-			await useSetterInts('updateRefundWindow', delay);
-			// console.log('Delay', delay, 'last mint', lastMint, 'clock', clockTime);
-			// withdrawal of funds should be blocked
-			const [contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
-			let errorCount = 0;
-			try {
-				await transferHbarFromContract(Number(contractHbarBal.toTinybars()), HbarUnit.Tinybar);
+
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				300_000,
+				'updateRefundWindow',
+				[delay],
+			);
+
+			if (result[0]?.status?.toString() != 'SUCCESS') {
+				console.log('Error:', result);
+				fail();
 			}
-			catch {
-				errorCount++;
+
+			// withdrawal of funds should be blocked
+			const contractLazyBal = await checkMirrorBalance(env, AccountId.fromString(contractId.toString()), lazyTokenId);
+			const contractBal = await checkMirrorHbarBalance(env, AccountId.fromString(contractId.toString()));
+
+			let expectedErrors = 0;
+			let unexpectedErrors = 0;
+
+			try {
+				result = await contractExecuteFunction(
+					contractId,
+					minterIface,
+					client,
+					300_000,
+					'transferHbar',
+					[operatorId.toSolidityAddress(), contractBal],
+				);
+
+				if (result[0]?.status?.name != 'HbarCooldown') {
+					console.log('ERROR expecting HbarCooldown:', result);
+					unexpectedErrors++;
+				}
+				else {
+					expectedErrors++;
+				}
+			}
+			catch (err) {
+				console.log('Unxpected Error:', err);
+				unexpectedErrors++;
 			}
 
 			try {
-				if (contractLazyBal > 0) {
-					const pullLazy = await retrieveLazyFromContract(operatorId, contractLazyBal);
-					expect(pullLazy).to.be.equal('SUCCESS');
+				result = await contractExecuteFunction(
+					contractId,
+					minterIface,
+					client,
+					300_000,
+					'retrieveLazy',
+					[operatorId.toSolidityAddress(), contractLazyBal],
+				);
+
+				if (result[0]?.status?.name != 'LazyCooldown') {
+					console.log('ERROR expecting LazyCooldown:', result);
+					unexpectedErrors++;
+				}
+				else {
+					expectedErrors++;
 				}
 			}
-			catch {
-				errorCount++;
+			catch (err) {
+				console.log('Unxpected Error:', err);
+				unexpectedErrors++;
 			}
-			expect(errorCount).to.be.equal(2);
+
+			expect(expectedErrors).to.be.equal(2);
+			expect(unexpectedErrors).to.be.equal(0);
 			// sleep the required time to ensure next pull should work.
 			await sleep(delay * 1000);
 		}
@@ -1230,151 +3432,33 @@ describe('Withdrawal tests...', function() {
 
 	it('Check Owner can pull hbar & Lazy', async function() {
 		client.setOperator(operatorId, operatorKey);
-		let [contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
-		const result = await transferHbarFromContract(Number(contractHbarBal.toTinybars()), HbarUnit.Tinybar);
-		console.log('Clean-up -> Retrieve hbar from Contract');
-		if (contractLazyBal > 0) {
-			const pullLazy = await retrieveLazyFromContract(operatorId, contractLazyBal);
-			expect(pullLazy).to.be.equal('SUCCESS');
-		}
-		[contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
-		console.log('Contract ending hbar balance:', contractHbarBal.toString());
-		console.log('Contract ending Lazy balance:', contractLazyBal.toString());
-		expect(result).to.be.equal('SUCCESS');
-	});
 
-	it('Cleans up -> retrieve hbar/Lazy', async function() {
-		// get Alice balance
-		let [aliceLazyBal, aliceHbarBal, aliceNftBal] = await getAccountBalance(aliceId);
-		// SDK transfer back to operator
-		client.setOperator(aliceId, alicePK);
-		if (aliceLazyBal > 0) {
-			const lazyReceipt = await ftTansferFcn(aliceId, operatorId, aliceLazyBal, lazyTokenId);
-			expect(lazyReceipt == 'SUCCESS').to.be.true;
+		await sleep(7000);
+		let balance = await checkMirrorHbarBalance(env, aliceId);
+		balance -= 1_000_000;
+		console.log('sweeping alice', balance / 10 ** 8);
+		let result = await sweepHbar(client, aliceId, alicePK, operatorId, new Hbar(balance, HbarUnit.Tinybar));
+		console.log('alice:', result);
+
+		// get contract hbar balance
+		const contractBal = await checkMirrorHbarBalance(env, AccountId.fromString(contractId.toString()));
+
+		// now transfer out that 1 hbar
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'transferHbar',
+			[operatorId.toSolidityAddress(), contractBal],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('ERROR:', result);
+			fail();
 		}
-		const receipt = await hbarTransferFcn(aliceId, operatorId, aliceHbarBal.toBigNumber().minus(0.05));
-		console.log('Clean-up -> Retrieve hbar/Lazy from Alice');
-		// reverting operator as Alice should be drained
-		client.setOperator(operatorId, operatorKey);
-		[aliceLazyBal, aliceHbarBal, aliceNftBal] = await getAccountBalance(aliceId);
-		console.log('Alice ending hbar balance:', aliceHbarBal.toString());
-		console.log('Alice ending Lazy balance:', aliceLazyBal.toString());
-		console.log('Alice ending NFT balance:', aliceNftBal.toString());
-		expect(receipt == 'SUCCESS').to.be.true;
 	});
 });
-
-/**
- * Helper function to get the current settings of the contract
- * @param {string} fcnName the name of the getter to call
- * @param {string} expectedVar the variable to exeppect to get back
- * @param {number=100000} gasLim allows gas veride
- * @return {*}
- */
-// eslint-disable-next-line no-unused-vars
-async function getSetting(fcnName, expectedVar, gasLim = 100000) {
-	// check the Lazy Token and LSCT addresses
-	// generate function call with function name and parameters
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
-
-	// query the contract
-	const contractCall = await new ContractCallQuery()
-		.setContractId(contractId)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setMaxQueryPayment(new Hbar(2))
-		.setGas(gasLim)
-		.execute(client);
-	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
-	return queryResult[expectedVar];
-}
-
-/**
- * Helper function to get the current settings of the contract
- * @param {string} fcnName the name of the getter to call
- * @param {string} expectedVars the variable to exeppect to get back
- * @return {*} array of results
- */
-// eslint-disable-next-line no-unused-vars
-async function getSettings(fcnName, ...expectedVars) {
-	// check the Lazy Token and LSCT addresses
-	// generate function call with function name and parameters
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
-
-	// query the contract
-	const contractCall = await new ContractCallQuery()
-		.setContractId(contractId)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setMaxQueryPayment(new Hbar(2))
-		.setGas(100000)
-		.execute(client);
-	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
-	const results = [];
-	for (let v = 0 ; v < expectedVars.length; v++) {
-		results.push(queryResult[expectedVars[v]]);
-	}
-	return results;
-}
-
-/**
- * Helper method to encode a contract query function
- * @param {string} functionName name of the function to call
- * @param {string[]} parameters string[] of parameters - typically blank
- * @returns {Buffer} encoded function call
- */
-function encodeFunctionCall(functionName, parameters) {
-	const functionAbi = abi.find((func) => func.name === functionName && func.type === 'function');
-	const encodedParametersHex = web3.eth.abi.encodeFunctionCall(functionAbi, parameters).slice(2);
-	return Buffer.from(encodedParametersHex, 'hex');
-}
-
-/**
- * Helper function for FT transfer
- * @param {AccountId} sender
- * @param {AccountId} receiver
- * @param {Number} amount
- * @param {TokenId} token
- * @returns {TransactionReceipt | any}
- */
-async function ftTansferFcn(sender, receiver, amount, token) {
-	const transferTx = new TransferTransaction()
-		.addTokenTransfer(token, sender, -amount)
-		.addTokenTransfer(token, receiver, amount)
-		.freezeWith(client);
-	const transferSign = await transferTx.sign(operatorKey);
-	const transferSubmit = await transferSign.execute(client);
-	const transferRx = await transferSubmit.getReceipt(client);
-	return transferRx.status.toString();
-}
-
-/**
- * Request hbar from the contract
- * @param {number} amount
- * @param {HbarUnit=} units defaults to Hbar as the unit type
- */
-async function transferHbarFromContract(amount, units = HbarUnit.Hbar) {
-	const gasLim = 400000;
-	const params = new ContractFunctionParameters()
-		.addAddress(operatorId.toSolidityAddress())
-		.addUint256(new Hbar(amount, units).toTinybars());
-	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'transferHbar', params);
-	return callHbarRx.status.toString();
-}
-
-/**
- *
- * @param {Number} quantity
- * @param {Number | Long} tinybarPmt
- * @param {Client=} clientToUse
- * @param {Number=} gasLim
- */
-// eslint-disable-next-line no-unused-vars
-async function mintNFT(quantity, tinybarPmt, clientToUse = client, gasLim = 2000000) {
-	const params = [quantity];
-
-	const [mintRx, mintResults] =
-		await contractExecuteWithStructArgs(contractId, gasLim, 'mintNFT', params, new Hbar(tinybarPmt, HbarUnit.Tinybar), clientToUse);
-	return [mintRx.status.toString(), mintResults['serials']] ;
-}
 
 /**
  * Method top upload the metadata using chunking
@@ -1391,446 +3475,22 @@ async function uploadMetadata(metadata) {
 		for (let inner = 0; (inner < uploadBatchSize) && ((inner + outer) < metadata.length); inner++) {
 			dataToSend.push(metadata[inner + outer]);
 		}
-		[status, result] = await useSetterStringArray('addMetadata', dataToSend, 1500000);
-		totalLoaded = Number(result['totalLoaded']);
-		// console.log('Uploaded metadata:', totalLoaded);
+		// use addMetadata method
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000 + (dataToSend.length * 20_000),
+			'addMetadata',
+			[dataToSend],
+		);
+
+		status = result[0].status.toString();
+		totalLoaded = Number(result[1][0]);
+		console.log('Uploaded:', totalLoaded, 'of', metadata.length);
 	}
 
 	return [status, totalLoaded];
-}
-
-/**
- *
- * @param {string} name
- * @param {string} symbol
- * @param {string} memo
- * @param {string} cid
- * @param {*} royaltyList
- * @param {Number=0} maxSupply
- * @param {Number=1000000} gasLim
- */
-async function initialiseNFTMint(name, symbol, memo, cid, royaltyList, maxSupply = 0, gasLim = 1000000) {
-	const params = [name, symbol, memo, cid, royaltyList, maxSupply];
-
-	const [initialiseRx, initialiseResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'initialiseNFTMint', params, MINT_PAYMENT);
-	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress'], initialiseResults['maxSupply']] ;
-}
-
-async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar, clientToUse = client) {
-	// use web3.eth.abi to encode the struct for sending.
-	// console.log('pre-encode:', JSON.stringify(params, null, 4));
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, params);
-
-	const contractExecuteTx = await new ContractExecuteTransaction()
-		.setContractId(cId)
-		.setGas(gasLim)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setPayableAmount(amountHbar)
-		.freezeWith(clientToUse)
-		.execute(clientToUse);
-
-	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(clientToUse);
-	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(clientToUse);
-	return [contractExecuteRx, contractResults, record];
-}
-
-/**
- * Helper function for calling the contract methods
- * @param {ContractId} cId the contract to call
- * @param {number | Long.Long} gasLim the max gas
- * @param {string} fcnName name of the function to call
- * @param {ContractFunctionParameters} params the function arguments
- * @param {string | number | Hbar | Long.Long | BigNumber} amountHbar the amount of hbar to send in the methos call
- * @returns {[TransactionReceipt, any, TransactionRecord]} the transaction receipt and any decoded results
- */
-async function contractExecuteFcn(cId, gasLim, fcnName, params, amountHbar) {
-	const contractExecuteTx = await new ContractExecuteTransaction()
-		.setContractId(cId)
-		.setGas(gasLim)
-		.setFunction(fcnName, params)
-		.setPayableAmount(amountHbar)
-		.execute(client);
-
-	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
-	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
-	return [contractExecuteRx, contractResults, record];
-}
-
-/**
- * Decodes the result of a contract's function execution
- * @param functionName the name of the function within the ABI
- * @param resultAsBytes a byte array containing the execution result
- */
-function decodeFunctionResult(functionName, resultAsBytes) {
-	const functionAbi = abi.find(func => func.name === functionName);
-	const functionParameters = functionAbi.outputs;
-	const resultHex = '0x'.concat(Buffer.from(resultAsBytes).toString('hex'));
-	const result = web3.eth.abi.decodeParameters(functionParameters, resultHex);
-	return result;
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {boolean} value
- * @param {number=} gasLim
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterBool(fcnName, value, gasLim = 200000) {
-	const params = new ContractFunctionParameters()
-		.addBool(value);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
-}
-
-async function resetContract() {
-	const params = new ContractFunctionParameters()
-		.addBool(true)
-		.addUint256(1000);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, 1000000, 'resetContract', params);
-	return setterAddressRx.status.toString();
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {TokenId | AccountId | ContractId} value
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterAddress(fcnName, value) {
-	const gasLim = 200000;
-	const params = new ContractFunctionParameters()
-		.addAddress(value.toSolidityAddress());
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {TokenId[] | AccountId[] | ContractId[]} value
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterAddresses(fcnName, value) {
-	const gasLim = 500000;
-	const params = new ContractFunctionParameters()
-		.addAddressArray(value);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {string} value
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterString(fcnName, value) {
-	const gasLim = 200000;
-	const params = new ContractFunctionParameters()
-		.addString(value);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {string[]} value
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterStringArray(fcnName, value, gasLim = 500000) {
-	const params = new ContractFunctionParameters()
-		.addStringArray(value);
-	const [setterAddressRx, setterResults] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterAddressRx.status.toString(), setterResults];
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {string[]} value
- * @param {Number} offset starting point to update the array
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function updateMetadataAtOffset(fcnName, value, offset = 0, gasLim = 800000) {
-	const params = new ContractFunctionParameters()
-		.addStringArray(value)
-		.addUint256(offset);
-	const [setterAddressRx, setterResults] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterAddressRx.status.toString(), setterResults];
-}
-
-/**
- * Call a methos with no arguments
- * @param {string} fcnName
- * @param {number=} gas
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function methodCallerNoArgs(fcnName, gasLim = 500000) {
-	const params = new ContractFunctionParameters();
-	const [setterAddressRx, setterResults ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterAddressRx.status.toString(), setterResults];
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {...number} values
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterInts(fcnName, ...values) {
-	const gasLim = 800000;
-	const params = new ContractFunctionParameters();
-
-	for (let i = 0 ; i < values.length; i++) {
-		params.addUint256(values[i]);
-	}
-	const [setterIntsRx, setterResult] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterIntsRx.status.toString(), setterResult];
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {number[]} ints
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterInt256Array(fcnName, ints) {
-	const gasLim = 8000000;
-	const params = new ContractFunctionParameters().addUint256Array(ints);
-
-	const [setterIntArrayRx, setterResult] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterIntArrayRx.status.toString(), setterResult];
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {number[]} ints
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterInt64Array(fcnName, ints) {
-	const gasLim = 8000000;
-	const params = new ContractFunctionParameters().addInt64Array(ints);
-
-	const [setterIntArrayRx, setterResult] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterIntArrayRx.status.toString(), setterResult];
-}
-/**
- * Helper function to get the Lazy, hbar & minted NFT balance of the contract
- * @returns {[number | Long.Long, Hbar, number | Long.Long]} The balance of the FT (without decimals), Hbar & NFT at the SC
- */
-async function getContractBalance() {
-
-	const query = new ContractInfoQuery()
-		.setContractId(contractId);
-
-	const info = await query.execute(client);
-
-	let balance;
-
-	const tokenMap = info.tokenRelationships;
-	const tokenBal = tokenMap.get(lazyTokenId.toString());
-	if (tokenBal) {
-		balance = tokenBal.balance;
-	}
-	else {
-		balance = -1;
-	}
-
-	let nftBal = 0;
-	if (tokenId) {
-		const nftTokenBal = tokenMap.get(tokenId.toString());
-		if (nftTokenBal) {
-			nftBal = nftTokenBal.balance;
-		}
-		else {
-			nftBal = -1;
-		}
-	}
-
-	return [balance, info.balance, nftBal];
-}
-
-
-/**
- * Helper function to send hbar
- * @param {AccountId} sender sender address
- * @param {AccountId} receiver receiver address
- * @param {string | number | BigNumber} amount the amounbt to send
- * @returns {any} expect a string of SUCCESS
- */
-async function hbarTransferFcn(sender, receiver, amount) {
-	const transferTx = new TransferTransaction()
-		.addHbarTransfer(sender, -amount)
-		.addHbarTransfer(receiver, amount)
-		.freezeWith(client);
-	const transferSubmit = await transferTx.execute(client);
-	const transferRx = await transferSubmit.getReceipt(client);
-	return transferRx.status.toString();
-}
-
-/**
- * Helper function to retrieve account balances
- * @param {AccountId} acctId the account to check
- * @returns {[number, Hbar, number]} balance of the FT token (without decimals), balance of Hbar & NFTs in account as array
- */
-async function getAccountBalance(acctId) {
-
-	const query = new AccountInfoQuery()
-		.setAccountId(acctId);
-
-	const info = await query.execute(client);
-
-	let balance;
-	const tokenMap = info.tokenRelationships;
-	// This is in process of deprecation sadly so may need to be adjusted.
-	const tokenBal = tokenMap.get(lazyTokenId.toString());
-	if (tokenBal) {
-		balance = tokenBal.balance;
-	}
-	else {
-		balance = -1;
-	}
-
-	let nftBal = 0;
-	if (tokenId) {
-		const nftTokenBal = tokenMap.get(tokenId.toString());
-		if (nftTokenBal) {
-			nftBal = nftTokenBal.balance;
-		}
-		else {
-			nftBal = -1;
-		}
-	}
-
-	return [balance, info.balance, nftBal];
-}
-
-/**
- * Method to transfer an NFT by SDK
- * @param {AccountId} sender
- * @param {AccounId} receiver
- * @param {TokenId} token
- * @param {int[]} serials
- * @param {Client=} cliebntToUse allows for overide
- * @returns {string} sumbission status
- */
-async function transferNFTBySDK(sender, receiver, token, serials, clientToUse = client) {
-	const tokenTransferTx = new TransferTransaction();
-	for (let s = 0; s < serials.length; s++) {
-		const nftId = new NftId(token, serials[s]);
-		tokenTransferTx.addNftTransfer(nftId, sender, receiver);
-	}
-	const tokenTransferSubmit = await tokenTransferTx.setTransactionMemo('WL Token Transfer')
-		.freezeWith(clientToUse)
-		.execute(clientToUse);
-	const tokenTransferRx = await tokenTransferSubmit.getReceipt(client);
-	return tokenTransferRx.status.toString();
-
-}
-
-/**
- * Helper function to create new accounts
- * @param {PrivateKey} privateKey new accounts private key
- * @param {string | number} initialBalance initial balance in hbar
- * @returns {AccountId} the newly created Account ID object
- */
-async function accountCreator(privateKey, initialBalance) {
-	const response = await new AccountCreateTransaction()
-		.setInitialBalance(new Hbar(initialBalance))
-		.setMaxAutomaticTokenAssociations(10)
-		.setKey(privateKey.publicKey)
-		.execute(client);
-	const receipt = await response.getReceipt(client);
-	return receipt.accountId;
-}
-
-/**
- * Helper method for token association
- * @param {AccountId} account
- * @param {TokenId} tokenToAssociate
- * @returns {any} expected to be a string 'SUCCESS' implies it worked
- */
-// eslint-disable-next-line no-unused-vars
-async function associateTokenToAccount(account, tokenToAssociate) {
-	// now associate the token to the operator account
-	const associateToken = await new TokenAssociateTransaction()
-		.setAccountId(account)
-		.setTokenIds([tokenToAssociate])
-		.freezeWith(client);
-
-	const associateTokenTx = await associateToken.execute(client);
-	const associateTokenRx = await associateTokenTx.getReceipt(client);
-
-	const associateTokenStatus = associateTokenRx.status;
-
-	return associateTokenStatus.toString();
-}
-
-
-/**
- * Helper function to deploy the contract
- * @param {string} bytecode bytecode from compiled SOL file
- * @param {number} gasLim gas limit as a number
- */
-async function contractDeployFcn(bytecode, gasLim) {
-	const contractCreateTx = new ContractCreateFlow()
-		.setBytecode(bytecode)
-		.setGas(gasLim)
-		.setConstructorParameters(
-			new ContractFunctionParameters()
-				.addAddress(lazyContractId.toSolidityAddress())
-				.addAddress(lazyTokenId.toSolidityAddress())
-				.addUint256(lazyBurnPerc),
-		);
-	const contractCreateSubmit = await contractCreateTx.execute(client);
-	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
-	contractId = contractCreateRx.contractId;
-	contractAddress = contractId.toSolidityAddress();
-}
-
-/*
- * basci sleep function
- * @param {number} ms milliseconds to sleep
- * @returns {Promise}
- */
-// eslint-disable-next-line no-unused-vars
-function sleep(ms) {
-	return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Helper method to transfer FT using HTS
- * @param {AccountId} receiver
- * @param {number} amount amount of the FT to transfer (adjusted for decimal)
- * @returns {any} expected to be a string 'SUCCESS' implies it worked
- */
-async function retrieveLazyFromContract(receiver, amount) {
-
-	const gasLim = 600000;
-	const params = new ContractFunctionParameters()
-		.addAddress(receiver.toSolidityAddress())
-		.addInt64(amount);
-	const [tokenTransferRx, , ] = await contractExecuteFcn(contractId, gasLim, 'retrieveLazy', params);
-	const tokenTransferStatus = tokenTransferRx.status;
-
-	return tokenTransferStatus.toString();
 }
 
 class NFTFeeObject {
@@ -1850,55 +3510,66 @@ class NFTFeeObject {
 }
 
 /**
- * Helper function to mint an NFT and a serial on to that token
- * Using royaltyies to test the (potentially) more complicate case
+ * Helper function to encpapsualte minting an FT
+ * @param {string} tokenName
+ * @param {string} tokenSymbol
+ * @param {string} tokenMemo
+ * @param {number} tokenInitalSupply
+ * @param {number} tokenDecimal
+ * @param {number} tokenMaxSupply
+ * @param {number} payment
  */
-async function mintNFTBySDK(name) {
-	const supplyKey = PrivateKey.generateED25519();
+async function mintLazy(
+	tokenName,
+	tokenSymbol,
+	tokenMemo,
+	tokenInitalSupply,
+	decimal,
+	tokenMaxSupply,
+	payment,
+) {
+	const gasLim = 800000;
+	// call associate method
+	const params = [
+		tokenName,
+		tokenSymbol,
+		tokenMemo,
+		tokenInitalSupply,
+		decimal,
+		tokenMaxSupply,
+	];
 
-	// create a basic royalty
-	const fee = new CustomRoyaltyFee()
-		.setNumerator(2 * 100)
-		.setDenominator(10000)
-		.setFeeCollectorAccountId(operatorId)
-		.setFallbackFee(new CustomFixedFee().setHbarAmount(new Hbar(5)));
+	const [, , createTokenRecord] = await contractExecuteFunction(
+		lazySCT,
+		lazyIface,
+		client,
+		gasLim,
+		'createFungibleWithBurn',
+		params,
+		payment,
+	);
+	const tokenIdSolidityAddr =
+		createTokenRecord.contractFunctionResult.getAddress(0);
+	lazyTokenId = TokenId.fromSolidityAddress(tokenIdSolidityAddr);
+}
 
-	const tokenCreateTx = new TokenCreateTransaction()
-		.setTokenType(TokenType.NonFungibleUnique)
-		.setTokenName(name + new Date().toISOString())
-		.setTokenSymbol('MCWL')
-		.setInitialSupply(0)
-		.setMaxSupply(10)
-		.setSupplyType(TokenSupplyType.Finite)
-		.setTreasuryAccountId(operatorId)
-		.setAutoRenewAccountId(operatorId)
-		.setSupplyKey(supplyKey)
-		.setCustomFees([fee])
-		.setMaxTransactionFee(new Hbar(75, HbarUnit.Hbar));
-
-	tokenCreateTx.freezeWith(client);
-	const signedCreateTx = await tokenCreateTx.sign(operatorKey);
-	const executionResponse = await signedCreateTx.execute(client);
-
-	/* Get the receipt of the transaction */
-	const createTokenRx = await executionResponse.getReceipt(client).catch((e) => {
-		console.log(e);
-		console.log('Token Create **FAILED*');
-	});
-
-	/* Get the token ID from the receipt */
-	const mintedTokenId = createTokenRx.tokenId;
-
-	// YOU CAN MINT *UP TO* 10 in a single tx by supplying and array of metadata
-	const tokenMintTx = new TokenMintTransaction().setMaxTransactionFee(10);
-	for (let c = 0 ; c < 10; c++) {
-		tokenMintTx.addMetadata(Buffer.from('ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/metadata.json'));
+/**
+ * Use the LSCT to send $LAZY out
+ * @param {AccountId} receiverId
+ * @param {*} amt
+ */
+async function sendLazy(receiverId, amt) {
+	const result = await contractExecuteFunction(
+		lazySCT,
+		lazyIface,
+		client,
+		300_000,
+		'transferHTS',
+		[lazyTokenId.toSolidityAddress(), receiverId.toSolidityAddress(), amt],
+	);
+	if (result[0]?.status?.toString() !== 'SUCCESS') {
+		console.log('Failed to send $LAZY:', result);
+		fail();
 	}
-	tokenMintTx.setTokenId(mintedTokenId).freezeWith(client);
-
-	const signedTx = await tokenMintTx.sign(supplyKey);
-	const tokenMintSubmit = await signedTx.execute(client);
-	// check it worked
-	const mintRx = await tokenMintSubmit.getReceipt(client);
-	return [mintRx.status.toString(), mintedTokenId];
+	return result[0]?.status.toString();
 }
