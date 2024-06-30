@@ -3,22 +3,17 @@ const {
 	AccountId,
 	PrivateKey,
 	ContractId,
-	Hbar,
-	ContractExecuteTransaction,
-	ContractCallQuery,
-	ContractFunctionParameters,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const readlineSync = require('readline-sync');
 const fs = require('fs');
-const Web3 = require('web3');
-const web3 = new Web3();
-let abi;
+const ethers = require('ethers');
+const { contractExecuteFunction } = require('../../utils/solidityHelpers');
 
 // Get operator from .env file
-const operatorKey = PrivateKey.fromString(process.env.PRIVATE_KEY);
+const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
-const contractName = process.env.CONTRACT_NAME ?? null;
+const contractName = process.env.CONTRACT_NAME ?? 'MinterContract';
 
 const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
@@ -27,11 +22,6 @@ let client;
 
 // check-out the deployed script - test read-only method
 const main = async () => {
-	if (contractName === undefined || contractName == null) {
-		console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
-		return;
-	}
-
 
 	console.log('\n-Using ENIVRONMENT:', env);
 	console.log('\n-Using Operator:', operatorId.toString());
@@ -51,145 +41,44 @@ const main = async () => {
 	}
 
 	client.setOperator(operatorId, operatorKey);
+	console.log('Operator Account ID:', operatorId.toString());
+	console.log('CONTRACT NAME:', contractName);
 
 	// import ABI
 	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`, 'utf8'));
-	abi = json.abi;
-	console.log('\n -Loading ABI...\n');
+
+	const minterIface = new ethers.Interface(json.abi);
+
+	// check if user wants to remove the token
+	const removeToken = readlineSync.keyInYNStrict('Do you want to remove the token?');
+
+	// request batch size (Default 100)
+	let batchSize = readlineSync.questionInt('Enter the batch size (Default 100): ');
+
+	if (!batchSize) {
+		batchSize = 100;
+	}
 
 	const proceed = readlineSync.keyInYNStrict('Do you want to reset the contract?');
 
 	if (proceed) {
-		const rstContract = await resetContract(false);
-		console.log('State changed:', rstContract);
+		const result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			3_200_000,
+			'resetContract',
+			[removeToken, batchSize],
+		);
+
+		console.log('resetContract result:', result[0]?.status?.toString());
+		console.log('resetContract transaction:', result[2]?.transactionId?.toString());
 	}
 	else {
 		console.log('user aborted');
 	}
 };
 
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {boolean} value
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterBool(fcnName, value) {
-	const gasLim = 15000000;
-	const params = new ContractFunctionParameters()
-		.addBool(value);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
-}
-
-/**
- * helper to reset the contract
- * @param {boolean=false} resetToken
- * @param {Number=1000} batch
- * @param {Number=1000000} gasLim
- * @returns {string}
- */
-async function resetContract(resetToken = false, batch = 260, gasLim = 7_000_000) {
-	const params = new ContractFunctionParameters()
-		.addBool(resetToken)
-		.addUint256(batch);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, 'resetContract', params);
-	return setterAddressRx.status.toString();
-}
-
-/**
- * Helper function for calling the contract methods
- * @param {ContractId} cId the contract to call
- * @param {number | Long.Long} gasLim the max gas
- * @param {string} fcnName name of the function to call
- * @param {ContractFunctionParameters} params the function arguments
- * @param {string | number | Hbar | Long.Long | BigNumber} amountHbar the amount of hbar to send in the methos call
- * @returns {[TransactionReceipt, any, TransactionRecord]} the transaction receipt and any decoded results
- */
-async function contractExecuteFcn(cId, gasLim, fcnName, params, amountHbar) {
-	const contractExecuteTx = await new ContractExecuteTransaction()
-		.setContractId(cId)
-		.setGas(gasLim)
-		.setFunction(fcnName, params)
-		.setPayableAmount(amountHbar)
-		.execute(client);
-
-	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
-	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
-	return [contractExecuteRx, contractResults, record];
-}
-
-/**
- * Helper function to get the current settings of the contract
- * @param {string} fcnName the name of the getter to call
- * @param {string} expectedVar the variable to exeppect to get back
- * @return {*}
- */
-// eslint-disable-next-line no-unused-vars
-async function getSetting(fcnName, expectedVar) {
-	// check the Lazy Token and LSCT addresses
-	// generate function call with function name and parameters
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
-
-	// query the contract
-	const contractCall = await new ContractCallQuery()
-		.setContractId(contractId)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setMaxQueryPayment(new Hbar(2))
-		.setGas(100000)
-		.execute(client);
-	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
-	return queryResult[expectedVar];
-}
-
-/**
- * Helper function to get the current settings of the contract
- * @param {string} fcnName the name of the getter to call
- * @param {string} expectedVars the variable to exeppect to get back
- * @return {*} array of results
- */
-// eslint-disable-next-line no-unused-vars
-async function getSettings(fcnName, ...expectedVars) {
-	// check the Lazy Token and LSCT addresses
-	// generate function call with function name and parameters
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
-
-	// query the contract
-	const contractCall = await new ContractCallQuery()
-		.setContractId(contractId)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setMaxQueryPayment(new Hbar(2))
-		.setGas(100000)
-		.execute(client);
-	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
-	const results = [];
-	for (let v = 0 ; v < expectedVars.length; v++) {
-		results.push(queryResult[expectedVars[v]]);
-	}
-	return results;
-}
-
-/**
- * Decodes the result of a contract's function execution
- * @param functionName the name of the function within the ABI
- * @param resultAsBytes a byte array containing the execution result
- */
-function decodeFunctionResult(functionName, resultAsBytes) {
-	const functionAbi = abi.find(func => func.name === functionName);
-	const functionParameters = functionAbi.outputs;
-	const resultHex = '0x'.concat(Buffer.from(resultAsBytes).toString('hex'));
-	const result = web3.eth.abi.decodeParameters(functionParameters, resultHex);
-	return result;
-}
-
-function encodeFunctionCall(functionName, parameters) {
-	const functionAbi = abi.find((func) => func.name === functionName && func.type === 'function');
-	const encodedParametersHex = web3.eth.abi.encodeFunctionCall(functionAbi, parameters).slice(2);
-	return Buffer.from(encodedParametersHex, 'hex');
-}
 
 main()
 	.then(() => {

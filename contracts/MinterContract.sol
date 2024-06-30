@@ -127,7 +127,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     MintEconomics private mintEconomics;
 
     address private token;
-    address private prngGenerator;
+    address public prngGenerator;
 
     enum ContractEventType {
         INITIALISE,

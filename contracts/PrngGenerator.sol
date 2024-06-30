@@ -40,7 +40,8 @@ contract PrngGenerator is IPrngGenerator {
         external
         returns (uint256 randNum)
     {
-        if (lo >= hi) revert ParamsError("lo / hi");
+        if (lo > hi) revert ParamsError("lo / hi");
+		else if (lo == hi) return lo;
 
         bytes32 seedBytes = this.getPseudorandomSeed();
         uint256 choice = bytesToUint(keccak256(abi.encodePacked(block.timestamp, seedBytes, userSeed, msg.sender)));

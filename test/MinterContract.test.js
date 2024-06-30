@@ -17,7 +17,7 @@ const {
 	contractExecuteFunction,
 	linkBytecode,
 } = require('../utils/solidityHelpers');
-const { sleep } = require('../utils/nodeHelpers');
+const { sleep, hex_to_ascii } = require('../utils/nodeHelpers');
 const {
 	accountCreator,
 	associateTokenToAccount,
@@ -424,7 +424,6 @@ describe('Check SC deployment...', function() {
 		expect(Number(wlNumMinted[0])).to.be.equal(0);
 	});
 
-	// initialize the minter!
 	it('Initialise the minter for a token with no Fees to check it works', async function() {
 		const metadataList = ['metadata.json'];
 
@@ -509,6 +508,8 @@ describe('Check SC deployment...', function() {
 			fail();
 		}
 
+		console.log('Contract Reset TX:', reset[2][0]?.transactionId?.toString());
+
 		const metadataList = ['metadata.json'];
 
 		// set metadata seperately
@@ -541,7 +542,7 @@ describe('Check SC deployment...', function() {
 			fail();
 		}
 		const tokenId = TokenId.fromSolidityAddress(newMint[1][0]);
-		console.log('Token Created:', tokenId.toString(), ' / ', tokenId.toString());
+		console.log('Token Created:', tokenId.toString());
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
 	});
 
@@ -2989,71 +2990,6 @@ describe('Test out Discount mint functions...', function() {
 	});
 });
 
-// test out random selection
-describe.skip('Test out random selection...', function() {
-	it('Mint 10 NFTs and check the random selection', async function() {
-		// initialise a new token with fees and 10 metadata items
-		client.setOperator(operatorId, operatorKey);
-		const tinybarCost = new Hbar(1).toTinybars();
-
-		let result = await contractExecuteFunction(
-			contractId,
-			minterIface,
-			client,
-			500_000,
-			'updateCost',
-			[BigInt(tinybarCost), 0],
-		);
-		if (result[0]?.status?.toString() != 'SUCCESS') {
-			console.log('Error:', result);
-			fail();
-		}
-
-		// deploy PRNG
-		if (process.env.PRNG_CONTRACT_ID) {
-			console.log('\n-Using existing PRNG:', process.env.PRNG_CONTRACT_ID);
-			prngId = ContractId.fromString(process.env.PRNG_CONTRACT_ID);
-		}
-		else {
-			const gasLimit = 800_000;
-			console.log('\n- Deploying contract...', prngName, '\n\tgas@', gasLimit);
-			const prngJson = JSON.parse(
-				fs.readFileSync(
-					`./artifacts/contracts/${prngName}.sol/${prngName}.json`,
-				),
-			);
-
-			const prngBytecode = prngJson.bytecode;
-
-			[prngId] = await contractDeployFunction(client, prngBytecode, gasLimit);
-
-			console.log(
-				`PRNG contract created with ID: ${prngId} / ${prngId.toSolidityAddress()}`,
-			);
-		}
-
-		expect(prngId.toString().match(addressRegex).length == 2).to.be.true;
-
-		// update PRNG object to minter
-		result = await contractExecuteFunction(
-			contractId,
-			minterIface,
-			client,
-			500_000,
-			'updatePrng',
-			[prngId.toSolidityAddress()],
-		);
-
-		// reset the contract
-
-		// initialize a new NFT mint with 10 metadata items
-
-		// mint 10 items
-
-		// check the metadata is not sequential
-	});
-});
-
 describe('Test out refund functions...', function() {
 	it('Check anyone can burn NFTs', async function() {
 		client.setOperator(operatorId, operatorKey);
@@ -3153,6 +3089,179 @@ describe('Test out refund functions...', function() {
 
 	it.skip('Check Owner can withdraw NFTs exchanged for refund', async function() {
 		expect.fail(0, 1, 'Not implemented');
+	});
+});
+
+// test out random selection
+describe('Test out random selection...', function() {
+	it('Mint 10 NFTs and check the random selection', async function() {
+		// initialise a new token with fees and 10 metadata items
+		client.setOperator(operatorId, operatorKey);
+		const tinybarCost = new Hbar(1).toTinybars();
+
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updateCost',
+			[BigInt(tinybarCost), 0],
+		);
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// deploy PRNG
+		if (process.env.PRNG_CONTRACT_ID) {
+			console.log('\n-Using existing PRNG:', process.env.PRNG_CONTRACT_ID);
+			prngId = ContractId.fromString(process.env.PRNG_CONTRACT_ID);
+		}
+		else {
+			const gasLimit = 800_000;
+			console.log('\n- Deploying contract...', prngName, '\n\tgas@', gasLimit);
+			const prngJson = JSON.parse(
+				fs.readFileSync(
+					`./artifacts/contracts/${prngName}.sol/${prngName}.json`,
+				),
+			);
+
+			const prngBytecode = prngJson.bytecode;
+
+			[prngId] = await contractDeployFunction(client, prngBytecode, gasLimit);
+
+			console.log(
+				`PRNG contract created with ID: ${prngId} / ${prngId.toSolidityAddress()}`,
+			);
+		}
+
+		expect(prngId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// update PRNG object to minter
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			500_000,
+			'updatePrng',
+			[prngId.toSolidityAddress()],
+		);
+
+		// loop three times in batches of 60 to reset contract
+		for (let i = 0; i < 2; i++) {
+			// reset the contract
+			result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				3_200_000,
+				'resetContract',
+				[i == 0 ? true : false, 100],
+			);
+			if (result[0]?.status?.toString() != 'SUCCESS') {
+				console.log('Error:', result);
+				fail();
+			}
+
+			console.log(`reset tx (${i + 1}):`, result[2]?.transactionId?.toString());
+		}
+
+		// create a string list for metadata form 0 to 9
+		const metadata = [];
+		for (let i = 0; i < 10; i++) {
+			metadata.push(i.toString());
+		}
+
+		// upload metadata
+		const [success, totalLoaded] = await uploadMetadata(metadata);
+		expect(success).to.be.equal('SUCCESS');
+		expect(totalLoaded == 10).to.be.true;
+
+		const royaltyList = [];
+		// initialize a new NFT mint with 10 metadata items
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			1_000_000,
+			'initialiseNFTMint',
+			[
+				'PRNG-test',
+				'PRNG',
+				'Random testing memo',
+				'ipfs://PRNG/',
+				royaltyList,
+				0,
+			],
+			MINT_PAYMENT,
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		const randomTokenId = TokenId.fromSolidityAddress(result[1][0]);
+		console.log('Token Created:', randomTokenId.toString());
+		expect(randomTokenId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// associate the new token to operator
+		result = await associateTokenToAccount(client, operatorId, operatorKey, randomTokenId);
+		expect(result).to.be.equal('SUCCESS');
+
+		// double check contract is unpaused
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			400_000,
+			'updatePauseStatus',
+			[false],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// mint 10 items
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			5_000_000,
+			'mintNFT',
+			[10],
+			new Hbar(10),
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		console.log('Mint (10) tx:', result[2]?.transactionId?.toString());
+
+		const metadataList = result[1][1];
+
+		expect(result[1][0].length == 10).to.be.true;
+
+
+		// check the metadata is not sequential
+		let sequential = true;
+		for (let i = (metadataList.length - 1); i >= 0; i--) {
+			const strFromHex = hex_to_ascii(metadataList[i]);
+			const lastCharAsNumber = Number(strFromHex.slice(-1));
+			// check last char is a number
+			if (isNaN(lastCharAsNumber)) {
+				console.log('Error - expecting number:', hex_to_ascii, 'from', strFromHex);
+				fail();
+			}
+			if (i != lastCharAsNumber) {
+				sequential = false;
+				break;
+			}
+		}
+		expect(sequential).to.be.false;
 	});
 });
 

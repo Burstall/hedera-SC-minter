@@ -113,6 +113,9 @@ async function parseErrorTransactionId(envOrClient, transactionId, iface) {
 			.execute(envOrClient);
 
 		try {
+			if (!record?.contractFunctionResult?.errorMessage || record?.contractFunctionResult?.errorMessage == '0x') {
+				return `POORLY FORMED ERROR: ${transactionId}`;
+			}
 			return parseError(iface, record.contractFunctionResult.errorMessage);
 		}
 		catch (e) {

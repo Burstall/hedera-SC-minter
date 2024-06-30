@@ -19,10 +19,11 @@ library MinterLibrary {
 		string storage cid,
 		address prngGenerator
 		) 
-		internal returns (bytes[] memory metadataForMint) {
+		public returns (bytes[] memory metadataForMint) {
+		// size the return array
+		metadataForMint = new bytes[](numberToMint);
 
 		if (prngGenerator == address(0)) {
-			metadataForMint = new bytes[](numberToMint);
 			for (uint256 m = 0; m < numberToMint; m++) {
 				metadataForMint[m] = bytes(string.concat(cid, metadata[metadata.length - 1]));
 				// pop discarding the element used up
@@ -30,14 +31,27 @@ library MinterLibrary {
 			}
 		}
 		else {
-			for (uint256 m = 0; m < numberToMint; m++) {
-				uint256 index = IPrngGenerator(prngGenerator).getPseudorandomNumber(0, metadata.length - 1, m);
-				string memory chosen = metadata[index];
-				// swap the chosen element with the last element
-				metadata[index] = metadata[metadata.length - 1];
-				metadataForMint[m] = bytes(string.concat(cid, chosen));
-				// pop discarding the element used up
-				metadata.pop();
+			for (uint256 m = 0; m < numberToMint; ) {
+				// if only 1 item left, no need to generate random number
+				if (metadata.length == 1) {
+					metadataForMint[m] = bytes(string.concat(cid, metadata[0]));
+					metadata.pop();
+					// should only be here on the last iteration anyway
+					break;
+				}
+				else {
+					uint256 index = IPrngGenerator(prngGenerator).getPseudorandomNumber(0, metadata.length - 1, m);
+					string memory chosen = metadata[index];
+					// swap the chosen element with the last element
+					metadata[index] = metadata[metadata.length - 1];
+					metadataForMint[m] = bytes(string.concat(cid, chosen));
+					// pop discarding the element used up
+					metadata.pop();
+				}
+
+				unchecked {
+					++m;
+				}
 			}
 		}
 	}
