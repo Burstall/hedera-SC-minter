@@ -22,7 +22,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
-contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
+// Minter Contract to mint Soulbound NFTs
+contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     using EnumerableMap for EnumerableMap.UintToUintMap;
     using EnumerableSet for EnumerableSet.UintSet;
@@ -84,6 +85,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     error NotTokenOwner();
     error MaxSerials();
     error BadArguments();
+	error FreezingFailed();
+	error UnFreezingFailed();
 
     struct MintTiming {
         uint256 lastMintTime;
@@ -114,20 +117,12 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         IBurnableHTS lazySCT;
     }
 
-    // to avoid serialisation related default causing odd behaviour
-    // implementing custom object as a wrapper
-    struct NFTFeeObject {
-        uint32 numerator;
-        uint32 denominator;
-        uint32 fallbackfee;
-        address account;
-    }
-
     MintTiming private mintTiming;
     MintEconomics private mintEconomics;
 
     address private token;
-    address public prngGenerator;
+	address public prngGenerator;
+	bool public fixedEdition;
 
     enum ContractEventType {
         INITIALISE,
@@ -188,9 +183,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             revert AssociationFailed();
         }
 
-        mintEconomics = MintEconomics(false, 0, 0, 0, 20, 0, 0, 0, address(0));
+		// by default max 1 mint per wallet, singular mint
+        mintEconomics = MintEconomics(false, 0, 0, 0, 1, 0, 1, 1, address(0));
         mintTiming = MintTiming(0, 0, true, 0, 0, false);
-        batchSize = 10;
+        batchSize = 1;
     }
 
     // Supply the contract with token details and _metadata
@@ -199,25 +195,25 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _symbol token symbol
     /// @param _memo token longer form description as a string
     /// @param _cid root _cid for the _metadata files
-	/// @param _royalties array of NFTFeeObject to set the royalties
-    /// @param _maxIssuance 0 or less to size based off _metadata else will override
+    /// @param _maxSupply must be > 0 if _fixedEdition is true
+	/// @param _fixedEdition boolean to indicate if the token is a fixed edition (repeated metadata)
     /// @return _createdTokenAddress the address of the new token
     function initialiseNFTMint(
         string memory _name,
         string memory _symbol,
         string memory _memo,
         string memory _cid,
-        NFTFeeObject[] memory _royalties,
-        int64 _maxIssuance
+        int64 _maxSupply,
+		bool _fixedEdition
     )
         external
         payable
         onlyOwner
-        returns (address _createdTokenAddress, uint256 _maxSupply)
+        returns (address _createdTokenAddress, uint256 _tokenSupply)
     {
         if (token != address(0)) revert NotReset(token);
         if (bytes(_memo).length > 100) revert MemoTooLong();
-        if (_royalties.length > 10) revert TooManyFees();
+		if (_fixedEdition && _maxSupply == 0) revert BadArguments();
 
         cid = _cid;
 
@@ -225,11 +221,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         IHederaTokenService.TokenKey[]
             memory _keys = new IHederaTokenService.TokenKey[](1);
 
-        _keys[0] = getSingleKey(
-            KeyType.SUPPLY,
-            KeyValueType.CONTRACT_ID,
+		// need to upgrade to a freeze key to make the token a SBT atomically at mint.
+		_keys[0] = getSingleKey(
+			KeyType.SUPPLY, 
+			KeyType.FREEZE, 
+			KeyValueType.CONTRACT_ID,
             address(this)
-        );
+		);
 
         IHederaTokenService.HederaToken memory _token;
         _token.name = _name;
@@ -238,53 +236,26 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         _token.treasury = address(this);
         _token.tokenKeys = _keys;
         _token.tokenSupplyType = true;
-        if (_maxIssuance > 0) {
-            // check that there is not already too much metadats in the contract
-            if (metadata.length > _maxIssuance.toUint256())
+		if (_fixedEdition || _maxSupply > 0) {
+    		// check that there is not already too much metadats in the contract
+            if (metadata.length > _maxSupply.toUint256())
                 revert TooMuchMetadata();
-            _token.maxSupply = _maxIssuance;
+            _token.maxSupply = _maxSupply;
         } else {
             if (metadata.length == 0) revert EmptyMetadata();
             _token.maxSupply = metadata.length.toInt256().toInt64();
         }
-        maxSupply = SafeCast.toUint256(_token.maxSupply);
+
+        maxSupply = _token.maxSupply.toUint256();
+		fixedEdition = _fixedEdition;
         // create the expiry schedule for the token using ExpiryHelper
         _token.expiry = createAutoRenewExpiry(
             address(this),
             HederaTokenService.defaultAutoRenewPeriod
         );
 
-        // translate fee objects to avoid oddities from serialisation of default/empty values
-        IHederaTokenService.RoyaltyFee[]
-            memory _fees = new IHederaTokenService.RoyaltyFee[](
-                _royalties.length
-            );
-
-        uint256 _length = _royalties.length;
-        for (uint256 f = 0; f < _length; ) {
-            IHederaTokenService.RoyaltyFee memory _fee;
-            _fee.numerator = _royalties[f].numerator;
-            _fee.denominator = _royalties[f].denominator;
-            _fee.feeCollector = _royalties[f].account;
-
-            if (_royalties[f].fallbackfee != 0) {
-                _fee.amount = _royalties[f].fallbackfee;
-                _fee.useHbarsForPayment = true;
-            }
-
-            _fees[f] = _fee;
-
-            unchecked {
-                ++f;
-            }
-        }
-
         (int32 responseCode, address tokenAddress) = HederaTokenService
-            .createNonFungibleTokenWithCustomFees(
-                _token,
-                new IHederaTokenService.FixedFee[](0),
-                _fees
-            );
+            .createNonFungibleToken(_token);
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
             revert FailedToMint();
@@ -292,13 +263,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
         token = tokenAddress;
         // set the return values
-        _maxSupply = maxSupply;
         _createdTokenAddress = token;
+		_tokenSupply = maxSupply;
 
         emit MinterContractMessage(
             ContractEventType.INITIALISE,
             token,
-            _maxSupply
+            maxSupply
         );
     }
 
@@ -319,7 +290,12 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             mintTiming.mintStartTime > block.timestamp
         ) revert NotOpen();
         if (mintTiming.mintPaused) revert Paused();
-        if (_numberToMint > metadata.length) revert MintedOut();
+		if (fixedEdition) {
+			if (_numberToMint > maxSupply) revert MintedOut();
+		}
+		else {
+			if (_numberToMint > metadata.length) revert MintedOut();
+		}
         if (_numberToMint > mintEconomics.maxMint) revert MaxMintExceeded();
 
         bool isWlMint = false;
@@ -375,13 +351,20 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             if (msg.value < totalHbarCost) revert NotEnoughHbar();
         }
 
-        // pop the _metadata
-        _metadataForMint = MinterLibrary.selectMetdataToMint(
-            metadata,
-            _numberToMint,
-            cid,
-            prngGenerator
-        );
+        if (fixedEdition) {
+			_metadataForMint = new bytes[](_numberToMint);
+			for (uint256 i = 0; i < _numberToMint; i++) {
+				_metadataForMint[i] = bytes(cid);
+			}
+		}
+		else {
+			_metadataForMint = MinterLibrary.selectMetdataToMint(
+				metadata,
+				_numberToMint,
+				cid,
+				prngGenerator
+			);
+		}
 
         int64[] memory mintedSerials = new int64[](_numberToMint);
         for (uint256 outer = 0; outer < _numberToMint; outer += batchSize) {
@@ -397,13 +380,13 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
                 batchMetadataForMint[inner] = _metadataForMint[inner + outer];
             }
 
-            (int32 responseCode, , int64[] memory serialNumbers) = mintToken(
+            (int32 response, , int64[] memory serialNumbers) = mintToken(
                 token,
                 0,
                 batchMetadataForMint
             );
 
-            if (responseCode != HederaResponseCodes.SUCCESS) {
+            if (response != HederaResponseCodes.SUCCESS) {
                 revert FailedNFTMint();
             }
 
@@ -430,14 +413,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
                 }
             }
 
-            responseCode = transferNFTs(
+            response = transferNFTs(
                 token,
                 senderList,
                 receiverList,
                 serialNumbers
             );
 
-            if (responseCode != HederaResponseCodes.SUCCESS) {
+            if (response != HederaResponseCodes.SUCCESS) {
                 revert NFTTransferFailed();
             }
         }
@@ -473,6 +456,12 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         } else {
             addressToNumMintedMap.set(msg.sender, _numberToMint);
         }
+
+		// now freeze the mints to make them SBT
+		int32 responseCode = freezeToken(token, msg.sender);
+		if (responseCode != HederaResponseCodes.SUCCESS) {
+			revert FreezingFailed();
+		}
 
         totalMinted += _numberToMint;
 
@@ -699,8 +688,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         );
     }
 
-    // function to allow the burning of NFTs (as long as no fallback fee)
-    // NFTs transfered to the SC and then burnt with contract as supply key
+    // Only way to remove the token form an account is via this method
+	// contract will unfreeze, transfer and then burn the token atomicly
     /// @param _serialNumbers array of serials to burn
     /// @return _newTotalSupply the new total supply of the NFT
     function burnNFTs(
@@ -720,8 +709,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             }
         }
 
+		// TODO: UNFREEZE
+		int32 responseCode = unfreezeToken(token, msg.sender);
+		if (responseCode != HederaResponseCodes.SUCCESS) {
+			revert UnFreezingFailed();
+		}
+
         // Need to check if this allows approval based transfers, else move it to 'stake' code
-        int32 responseCode = transferNFTs(
+        responseCode = transferNFTs(
             token,
             senderList,
             receiverList,
@@ -740,6 +735,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         if (responseCode != HederaResponseCodes.SUCCESS) {
             revert BurnFailed();
         }
+
+		// if the user has more of the token refeeze it
+		if (IERC721(token).balanceOf(msg.sender) > 0) {
+			responseCode = freezeToken(token, msg.sender);
+			if (responseCode != HederaResponseCodes.SUCCESS) {
+				revert FreezingFailed();
+			}
+		}
     }
 
     // unsigned ints so no ability to set a negative cost.
@@ -800,7 +803,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         mintTiming.wlOnly = _wlOnly;
     }
 
-    /// @param _prng address of the new PRNG Generator
+	/// @param _prng address of the new PRNG Generator
     function updatePrng(address _prng) external onlyOwner {
         prngGenerator = _prng;
     }
@@ -958,7 +961,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         emit MinterContractMessage(ContractEventType.UPDATE_CID, msg.sender, 0);
     }
 
-    /// @param _metadata new _metadata array
+	/// @param _metadata new _metadata array
     function updateMetadataArray(
         string[] memory _metadata,
         uint256 _startIndex
@@ -1025,7 +1028,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         );
     }
 
-    /// @return _metadataList of _metadata unminted
+	/// @return _metadataList of _metadata unminted
     // no point in obfuscating the ability to view unminted _metadata
     // technical workarounds are trivial.
     function getMetadataArray(
@@ -1151,7 +1154,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
     /// @return _remainingMint number of NFTs left to mint
     function getRemainingMint() external view returns (uint256 _remainingMint) {
-        _remainingMint = metadata.length;
+        _remainingMint = maxSupply - totalMinted;
     }
 
     /// @return _batchSize the size for mint/transfer
@@ -1172,17 +1175,31 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         view
         returns (address[] memory _wl, uint256[] memory _wlQty)
     {
-        uint256 _length = whitelistedAddressQtyMap.length();
-        _wl = new address[](_length);
-        _wlQty = new uint256[](_length);
-
-        for (uint256 a = 0; a < _length; ) {
-            (_wl[a], _wlQty[a]) = whitelistedAddressQtyMap.at(a);
-            unchecked {
-                ++a;
-            }
-        }
+        // use the batch method to get all
+		(_wl, _wlQty) = getWhitelistBatch(0, whitelistedAddressQtyMap.length());
     }
+
+	// add a get Whitelist as Batch
+	/// @param _offset the start of the batch
+	/// @param _batchSize the size of the batch
+	/// @return _wl an array of addresses on WL
+	/// @return _wlQty an array of the number of mints allowed
+	function getWhitelistBatch(
+		uint256 _offset,
+		uint256 _batchSize
+	) public view returns (address[] memory _wl, uint256[] memory _wlQty) {
+		if ((_offset + _batchSize) > whitelistedAddressQtyMap.length()) revert BadArguments();
+
+		_wl = new address[](_batchSize);
+		_wlQty = new uint256[](_batchSize);
+
+		for (uint256 a = 0; a < _batchSize; ) {
+			(_wl[a], _wlQty[a]) = whitelistedAddressQtyMap.at(_offset + a);
+			unchecked {
+				++a;
+			}
+		}
+	}
 
     /// @return _mintEconomics basic struct with mint economics details
     function getMintEconomics()

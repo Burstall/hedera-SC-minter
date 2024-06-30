@@ -68,8 +68,6 @@ library MinterLibrary {
             uint256[] memory wlNumMintedList
         )
     {
-        if (offset >= wlAddressToNumMintedMap.length()) revert BadArguments();
-        if (batchSize > wlAddressToNumMintedMap.length()) revert BadArguments();
         if ((offset + batchSize) > wlAddressToNumMintedMap.length())
             revert BadArguments();
         wlWalletList = new address[](batchSize);
