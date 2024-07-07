@@ -181,12 +181,18 @@ const main = async () => {
 			[qty],
 			new Hbar(Number(costs[0]) * qty, HbarUnit.Tinybar),
 		);
-		console.log('\nResult:', result[0]?.status?.toString(), '\nserial(s)', result[1][0], '\nmetadata');
-		for (let m = 0; m < result[1][1].length; m++) {
-			console.log('Serial #', result[1][0][m], ' -> ', hex_to_ascii(result[1][1][m]));
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Transaction failed:', result[0]);
 		}
+		else {
 
-		console.log('\nTransaction ID:', result[2].transactionId.toString());
+			console.log('\nResult:', result[0]?.status?.toString(), '\nserial(s)', result[1][0], '\nmetadata:');
+			for (let m = 0; m < result[1][1].length; m++) {
+				console.log('Serial #', Number(result[1][0][m]), ' -> ', hex_to_ascii(result[1][1][m]));
+			}
+
+			console.log('\nTransaction ID:', result[2].transactionId.toString());
+		}
 	}
 	else {
 		console.log('User aborted.');

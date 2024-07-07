@@ -20,6 +20,7 @@ const { getTokenDetails } = require('../../utils/hederaMirrorHelpers');
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = process.env.CONTRACT_NAME ?? 'MinterContract';
+const sbtContractName = process.env.SBT_CONTRACT_NAME ?? 'SoulboundMinter';
 
 const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
@@ -249,7 +250,7 @@ const main = async () => {
 		console.log('Current metadata loaded:', totalLoaded);
 
 		// check if user wants to use PRNG
-		const usePRNG = readlineSync.keyInYNStrict('Do you wish to use PRNG to ensure random metadata (not used is fixed edition)?');
+		const usePRNG = readlineSync.keyInYNStrict('Do you wish to use PRNG to ensure random metadata (not used if it is fixed edition)?');
 
 		if (usePRNG) {
 			let prngContractId;
@@ -299,6 +300,11 @@ const main = async () => {
 
 		if (isSBT) {
 			console.log('SBT mint selected');
+
+			// bring in the correct ABI
+			const sbtJson = JSON.parse(fs.readFileSync(`./artifacts/contracts/${sbtContractName}.sol/${sbtContractName}.json`, 'utf8'));
+			minterIface = new ethers.Interface(sbtJson.abi);
+
 			// add an option of a fixed edition mint.
 			// no need for royalties as it can't be resold
 			// adds in ability to deifne a fixed edition mint
