@@ -80,7 +80,7 @@ const main = async () => {
 	console.log('Current mint timing:');
 	console.log('last mint:', mintTiming[0], ' -> ', new Date(Number(mintTiming[0]) * 1000).toISOString());
 	console.log('mint start:', mintTiming[1], ' -> ', new Date(Number(mintTiming[1]) * 1000).toISOString());
-	console.log('PAUSE STAUS:', Boolean(mintTiming[2]));
+	console.log('PAUSE STATUS:', Boolean(mintTiming[2]));
 	console.log('Cooldown period:', Number(mintTiming[3]), ' seconds');
 	console.log('Refund Window (if applicable):', Number(mintTiming[4]));
 	console.log('WL ONLY:', Boolean(mintTiming[5]));

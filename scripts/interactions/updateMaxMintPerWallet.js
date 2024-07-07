@@ -100,7 +100,7 @@ const main = async () => {
 		false,
 	);
 
-	const lazyToken = mintIface.decodeFunctionResult('getLazyToken', lazyTokenOutput)[0];
+	const lazyToken = TokenId.fromSolidityAddress(mintIface.decodeFunctionResult('getLazyToken', lazyTokenOutput)[0]);
 
 	const lazyTokenDetails = await getTokenDetails(env, lazyToken);
 
@@ -113,7 +113,7 @@ const main = async () => {
 	console.log('WL cost in $LAZY (0 = N/A):', Number(mintEcon[5]) ? `${Number(mintEcon[5]) / 10 ** lazyTokenDetails.decimals} ${lazyTokenDetails.symbol}` : 'N/A');
 	console.log('WL slots per purchase (0 = uncapped):', Number(mintEcon[6]));
 	console.log('Max Mints per Wallet:', Number(mintEcon[7]));
-	console.log('Token to buy WL with:', TokenId.fromSolidityAddress(mintEcon[8]));
+	console.log('Token to buy WL with:', TokenId.fromSolidityAddress(mintEcon[8]).toString());
 
 	const settting = Number(args[0]);
 	const msg = `Update max mint per wallet to ${args[0]}?`;

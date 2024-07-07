@@ -5,7 +5,7 @@ Refactored post Hedera Solidity Security Change
 
 ## on-click mint
 [non random metadata]
-~700k for singular mint.
+~800k for singular mint. (with PRNG)
 ~860k for two mints
 ~7,400k for 19 mints
 
