@@ -1,0 +1,11 @@
+{
+    "contractName": "MinterLibrary",
+    "sourceName": "contracts/MinterLibrary.sol",
+    "abi": [
+        {
+            "inputs": [],
+            "name": "BadArguments",
+            "type": "error"
+        }
+    ]
+}

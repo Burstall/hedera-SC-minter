@@ -3,39 +3,50 @@ const {
 	AccountId,
 	PrivateKey,
 	ContractId,
-	Hbar,
-	ContractExecuteTransaction,
+	TokenId,
 	HbarUnit,
-	ContractFunctionParameters,
-	ContractInfoQuery,
+	Hbar,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const fs = require('fs');
-const Web3 = require('web3');
-const web3 = new Web3();
-let abi;
+const { ethers } = require('ethers');
+const readlineSync = require('readline-sync');
+const { getArgFlag, sleep } = require('../../utils/nodeHelpers');
+const { contractExecuteFunction, readOnlyEVMFromMirrorNode } = require('../../utils/solidityHelpers');
+const { checkMirrorHbarBalance, checkMirrorBalance, getTokenDetails } = require('../../utils/hederaMirrorHelpers');
+
 
 // Get operator from .env file
-const operatorKey = PrivateKey.fromString(process.env.PRIVATE_KEY);
+const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
-const contractName = process.env.CONTRACT_NAME ?? null;
-const lazyTokenId = process.env.LAZY_TOKEN;
+const contractName = process.env.CONTRACT_NAME ?? 'MinterContract';
 
 const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
-// check-out the deployed script - test read-only method
 const main = async () => {
-	if (contractName === undefined || contractName == null) {
-		console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
+	const args = process.argv.slice(2);
+	if (getArgFlag('-h') || args.length != 1) {
+		console.log('Usage: withdrawFunds.js');
+		console.log('   pull hbar / $LAZY from contract to operator account');
 		return;
 	}
 
+	if (operatorId === undefined || operatorId == null) {
+		console.log('Environment required, please specify ACCOUNT_ID in the .env file');
+		return;
+	}
+	else if (contractId === undefined || contractId == null) {
+		console.log('Contract ID required, please specify CONTRACT_ID in the .env file');
+		return;
+	}
 
 	console.log('\n-Using ENIVRONMENT:', env);
 	console.log('\n-Using Operator:', operatorId.toString());
+	console.log('\n-Using contract:', contractId.toString());
+	console.log('\n-Using contract name:', contractName);
 
 	if (env.toUpperCase() == 'TEST') {
 		client = Client.forTestnet();
@@ -45,8 +56,17 @@ const main = async () => {
 		client = Client.forMainnet();
 		console.log('interacting in *MAINNET*');
 	}
+	else if (env.toUpperCase() == 'PREVIEW') {
+		client = Client.forPreviewnet();
+		console.log('interacting in *PREVIEWNET*');
+	}
+	else if (env.toUpperCase() == 'LOCAL') {
+		const node = { '127.0.0.1:50211': new AccountId(3) };
+		client = Client.forNetwork(node).setMirrorNetwork('127.0.0.1:5600');
+		console.log('interacting in *LOCAL*');
+	}
 	else {
-		console.log('ERROR: Must specify either MAIN or TEST as environment in .env file');
+		console.log('ERROR: Must specify either MAIN or TEST or PREVIEW or LOCAL as environment in .env file');
 		return;
 	}
 
@@ -54,123 +74,76 @@ const main = async () => {
 
 	// import ABI
 	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`, 'utf8'));
-	abi = json.abi;
-	console.log('\n -Loading ABI...\n');
+	const mintIface = new ethers.Interface(json.abi);
 
-	client.setOperator(operatorId, operatorKey);
-	let [contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
-	console.log('Contract starting hbar balance:', contractHbarBal.toString());
-	console.log('Contract starting Lazy balance:', contractLazyBal.toString());
-	await transferHbarFromContract(Number(contractHbarBal.toTinybars()), HbarUnit.Tinybar);
-	console.log('Clean-up -> Retrieve hbar from Contract');
-	if (contractLazyBal > 0) {
-		await retrieveLazyFromContract(operatorId, contractLazyBal);
-	}
-	[contractLazyBal, contractHbarBal] = await getContractBalance(contractId);
-	console.log('Contract ending hbar balance:', contractHbarBal.toString());
-	console.log('Contract ending Lazy balance:', contractLazyBal.toString());
-};
+	const proceed = readlineSync.keyInYNStrict('Do you want to pull HBAR/$LAZY?');
+	if (proceed) {
+		// get the $LAZY token of the contract via mirror node -> getLazyToken
 
-/**
- * Helper function to get the Lazy, hbar & minted NFT balance of the contract
- * @returns {[number | Long.Long, Hbar, number | Long.Long]} The balance of the FT (without decimals), Hbar & NFT at the SC
- */
-async function getContractBalance() {
+		const encodedCommand = mintIface.encodeFunctionData('getLazyToken');
 
-	const query = new ContractInfoQuery()
-		.setContractId(contractId);
+		let result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
 
-	const info = await query.execute(client);
+		const lazyToken = TokenId.fromSolidityAddress(mintIface.decodeFunctionResult('getLazyToken', result)[0]);
 
-	let balance;
+		const lazyTokenDetails = await getTokenDetails(env, lazyToken);
 
-	const tokenMap = info.tokenRelationships;
-	const tokenBal = tokenMap.get(lazyTokenId.toString());
-	if (tokenBal) {
-		balance = tokenBal.balance;
+
+		// find out the hbar balance of the contract
+		let contractBal = await checkMirrorHbarBalance(env, AccountId.fromString(contractId.toString()));
+		let contractLazyBal = await checkMirrorBalance(env, AccountId.fromString(contractId.toString()), lazyToken);
+
+		console.log('Contract HBAR balance:', new Hbar(contractBal, HbarUnit.Tinybar).toString());
+		console.log('Contract $LAZY balance:', contractLazyBal / 10 ** lazyTokenDetails.decimals, lazyTokenDetails.symbol);
+
+		// withdraw the hbar
+		result = await contractExecuteFunction(
+			contractId,
+			mintIface,
+			client,
+			500_000,
+			'transferHbar',
+			[operatorId.toSolidityAddress(), Number(contractBal)],
+		);
+
+		console.log('HBAR Result:', result[0]?.status.toString(), 'transaction ID:', result[2].transactionId.toString());
+
+		result = await contractExecuteFunction(
+			contractId,
+			mintIface,
+			client,
+			500_000,
+			'retrieveLazy',
+			[operatorId.toSolidityAddress(), Number(contractLazyBal)],
+		);
+
+		console.log('$LAZY Result:', result[0]?.status.toString(), 'transaction ID:', result[2].transactionId.toString());
+
+		// sleep to let mirror node catch up
+		await sleep(4000);
+		contractBal = await checkMirrorHbarBalance(env, AccountId.fromString(contractId.toString()));
+		contractLazyBal = await checkMirrorBalance(env, AccountId.fromString(contractId.toString()), lazyToken);
+
+		console.log('Contract HBAR balance:', new Hbar(contractBal, HbarUnit.Tinybar).toString());
+		console.log('Contract $LAZY balance:', contractLazyBal / 10 ** lazyTokenDetails.decimals, lazyTokenDetails.symbol);
 	}
 	else {
-		balance = -1;
+		console.log('User aborted');
+		return;
 	}
-
-	return [balance, info.balance];
-}
-
-/**
- * Decodes the result of a contract's function execution
- * @param functionName the name of the function within the ABI
- * @param resultAsBytes a byte array containing the execution result
- */
-function decodeFunctionResult(functionName, resultAsBytes) {
-	const functionAbi = abi.find(func => func.name === functionName);
-	const functionParameters = functionAbi.outputs;
-	const resultHex = '0x'.concat(Buffer.from(resultAsBytes).toString('hex'));
-	const result = web3.eth.abi.decodeParameters(functionParameters, resultHex);
-	return result;
-}
+};
 
 main()
 	.then(() => {
-		// eslint-disable-next-line no-useless-escape
 		process.exit(0);
 	})
 	.catch(error => {
 		console.error(error);
 		process.exit(1);
 	});
-
-/**
- * Helper method to transfer FT using HTS
- * @param {AccountId} receiver
- * @param {number} amount amount of the FT to transfer (adjusted for decimal)
- * @returns {any} expected to be a string 'SUCCESS' implies it worked
- */
-async function retrieveLazyFromContract(receiver, amount) {
-
-	const gasLim = 600000;
-	const params = new ContractFunctionParameters()
-		.addAddress(receiver.toSolidityAddress())
-		.addInt64(amount);
-	const [tokenTransferRx, , ] = await contractExecuteFcn(contractId, gasLim, 'retrieveLazy', params);
-	const tokenTransferStatus = tokenTransferRx.status;
-
-	return tokenTransferStatus.toString();
-}
-
-/**
- * Helper function for calling the contract methods
- * @param {ContractId} cId the contract to call
- * @param {number | Long.Long} gasLim the max gas
- * @param {string} fcnName name of the function to call
- * @param {ContractFunctionParameters} params the function arguments
- * @param {string | number | Hbar | Long.Long | BigNumber} amountHbar the amount of hbar to send in the methos call
- * @returns {[TransactionReceipt, any, TransactionRecord]} the transaction receipt and any decoded results
- */
-async function contractExecuteFcn(cId, gasLim, fcnName, params, amountHbar) {
-	const contractExecuteTx = await new ContractExecuteTransaction()
-		.setContractId(cId)
-		.setGas(gasLim)
-		.setFunction(fcnName, params)
-		.setPayableAmount(amountHbar)
-		.execute(client);
-
-	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
-	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
-	return [contractExecuteRx, contractResults, record];
-}
-
-/**
- * Request hbar from the contract
- * @param {number} amount
- * @param {HbarUnit=} units defaults to Hbar as the unit type
- */
-async function transferHbarFromContract(amount, units = HbarUnit.Hbar) {
-	const gasLim = 400000;
-	const params = new ContractFunctionParameters()
-		.addAddress(operatorId.toSolidityAddress())
-		.addUint256(new Hbar(amount, units).toTinybars());
-	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'transferHbar', params);
-	return callHbarRx.status.toString();
-}

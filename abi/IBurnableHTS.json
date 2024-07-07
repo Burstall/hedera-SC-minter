@@ -1,0 +1,30 @@
+{
+    "contractName": "IBurnableHTS",
+    "sourceName": "contracts/IBurnableHTS.sol",
+    "abi": [
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint32",
+                    "name": "amount",
+                    "type": "uint32"
+                }
+            ],
+            "name": "burn",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        }
+    ]
+}

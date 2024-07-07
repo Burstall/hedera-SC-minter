@@ -35,11 +35,11 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     // list of WL addresses
     EnumerableMap.AddressToUintMap private whitelistedAddressQtyMap;
     LazyDetails private lazyDetails;
-    string private cid;
+    string public cid;
     string[] private metadata;
     uint256 private batchSize;
     uint256 public totalMinted;
-    uint256 private maxSupply;
+    uint256 public maxSupply;
     // map address to timestamps
     // for cooldown mechanic
     EnumerableMap.AddressToUintMap private walletMintTimeMap;
@@ -479,16 +479,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         _serials = mintedSerials;
     }
 
-    /// Use HTS to transfer FT - add the burn
-    /// @param _amount Non-negative value to take as pmt. a negative value will result in a failure.
+    /// @param _amount Non-negative value to take as pmt.
     /// @param _payer the address of the payer
-	/// @return _responseCode the response code from the HTS
     function takeLazyPayment(
         uint256 _amount,
         address _payer
-    ) internal returns (int256 _responseCode) {
+    ) internal {
         // check the payer has the required amount && the allowance is in place
-        if (IERC721(lazyDetails.lazyToken).balanceOf(_payer) < _amount)
+        if (IERC20(lazyDetails.lazyToken).balanceOf(_payer) < _amount)
             revert NotEnoughLazy();
 
         if (_payer != address(this)) {
@@ -507,7 +505,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         // This is a safe cast to uint32 as max value is >> max supply of Lazy
 
         if (burnAmt > 0) {
-            _responseCode = lazyDetails.lazySCT.burn(
+            int256 _responseCode = lazyDetails.lazySCT.burn(
                 lazyDetails.lazyToken,
                 SafeCast.toUint32(burnAmt)
             );
@@ -556,29 +554,24 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         );
     }
 
-    /// Use HTS to retrieve LAZY
     /// @param _receiver The receiver of the transaction
     /// @param _amount Non-negative value to send. a negative value will result in a failure.
-	/// @return responseCode the response code from the HTS
     function retrieveLazy(
         address _receiver,
-        int64 _amount
-    ) external onlyOwner returns (int32 responseCode) {
+        uint256 _amount
+    ) external onlyOwner {
         if (
             block.timestamp <
             (mintTiming.lastMintTime + mintTiming.refundWindow)
         ) revert LazyCooldown();
-
-        responseCode = HederaTokenService.transferToken(
-            lazyDetails.lazyToken,
-            address(this),
-            _receiver,
-            _amount
-        );
-
-        if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert FailedToPayLazy();
-        }
+		
+		bool success = IERC20(lazyDetails.lazyToken).transfer(
+                _receiver,
+                _amount
+		);
+		if (!success) {
+			revert FailedToPayLazy();
+		}
     }
 
     /// @return _wlSpotsPurchased number of spots purchased
@@ -1001,12 +994,12 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     function resetContract(
         bool _removeToken,
         uint256 _batch
-    ) external onlyOwner {
+    ) external onlyOwner returns (uint256 _remaingItems) {
         if (_removeToken) {
             token = address(0);
             totalMinted = 0;
         }
-        MinterLibrary.resetContract(
+        _remaingItems = MinterLibrary.resetContract(
             addressToNumMintedMap,
             metadata,
             walletMintTimeMap,

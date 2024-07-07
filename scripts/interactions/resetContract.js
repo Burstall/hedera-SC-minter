@@ -7,7 +7,7 @@ const {
 require('dotenv').config();
 const readlineSync = require('readline-sync');
 const fs = require('fs');
-const ethers = require('ethers');
+const { ethers } = require('ethers');
 const { contractExecuteFunction } = require('../../utils/solidityHelpers');
 
 // Get operator from .env file
@@ -20,7 +20,6 @@ const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
-// check-out the deployed script - test read-only method
 const main = async () => {
 
 	console.log('\n-Using ENIVRONMENT:', env);
@@ -53,26 +52,28 @@ const main = async () => {
 	const removeToken = readlineSync.keyInYNStrict('Do you want to remove the token?');
 
 	// request batch size (Default 100)
-	let batchSize = readlineSync.questionInt('Enter the batch size (Default 100): ');
-
-	if (!batchSize) {
-		batchSize = 100;
-	}
+	const batchSize = readlineSync.questionInt('Enter the batch size (Suggestion=100): ');
 
 	const proceed = readlineSync.keyInYNStrict('Do you want to reset the contract?');
 
+	let status;
+	let remaining;
 	if (proceed) {
-		const result = await contractExecuteFunction(
-			contractId,
-			minterIface,
-			client,
-			3_200_000,
-			'resetContract',
-			[removeToken, batchSize],
-		);
+		do {
+			const result = await contractExecuteFunction(
+				contractId,
+				minterIface,
+				client,
+				3_200_000,
+				'resetContract',
+				[removeToken, batchSize],
+			);
 
-		console.log('resetContract result:', result[0]?.status?.toString());
-		console.log('resetContract transaction:', result[2]?.transactionId?.toString());
+			console.log('resetContract result:', result[0]?.status?.toString());
+			console.log('resetContract transaction:', result[2]?.transactionId?.toString());
+			status = result[0]?.status?.toString();
+			remaining = Number(result[1][0]);
+		} while (status == 'SUCCESS' && remaining > 0);
 	}
 	else {
 		console.log('user aborted');
@@ -82,7 +83,6 @@ const main = async () => {
 
 main()
 	.then(() => {
-		// eslint-disable-next-line no-useless-escape
 		process.exit(0);
 	})
 	.catch(error => {

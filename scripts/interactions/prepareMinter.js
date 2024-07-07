@@ -3,35 +3,33 @@ const {
 	AccountId,
 	PrivateKey,
 	ContractId,
-	Hbar,
-	ContractExecuteTransaction,
-	ContractCallQuery,
 	TokenId,
-	ContractFunctionParameters,
+	Hbar,
+	HbarUnit,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const readlineSync = require('readline-sync');
 const fs = require('fs');
+const { ethers } = require('ethers');
+const { contractExecuteFunction, readOnlyEVMFromMirrorNode, contractDeployFunction } = require('../../utils/solidityHelpers');
+const { getArgFlag, getArg } = require('../../utils/nodeHelpers');
 const path = require('path');
-const Web3 = require('web3');
-const web3 = new Web3();
-let abi;
+const { getTokenDetails } = require('../../utils/hederaMirrorHelpers');
 
 // Get operator from .env file
-const operatorKey = PrivateKey.fromString(process.env.PRIVATE_KEY);
+const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
-const contractName = process.env.CONTRACT_NAME ?? null;
-const MINT_PAYMENT = process.env.MINT_PAYMENT || 50;
+const contractName = process.env.CONTRACT_NAME ?? 'MinterContract';
 
 const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
-const METADATA_BATCH = 60;
+const METADATA_BATCH = process.env.METADATA_BATCH || 60;
+const MINT_PAYMENT = process.env.MINT_PAYMENT || 50;
 
 const env = process.env.ENVIRONMENT ?? null;
-let client;
-let gas = 500000;
+let client, minterIface;
+let gas = 500_000;
 
-// check-out the deployed script - test read-only method
 const main = async () => {
 	if (getArgFlag('h')) {
 		console.log('Usage: prepareMinter.js [-gas X] -[upload|init|reset|hardreset]');
@@ -43,14 +41,10 @@ const main = async () => {
 		return;
 	}
 
-	if (contractName === undefined || contractName == null) {
-		console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
-		return;
-	}
-
-
 	console.log('\n-Using ENIVRONMENT:', env);
 	console.log('\n-Using Operator:', operatorId.toString());
+	console.log('\n-Using Contract:', contractId.toString());
+	console.log('CONTRACT NAME:', contractName);
 
 	if (env.toUpperCase() == 'TEST') {
 		client = Client.forTestnet();
@@ -66,25 +60,38 @@ const main = async () => {
 	}
 
 	client.setOperator(operatorId, operatorKey);
-	client.setSignOnDemand(true);
+
+	// import ABI
+	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`, 'utf8'));
+
+	minterIface = new ethers.Interface(json.abi);
 
 	if (getArgFlag('gas')) {
 		gas = Number(getArg('gas'));
 	}
 
-	// import ABI
-	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`, 'utf8'));
-	abi = json.abi;
-	console.log('\n -Loading ABI...\n');
-
-	console.log('Using contract:', contractId.toString());
 	console.log('Using default gas:', gas);
 
 	if (getArgFlag('reset')) {
 		const proceed = readlineSync.keyInYNStrict('Do you wish to reset contract data only (token intact)?');
 		if (proceed) {
-			const result = await useSetterBool('resetContract', false, gas);
-			console.log(result);
+			let status;
+			let remaining;
+			do {
+				const result = await contractExecuteFunction(
+					contractId,
+					minterIface,
+					client,
+					3_200_000,
+					'resetContract',
+					[false, 100],
+				);
+
+				console.log('resetContract result:', result[0]?.status?.toString());
+				console.log('resetContract transaction:', result[2]?.transactionId?.toString());
+				status = result[0]?.status?.toString();
+				remaining = Number(result[1][0]);
+			} while (status == 'SUCCESS' && remaining > 0);
 		}
 		else {
 			console.log('User Aborted');
@@ -93,8 +100,23 @@ const main = async () => {
 	else if (getArgFlag('hardreset')) {
 		const proceed = readlineSync.keyInYNStrict('Do you wish to **HARD** reset contract data AND TOKEN ID - burn function will be lost?');
 		if (proceed) {
-			const result = await useSetterBool('resetContract', true, gas);
-			console.log(result);
+			let status;
+			let remaining;
+			do {
+				const result = await contractExecuteFunction(
+					contractId,
+					minterIface,
+					client,
+					3_200_000,
+					'resetContract',
+					[true, 100],
+				);
+
+				console.log('resetContract result:', result[0]?.status?.toString());
+				console.log('resetContract transaction:', result[2]?.transactionId?.toString());
+				status = result[0]?.status?.toString();
+				remaining = Number(result[1][0]);
+			} while (status == 'SUCCESS' && remaining > 0);
 		}
 		else {
 			console.log('User Aborted');
@@ -140,22 +162,6 @@ const main = async () => {
 		// tell user how many found
 		const proceed = readlineSync.keyInYNStrict('Do you want to upload metadata?');
 		if (proceed) {
-			// mainnet behaving strangely moving to manual chunking
-			/*
-			if (env.toUpperCase() == 'MAIN') {
-				if (getArgFlag('chunk')) {
-					const chunk = Number(getArg('chunk'));
-					const mList = pinnedMetadataList.slice(chunk * METADATA_BATCH, (chunk + 1) * METADATA_BATCH);
-					console.log('Chunk:', chunk);
-					await uploadMetadata(mList);
-				}
-				else {
-					console.log('Specify chunk');
-					return;
-				}
-			}
-			else { */
-			// shuffle 10 times...
 			for (let p = 1; p <= 10; p++) {
 				console.log('Shuffle pass:', p);
 				for (let i = pinnedMetadataList.length - 1; i > 0; i--) {
@@ -163,62 +169,148 @@ const main = async () => {
 					[pinnedMetadataList[i], pinnedMetadataList[j]] = [pinnedMetadataList[j], pinnedMetadataList[i]];
 				}
 			}
-			await uploadMetadata(pinnedMetadataList);
-			// }
+			const [status, numUploaded] = await uploadMetadata(pinnedMetadataList);
+			console.log('Upload Status:', status, 'Uploaded:', numUploaded);
 		}
 	}
 	else if (getArgFlag('init')) {
-		const proceed = readlineSync.keyInYNStrict('Do you wish to initalise the contract based on the metadata you have uploaded?');
-		if (proceed) {
+		// check the current settings for the contract then step through setup
+		// getMintEconomics from mirror nodes
+		let encodedCommand = minterIface.encodeFunctionData('getMintEconomics');
 
-			const royaltyList = [];
-			let royaltiesAsString = '\n\n';
-			if (getArgFlag('royalty')) {
-				// read in the file specified
-				const fileToProcess = getArg('royalty');
-				let royaltiesJSONAsString;
-				try {
-					royaltiesJSONAsString = fs.readFileSync(fileToProcess, 'utf8');
-				}
-				catch (err) {
-					console.log(`ERROR: Could not read file (${fileToProcess})`, err);
-					process.exit(1);
-				}
+		const mintEconOutput = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
 
-				// parse JSON
-				let royaltyObjFromFile;
-				try {
-					royaltyObjFromFile = JSON.parse(royaltiesJSONAsString);
-				}
-				catch (err) {
-					console.log('ERROR: failed to parse the specified JSON', err, royaltyObjFromFile);
-					process.exit(1);
-				}
-				for (const idx in royaltyObjFromFile) {
-					let fee;
-					const royalty = royaltyObjFromFile[idx];
-					// console.log('Processing custom fee:', royalty);
-					if (royalty.percentage) {
-						// ensure collector account
-						if (!royalty.account) {
-							console.log('ERROR: Royalty defined as ' + royalty.percentage + ' but no account specified', royalty.account);
-							process.exit(1);
-						}
-						fee = new NFTFeeObject(royalty.percentage * 100, 10000, AccountId.fromString(royalty.account).toSolidityAddress());
-						royaltiesAsString += 'Pay ' + royalty.percentage + '% to ' + royalty.account;
-					}
-					if (royalty.fbf) {
-						fee.fallbackfee = Number(royalty.fbf);
-						royaltiesAsString += ' with Fallback of: ' + royalty.fbf + 'hbar\n';
+		const mintEcon = minterIface.decodeFunctionResult('getMintEconomics', mintEconOutput)[0];
+
+		// get the $LAZY token details
+		encodedCommand = minterIface.encodeFunctionData('getLazyToken');
+
+		const lazyTokenOutput = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const lazyToken = minterIface.decodeFunctionResult('getLazyToken', lazyTokenOutput)[0];
+
+		const lazyTokenDetails = await getTokenDetails(env, lazyToken);
+
+		console.log('Current mint economics:');
+		console.log('Contract Pays $LAZY:', Boolean(mintEcon[0]));
+		console.log('HBAR Px:', new Hbar(Number(mintEcon[1]), HbarUnit.Tinybar).toString());
+		console.log('$LAZY Px:', Number(mintEcon[2]) / 10 ** lazyTokenDetails.decimals, lazyTokenDetails.symbol);
+		console.log('WL discount (during WL period):', Number(mintEcon[3]), '%');
+		console.log('Max Mints (per tx):', Number(mintEcon[4]));
+		console.log('WL cost in $LAZY (0 = N/A):', Number(mintEcon[5]) ? `${Number(mintEcon[5]) / 10 ** lazyTokenDetails.decimals} ${lazyTokenDetails.symbol}` : 'N/A');
+		console.log('WL slots per purchase (0 = uncapped):', Number(mintEcon[6]));
+		console.log('Max Mints per Wallet:', Number(mintEcon[7]));
+		console.log('Token to buy WL with:', TokenId.fromSolidityAddress(mintEcon[8]));
+
+		encodedCommand = minterIface.encodeFunctionData('getMintTiming');
+
+		const mintTimingOutput = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const mintTiming = minterIface.decodeFunctionResult('getMintTiming', mintTimingOutput)[0];
+
+		console.log('Current mint timing:');
+		console.log('last mint:', mintTiming[0], ' -> ', new Date(Number(mintTiming[0]) * 1000).toISOString());
+		console.log('mint start:', mintTiming[1], ' -> ', new Date(Number(mintTiming[1]) * 1000).toISOString());
+		console.log('PAUSE STAUS:', Boolean(mintTiming[2]));
+		console.log('Cooldown period:', Number(mintTiming[3]), ' seconds');
+		console.log('Refund Window (if applicable):', Number(mintTiming[4]));
+		console.log('WL ONLY:', Boolean(mintTiming[5]));
+
+		// call addMetadata with an empty string[] to get the current number of metadata loaded
+		let result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000,
+			'addMetadata',
+			[],
+		);
+
+		const totalLoaded = Number(result[1][0]);
+
+		console.log('Current metadata loaded:', totalLoaded);
+
+		// check if user wants to use PRNG
+		const usePRNG = readlineSync.keyInYNStrict('Do you wish to use PRNG to ensure random metadata (not used is fixed edition)?');
+
+		if (usePRNG) {
+			let prngContractId;
+			if (process.env.PRNG_CONTRACT_ID) {
+				prngContractId = ContractId.fromString(process.env.PRNG_CONTRACT_ID);
+				if (!prngContractId) {
+					console.log('ERROR: PRNG_CONTRACT_ID not set in .env file');
+					const proceed = readlineSync.keyInYNStrict('Do you wish to deploy a new PRNG (best not to if you have done it before!)?');
+					if (proceed) {
+						const prngContractName = process.env.PRNG_CONTRACT_NAME ?? 'PRNGContract';
+						const prngJson = JSON.parse(fs.readFileSync(`./artifacts/contracts/${prngContractName}.sol/${prngContractName}.json`, 'utf8'));
+
+						const gasLimit = 800_000;
+						console.log('\n- Deploying contract...', prngContractName, '\n\tgas@', gasLimit);
+
+						const prngBytecode = prngJson.bytecode;
+
+						[prngContractId] = await contractDeployFunction(client, prngBytecode, gasLimit);
+
 					}
 					else {
-						royaltiesAsString += ' NO FALLBACK\n';
+						console.log('User Aborted');
 					}
-					royaltyList.push(fee);
 				}
-			}
 
-			const maxSupply = getArg('max') ?? 0;
+				console.log('Using PRNG Contract:', prngContractId.toString());
+			}
+			const proceed = readlineSync.keyInYNStrict('Do you wish to use this PRNG contract?');
+			if (proceed) {
+				result = await contractExecuteFunction(
+					contractId,
+					minterIface,
+					client,
+					500_000,
+					'updatePrng',
+					[prngContractId.toSolidityAddress()],
+				);
+			}
+			else {
+				console.log('Skipping PRNG setup - can add later');
+			}
+		}
+
+
+		// ask user if they are implementing a SBT mint or a regular one
+		const isSBT = readlineSync.keyInYNStrict('Is this a SBT mint?');
+
+		if (isSBT) {
+			console.log('SBT mint selected');
+			// add an option of a fixed edition mint.
+			// no need for royalties as it can't be resold
+			// adds in ability to deifne a fixed edition mint
+			const fixedEdition = readlineSync.keyInYNStrict('Is this a fixed edition mint?');
+
+			let maxSupply = 0;
+			if (fixedEdition) {
+				maxSupply = Number(readlineSync.questionInt('Enter the number of editions:'));
+			}
+			else {
+				maxSupply = getArg('max') ?? 0;
+			}
 
 			const nftName = getArg('name');
 			const nftSymbol = getArg('symbol');
@@ -232,14 +324,12 @@ const main = async () => {
 				nftDesc = new TextDecoder().decode(memoAsBytes.slice(0, 100));
 			}
 
-			let tokenDetails = 'Name:\t' + nftName +
+			const tokenDetails = 'Name:\t' + nftName +
 					'\nSymbol:\t' + nftSymbol +
 					'\nDescription/Memo (max 100 bytes!):\t' + nftDesc +
 					'\nCID path:\t' + cid +
-					'\nMax Supply:\t' + maxSupply + '\t' + '(0 => supply equal to metadata uploaded)';
-
-			if (royaltyList.length > 0) tokenDetails += royaltiesAsString;
-			else tokenDetails += '\nNO ROYALTIES SET\n';
+					'\nMax Supply:\t' + maxSupply + '\t' + '(0 => supply equal to metadata uploaded)'
+					+ '\nFixed Edition:\t' + fixedEdition;
 
 			console.log(tokenDetails);
 
@@ -247,25 +337,130 @@ const main = async () => {
 			const execute = readlineSync.keyInYNStrict('Do wish to create the token?');
 
 			if (execute) {
-				const [, tokenAddressSolidity, supplyOnToken] = await initialiseNFTMint(
-					nftName,
-					nftSymbol,
-					nftDesc,
-					cid,
-					royaltyList,
-					maxSupply,
+				result = await contractExecuteFunction(
+					contractId,
+					minterIface,
+					client,
+					1_600_000,
+					'initialiseNFTMint',
+					[nftName, nftSymbol, nftDesc, cid, maxSupply, fixedEdition],
+					MINT_PAYMENT,
 				);
-				const tokenId = TokenId.fromSolidityAddress(tokenAddressSolidity);
-				console.log('Token Created:', tokenId.toString(), ' / ', tokenAddressSolidity);
-				console.log('Max Supply:', Number(supplyOnToken));
+
+				console.log('TX Status:', result[0]?.status?.toString(), 'tx:', result[2]?.transactionId?.toString());
+				const tokenId = TokenId.fromSolidityAddress(result[1][0]);
+				console.log('Token Created:', tokenId.toString());
+				console.log('Max Supply:', Number(result[1][1]));
 			}
 			else {
 				console.log('User Aborted');
 			}
-
 		}
 		else {
-			console.log('User aborted.');
+			console.log('Regular mint selected');
+
+			const proceed = readlineSync.keyInYNStrict('Do you wish to initalise the contract based on the metadata you have uploaded?');
+			if (proceed) {
+
+				const royaltyList = [];
+				let royaltiesAsString = '\n\n';
+				if (getArgFlag('royalty')) {
+					// read in the file specified
+					const fileToProcess = getArg('royalty');
+					let royaltiesJSONAsString;
+					try {
+						royaltiesJSONAsString = fs.readFileSync(fileToProcess, 'utf8');
+					}
+					catch (err) {
+						console.log(`ERROR: Could not read file (${fileToProcess})`, err);
+						process.exit(1);
+					}
+
+					// parse JSON
+					let royaltyObjFromFile;
+					try {
+						royaltyObjFromFile = JSON.parse(royaltiesJSONAsString);
+					}
+					catch (err) {
+						console.log('ERROR: failed to parse the specified JSON', err, royaltyObjFromFile);
+						process.exit(1);
+					}
+					for (const idx in royaltyObjFromFile) {
+						let fee;
+						const royalty = royaltyObjFromFile[idx];
+						// console.log('Processing custom fee:', royalty);
+						if (royalty.percentage) {
+							// ensure collector account
+							if (!royalty.account) {
+								console.log('ERROR: Royalty defined as ' + royalty.percentage + ' but no account specified', royalty.account);
+								process.exit(1);
+							}
+							fee = new NFTFeeObject(royalty.percentage * 100, 10000, AccountId.fromString(royalty.account).toSolidityAddress());
+							royaltiesAsString += 'Pay ' + royalty.percentage + '% to ' + royalty.account;
+						}
+						if (royalty.fbf) {
+							fee.fallbackfee = Number(royalty.fbf);
+							royaltiesAsString += ' with Fallback of: ' + royalty.fbf + 'hbar\n';
+						}
+						else {
+							royaltiesAsString += ' NO FALLBACK\n';
+						}
+						royaltyList.push(fee);
+					}
+				}
+
+				const maxSupply = getArg('max') ?? 0;
+
+				const nftName = getArg('name');
+				const nftSymbol = getArg('symbol');
+				let nftDesc = getArg('memo');
+				const cid = getArg('cid');
+
+				// check memo length
+				const memoAsBytes = new TextEncoder().encode(Buffer.from(nftDesc));
+				if (memoAsBytes.length > 100) {
+					console.log('Memo too long -- max 100 bytes', nftDesc);
+					nftDesc = new TextDecoder().decode(memoAsBytes.slice(0, 100));
+				}
+
+				let tokenDetails = 'Name:\t' + nftName +
+						'\nSymbol:\t' + nftSymbol +
+						'\nDescription/Memo (max 100 bytes!):\t' + nftDesc +
+						'\nCID path:\t' + cid +
+						'\nMax Supply:\t' + maxSupply + '\t' + '(0 => supply equal to metadata uploaded)';
+
+				if (royaltyList.length > 0) tokenDetails += royaltiesAsString;
+				else tokenDetails += '\nNO ROYALTIES SET\n';
+
+				console.log(tokenDetails);
+
+				// take user input
+				const execute = readlineSync.keyInYNStrict('Do wish to create the token?');
+
+				if (execute) {
+					result = await contractExecuteFunction(
+						contractId,
+						minterIface,
+						client,
+						1_600_000,
+						'initialiseNFTMint',
+						[nftName, nftSymbol, nftDesc, cid, royaltyList, maxSupply],
+						MINT_PAYMENT,
+					);
+
+					console.log('TX Status:', result[0]?.status?.toString(), 'tx:', result[2]?.transactionId?.toString());
+					const tokenId = TokenId.fromSolidityAddress(result[1][0]);
+					console.log('Token Created:', tokenId.toString());
+					console.log('Max Supply:', Number(result[1][1]));
+				}
+				else {
+					console.log('User Aborted');
+				}
+
+			}
+			else {
+				console.log('User aborted.');
+			}
 		}
 	}
 	else {
@@ -274,216 +469,36 @@ const main = async () => {
 };
 
 /**
- * Call a methos with no arguments
- * @param {string} fcnName
- * @param {number=} gas
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function methodCallerNoArgs(fcnName, gasLim = 500000) {
-	const params = new ContractFunctionParameters();
-	const [setterAddressRx, setterResults ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterAddressRx.status.toString(), setterResults];
-}
-
-/**
- *
- * @param {string} name
- * @param {string} symbol
- * @param {string} memo
- * @param {string} cid
- * @param {*} royaltyList
- * @param {Number=0} maxSupply
- * @param {Number=1000000} gasLim
- */
-async function initialiseNFTMint(name, symbol, memo, cid, royaltyList, maxSupply = 0, gasLim = 1000000) {
-	const params = [name, symbol, memo, cid, royaltyList, maxSupply];
-
-	const [initialiseRx, initialiseResults] = await contractExecuteWithStructArgs(contractId, gasLim, 'initialiseNFTMint', params, MINT_PAYMENT);
-	return [initialiseRx.status.toString(), initialiseResults['createdTokenAddress'], initialiseResults['maxSupply']] ;
-}
-
-/**
- * Helper function to get the current settings of the contract
- * @param {string} fcnName the name of the getter to call
- * @param {string} expectedVar the variable to exeppect to get back
- * @return {*}
- */
-// eslint-disable-next-line no-unused-vars
-async function getSetting(fcnName, expectedVar) {
-	// check the Lazy Token and LSCT addresses
-	// generate function call with function name and parameters
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
-
-	// query the contract
-	const contractCall = await new ContractCallQuery()
-		.setContractId(contractId)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setMaxQueryPayment(new Hbar(2))
-		.setGas(100000)
-		.execute(client);
-	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
-	return queryResult[expectedVar];
-}
-
-/**
- * Helper function to get the current settings of the contract
- * @param {string} fcnName the name of the getter to call
- * @param {string} expectedVars the variable to exeppect to get back
- * @return {*} array of results
- */
-// eslint-disable-next-line no-unused-vars
-async function getSettings(fcnName, ...expectedVars) {
-	// check the Lazy Token and LSCT addresses
-	// generate function call with function name and parameters
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
-
-	// query the contract
-	const contractCall = await new ContractCallQuery()
-		.setContractId(contractId)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setMaxQueryPayment(new Hbar(2))
-		.setGas(100000)
-		.execute(client);
-	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
-	const results = [];
-	for (let v = 0 ; v < expectedVars.length; v++) {
-		results.push(queryResult[expectedVars[v]]);
-	}
-	return results;
-}
-
-async function contractExecuteWithStructArgs(cId, gasLim, fcnName, params, amountHbar) {
-	// use web3.eth.abi to encode the struct for sending.
-	// console.log('pre-encode:', JSON.stringify(params, null, 4));
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, params);
-
-	const contractExecuteTx = await new ContractExecuteTransaction()
-		.setContractId(cId)
-		.setGas(gasLim)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setPayableAmount(amountHbar)
-		.execute(client);
-
-	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
-	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
-	return [contractExecuteRx, contractResults, record];
-}
-
-/**
- * Decodes the result of a contract's function execution
- * @param functionName the name of the function within the ABI
- * @param resultAsBytes a byte array containing the execution result
- */
-function decodeFunctionResult(functionName, resultAsBytes) {
-	const functionAbi = abi.find(func => func.name === functionName);
-	const functionParameters = functionAbi.outputs;
-	const resultHex = '0x'.concat(Buffer.from(resultAsBytes).toString('hex'));
-	const result = web3.eth.abi.decodeParameters(functionParameters, resultHex);
-	return result;
-}
-
-function encodeFunctionCall(functionName, parameters) {
-	const functionAbi = abi.find((func) => func.name === functionName && func.type === 'function');
-	const encodedParametersHex = web3.eth.abi.encodeFunctionCall(functionAbi, parameters).slice(2);
-	return Buffer.from(encodedParametersHex, 'hex');
-}
-
-/**
  * Method top upload the metadata using chunking
  * @param {string[]} metadata
  * @return {[string, Number]}
  */
 async function uploadMetadata(metadata) {
-	const gasLim = 1500000;
+	const uploadBatchSize = METADATA_BATCH;
 	let totalLoaded = 0;
 	let result;
-	for (let outer = 0; outer < metadata.length; outer += METADATA_BATCH) {
+	let status = '';
+	for (let outer = 0; outer < metadata.length; outer += uploadBatchSize) {
 		const dataToSend = [];
-		for (let inner = 0; (inner < METADATA_BATCH) && ((inner + outer) < metadata.length); inner++) {
+		for (let inner = 0; (inner < uploadBatchSize) && ((inner + outer) < metadata.length); inner++) {
 			dataToSend.push(metadata[inner + outer]);
 		}
-		[, result] = await useSetterStringArray('addMetadata', dataToSend, gasLim);
-		totalLoaded = Number(result['totalLoaded']);
-		console.log('Uploaded metadata:', totalLoaded);
-	}
-}
+		// use addMetadata method
+		result = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			300_000 + (dataToSend.length * 20_000),
+			'addMetadata',
+			[dataToSend],
+		);
 
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {string[]} value
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterStringArray(fcnName, value, gasLim = 200000) {
-	const params = new ContractFunctionParameters()
-		.addStringArray(value);
-	const [setterAddressRx, setterResults] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return [setterAddressRx.status.toString(), setterResults];
-}
-
-/**
- * Helper function for calling the contract methods
- * @param {ContractId} cId the contract to call
- * @param {number | Long.Long} gasLim the max gas
- * @param {string} fcnName name of the function to call
- * @param {ContractFunctionParameters} params the function arguments
- * @param {string | number | Hbar | Long.Long | BigNumber} amountHbar the amount of hbar to send in the methos call
- * @returns {[TransactionReceipt, any, TransactionRecord]} the transaction receipt and any decoded results
- */
-async function contractExecuteFcn(cId, gasLim, fcnName, params, amountHbar) {
-	const contractExecuteTx = await new ContractExecuteTransaction()
-		.setContractId(cId)
-		.setGas(gasLim)
-		.setFunction(fcnName, params)
-		.setPayableAmount(amountHbar)
-		.execute(client);
-
-	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
-	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
-	return [contractExecuteRx, contractResults, record];
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {boolean} value
- * @param {number=} gasLim
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterBool(fcnName, value, gasLim = 200000) {
-	const params = new ContractFunctionParameters()
-		.addBool(value);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
-}
-
-function getArg(arg) {
-	const customidx = process.argv.indexOf(`-${arg}`);
-	let customValue;
-
-	if (customidx > -1) {
-		// Retrieve the value after --custom
-		customValue = process.argv[customidx + 1];
+		status = result[0].status.toString();
+		totalLoaded = Number(result[1][0]);
+		console.log('Uploaded:', totalLoaded, 'of', metadata.length);
 	}
 
-	return customValue;
-}
-
-function getArgFlag(arg) {
-	const customIndex = process.argv.indexOf(`-${arg}`);
-
-	if (customIndex > -1) {
-		return true;
-	}
-
-	return false;
+	return [status, totalLoaded];
 }
 
 class NFTFeeObject {
@@ -504,7 +519,6 @@ class NFTFeeObject {
 
 main()
 	.then(() => {
-		// eslint-disable-next-line no-useless-escape
 		process.exit(0);
 	})
 	.catch(error => {

@@ -4,22 +4,22 @@ const {
 	PrivateKey,
 	ContractId,
 	Hbar,
-	ContractExecuteTransaction,
-	ContractCallQuery,
-	ContractFunctionParameters,
 	HbarUnit,
+	TokenId,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const fs = require('fs');
-const Web3 = require('web3');
 const readlineSync = require('readline-sync');
-const web3 = new Web3();
-let abi;
+const { ethers } = require('ethers');
+const { getArgFlag } = require('../../utils/nodeHelpers');
+const { contractExecuteFunction, readOnlyEVMFromMirrorNode } = require('../../utils/solidityHelpers');
+const { getTokenDetails } = require('../../utils/hederaMirrorHelpers');
+
 
 // Get operator from .env file
-const operatorKey = PrivateKey.fromString(process.env.PRIVATE_KEY);
+const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
-const contractName = process.env.CONTRACT_NAME ?? null;
+const contractName = process.env.CONTRACT_NAME ?? 'MinterContract';
 
 const contractId = ContractId.fromString(process.env.CONTRACT_ID);
 
@@ -34,15 +34,20 @@ const main = async () => {
 		console.log('   where XX is price in Hbar and YY is price in Lazy allowinf for decimal so 10 == 1 $LAZY');
 		return;
 	}
-
-	if (contractName === undefined || contractName == null) {
-		console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
+	if (operatorId === undefined || operatorId == null) {
+		console.log('Environment required, please specify ACCOUNT_ID in the .env file');
+		return;
+	}
+	else if (contractId === undefined || contractId == null) {
+		console.log('Contract ID required, please specify CONTRACT_ID in the .env file');
 		return;
 	}
 
 
 	console.log('\n-Using ENIVRONMENT:', env);
 	console.log('\n-Using Operator:', operatorId.toString());
+	console.log('\n-Using contract:', contractId.toString());
+	console.log('\n-Using contract name:', contractName);
 
 	if (env.toUpperCase() == 'TEST') {
 		client = Client.forTestnet();
@@ -52,8 +57,17 @@ const main = async () => {
 		client = Client.forMainnet();
 		console.log('interacting in *MAINNET*');
 	}
+	else if (env.toUpperCase() == 'PREVIEW') {
+		client = Client.forPreviewnet();
+		console.log('interacting in *PREVIEWNET*');
+	}
+	else if (env.toUpperCase() == 'LOCAL') {
+		const node = { '127.0.0.1:50211': new AccountId(3) };
+		client = Client.forNetwork(node).setMirrorNetwork('127.0.0.1:5600');
+		console.log('interacting in *LOCAL*');
+	}
 	else {
-		console.log('ERROR: Must specify either MAIN or TEST as environment in .env file');
+		console.log('ERROR: Must specify either MAIN or TEST or PREVIEW or LOCAL as environment in .env file');
 		return;
 	}
 
@@ -61,166 +75,72 @@ const main = async () => {
 
 	// import ABI
 	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`, 'utf8'));
-	abi = json.abi;
-	console.log('\n -Loading ABI...\n');
+	const mintIface = new ethers.Interface(json.abi);
 
-	let [hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
-	console.log('Cost to mint:\nHbar:', new Hbar(hbarCost, HbarUnit.Tinybar).toString(),
-		'\nLazy:', lazyCost / 10);
+	// getMintEconomics from mirror nodes
+	let encodedCommand = mintIface.encodeFunctionData('getMintEconomics');
 
-	const newCostHbar = new Hbar(Number(args[0]));
-	console.log('\nNew Cost Hbar:', newCostHbar.toString());
-	console.log('New Cost LAZY:', Number(args[1]) / 10);
+	const mintEconOutput = await readOnlyEVMFromMirrorNode(
+		env,
+		contractId,
+		encodedCommand,
+		operatorId,
+		false,
+	);
+
+	const mintEcon = mintIface.decodeFunctionResult('getMintEconomics', mintEconOutput)[0];
+
+	// get the $LAZY token details
+	encodedCommand = mintIface.encodeFunctionData('getLazyToken');
+
+	const lazyTokenOutput = await readOnlyEVMFromMirrorNode(
+		env,
+		contractId,
+		encodedCommand,
+		operatorId,
+		false,
+	);
+
+	const lazyToken = mintIface.decodeFunctionResult('getLazyToken', lazyTokenOutput)[0];
+
+	const lazyTokenDetails = await getTokenDetails(env, lazyToken);
+
+	console.log('Current mint economics:');
+	console.log('Contract Pays $LAZY:', Boolean(mintEcon[0]));
+	console.log('HBAR Px:', new Hbar(Number(mintEcon[1]), HbarUnit.Tinybar).toString());
+	console.log('$LAZY Px:', Number(mintEcon[2]) / 10 ** lazyTokenDetails.decimals, lazyTokenDetails.symbol);
+	console.log('WL discount (during WL period):', Number(mintEcon[3]), '%');
+	console.log('Max Mints (per tx):', Number(mintEcon[4]));
+	console.log('WL cost in $LAZY (0 = N/A):', Number(mintEcon[5]) ? `${Number(mintEcon[5]) / 10 ** lazyTokenDetails.decimals} ${lazyTokenDetails.symbol}` : 'N/A');
+	console.log('WL slots per purchase (0 = uncapped):', Number(mintEcon[6]));
+	console.log('Max Mints per Wallet:', Number(mintEcon[7]));
+	console.log('Token to buy WL with:', TokenId.fromSolidityAddress(mintEcon[8]));
+
+	const hbarCost = new Hbar(Number(args[0]), HbarUnit.Hbar);
+	const lazyCost = Number(args[1]) * 10 ** lazyTokenDetails.decimals;
+
+	console.log('New cost to mint:\nHbar:', hbarCost.toString(), '\n$LAZY:', Number(args[1]), lazyTokenDetails.symbol);
+
 	const proceed = readlineSync.keyInYNStrict('Do you want to update mint price?');
 	if (proceed) {
-		await useSetterInts('updateCost', newCostHbar.toTinybars(), Number(args[1]));
-		[hbarCost, lazyCost] = await getSettings('getCost', 'hbarCost', 'lazyCost');
-		console.log('New cost to mint:\nHbar:', new Hbar(hbarCost, HbarUnit.Tinybar).toString(),
-			'\nLazy:', lazyCost / 10);
+		const result = await contractExecuteFunction(
+			contractId,
+			mintIface,
+			client,
+			500_000,
+			'updateCost',
+			[hbarCost.toTinybars(), lazyCost],
+		);
+
+		console.log('Result:', result[0]?.status.toString(), 'transaction ID:', result[2].transactionId.toString());
 	}
 	else {
 		console.log('User aborted');
 	}
 };
 
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {boolean} value
- * @returns {string}
- */
-// eslint-disable-next-line no-unused-vars
-async function useSetterBool(fcnName, value) {
-	const gasLim = 200000;
-	const params = new ContractFunctionParameters()
-		.addBool(value);
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
-}
-
-/**
- * Helper function for calling the contract methods
- * @param {ContractId} cId the contract to call
- * @param {number | Long.Long} gasLim the max gas
- * @param {string} fcnName name of the function to call
- * @param {ContractFunctionParameters} params the function arguments
- * @param {string | number | Hbar | Long.Long | BigNumber} amountHbar the amount of hbar to send in the methos call
- * @returns {[TransactionReceipt, any, TransactionRecord]} the transaction receipt and any decoded results
- */
-async function contractExecuteFcn(cId, gasLim, fcnName, params, amountHbar) {
-	const contractExecuteTx = await new ContractExecuteTransaction()
-		.setContractId(cId)
-		.setGas(gasLim)
-		.setFunction(fcnName, params)
-		.setPayableAmount(amountHbar)
-		.execute(client);
-
-	// get the results of the function call;
-	const record = await contractExecuteTx.getRecord(client);
-	const contractResults = decodeFunctionResult(fcnName, record.contractFunctionResult.bytes);
-	const contractExecuteRx = await contractExecuteTx.getReceipt(client);
-	return [contractExecuteRx, contractResults, record];
-}
-
-/**
- * Helper function to get the current settings of the contract
- * @param {string} fcnName the name of the getter to call
- * @param {string} expectedVar the variable to exeppect to get back
- * @return {*}
- */
-// eslint-disable-next-line no-unused-vars
-async function getSetting(fcnName, expectedVar) {
-	// check the Lazy Token and LSCT addresses
-	// generate function call with function name and parameters
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
-
-	// query the contract
-	const contractCall = await new ContractCallQuery()
-		.setContractId(contractId)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setMaxQueryPayment(new Hbar(2))
-		.setGas(100000)
-		.execute(client);
-	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
-	return queryResult[expectedVar];
-}
-
-/**
- * Generic setter caller
- * @param {string} fcnName
- * @param {...number} values
- * @returns {string}
- */
-async function useSetterInts(fcnName, ...values) {
-	const gasLim = 200000;
-	const params = new ContractFunctionParameters();
-
-	for (let i = 0 ; i < values.length; i++) {
-		params.addUint256(values[i]);
-	}
-	const [setterAddressRx, , ] = await contractExecuteFcn(contractId, gasLim, fcnName, params);
-	return setterAddressRx.status.toString();
-}
-
-/**
- * Helper function to get the current settings of the contract
- * @param {string} fcnName the name of the getter to call
- * @param {string} expectedVars the variable to exeppect to get back
- * @return {*} array of results
- */
-// eslint-disable-next-line no-unused-vars
-async function getSettings(fcnName, ...expectedVars) {
-	// check the Lazy Token and LSCT addresses
-	// generate function call with function name and parameters
-	const functionCallAsUint8Array = await encodeFunctionCall(fcnName, []);
-
-	// query the contract
-	const contractCall = await new ContractCallQuery()
-		.setContractId(contractId)
-		.setFunctionParameters(functionCallAsUint8Array)
-		.setMaxQueryPayment(new Hbar(2))
-		.setGas(100000)
-		.execute(client);
-	const queryResult = await decodeFunctionResult(fcnName, contractCall.bytes);
-	const results = [];
-	for (let v = 0 ; v < expectedVars.length; v++) {
-		results.push(queryResult[expectedVars[v]]);
-	}
-	return results;
-}
-
-/**
- * Decodes the result of a contract's function execution
- * @param functionName the name of the function within the ABI
- * @param resultAsBytes a byte array containing the execution result
- */
-function decodeFunctionResult(functionName, resultAsBytes) {
-	const functionAbi = abi.find(func => func.name === functionName);
-	const functionParameters = functionAbi.outputs;
-	const resultHex = '0x'.concat(Buffer.from(resultAsBytes).toString('hex'));
-	const result = web3.eth.abi.decodeParameters(functionParameters, resultHex);
-	return result;
-}
-
-function encodeFunctionCall(functionName, parameters) {
-	const functionAbi = abi.find((func) => func.name === functionName && func.type === 'function');
-	const encodedParametersHex = web3.eth.abi.encodeFunctionCall(functionAbi, parameters).slice(2);
-	return Buffer.from(encodedParametersHex, 'hex');
-}
-
-function getArgFlag(arg) {
-	const customIndex = process.argv.indexOf(`-${arg}`);
-
-	if (customIndex > -1) {
-		return true;
-	}
-
-	return false;
-}
-
 main()
 	.then(() => {
-		// eslint-disable-next-line no-useless-escape
 		process.exit(0);
 	})
 	.catch(error => {

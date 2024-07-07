@@ -16,7 +16,7 @@ require('dotenv').config();
 // Get operator from .env file
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
-const contractName = 'MinterContract';
+const contractName = 'SoulboundMinter';
 const libraryName = 'MinterLibrary';
 
 const lazyContractId = ContractId.fromString(process.env.LAZY_SCT_CONTRACT_ID);
@@ -71,7 +71,7 @@ const main = async () => {
 	console.log('\n-Using LAZY Token:', lazyTokenId.toString());
 	console.log('\n-Using LAZY Burn %:', lazyBurnPerc);
 
-	const proceed = readlineSync.keyInYNStrict('Do you want to deploy the (regular) minter?');
+	const proceed = readlineSync.keyInYNStrict('Do you want to deploy the SBT minter?');
 
 	if (proceed) {
 		if (env.toUpperCase() == 'TEST') {

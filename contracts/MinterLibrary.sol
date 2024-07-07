@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { EnumerableMap } from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { IPrngGenerator } from "./IPrngGenerator.sol";
 
@@ -116,9 +117,13 @@ library MinterLibrary {
         EnumerableMap.UintToUintMap storage serialMintTimeMap,
         EnumerableSet.UintSet storage wlSerialsUsed,
         uint256 batch
-    ) public {
+    ) public returns (uint256 remainingItems) {
         uint256 size = addressToNumMintedMap.length();
-        size = size > batch ? batch : size;
+		if (size > batch) {
+			remainingItems = size - batch;
+			size = batch;
+		}
+
         for (uint256 a = size; a > 0; ) {
             (address key, ) = addressToNumMintedMap.at(a - 1);
             addressToNumMintedMap.remove(key);
@@ -128,6 +133,11 @@ library MinterLibrary {
         }
         size = metadata.length;
         size = size > batch ? batch : size;
+		if (size > batch) {
+			remainingItems = Math.max(remainingItems, size - batch);
+			size = batch;
+		}
+		
         for (uint256 a = size; a > 0; ) {
             metadata.pop();
             unchecked {
@@ -135,7 +145,10 @@ library MinterLibrary {
             }
         }
         size = walletMintTimeMap.length();
-        size = size > batch ? batch : size;
+        if (size > batch) {
+			remainingItems = Math.max(remainingItems, size - batch);
+			size = batch;
+		}
         for (uint256 a = size; a > 0; ) {
             (address key, ) = walletMintTimeMap.at(a - 1);
             walletMintTimeMap.remove(key);
@@ -144,7 +157,10 @@ library MinterLibrary {
             }
         }
         size = wlAddressToNumMintedMap.length();
-        size = size > batch ? batch : size;
+        if (size > batch) {
+			remainingItems = Math.max(remainingItems, size - batch);
+			size = batch;
+		}
         for (uint256 a = size; a > 0; ) {
             (address key, ) = wlAddressToNumMintedMap.at(a - 1);
             wlAddressToNumMintedMap.remove(key);
@@ -153,7 +169,10 @@ library MinterLibrary {
             }
         }
         size = serialMintTimeMap.length();
-        size = size > batch ? batch : size;
+        if (size > batch) {
+			remainingItems = Math.max(remainingItems, size - batch);
+			size = batch;
+		}
         for (uint256 a = size; a > 0; ) {
             (uint256 key, ) = serialMintTimeMap.at(a - 1);
             serialMintTimeMap.remove(key);
@@ -162,7 +181,10 @@ library MinterLibrary {
             }
         }
         size = wlSerialsUsed.length();
-        size = size > batch ? batch : size;
+        if (size > batch) {
+			remainingItems = Math.max(remainingItems, size - batch);
+			size = batch;
+		}
         for (uint256 a = size; a > 0; ) {
             uint256 key = wlSerialsUsed.at(a - 1);
             wlSerialsUsed.remove(key);

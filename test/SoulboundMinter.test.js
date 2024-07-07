@@ -40,7 +40,7 @@ const contractName = 'SoulboundMinter';
 const libraryName = 'MinterLibrary';
 const lazyContractCreator = 'FungibleTokenCreator';
 const env = process.env.ENVIRONMENT ?? null;
-const lazyBurnPerc = process.env.LAZY_BURN_PERC || 25;
+const lazyBurnPerc = 25;
 const MINT_PAYMENT = process.env.MINT_PAYMENT || 50;
 const LAZY_DECIMAL = process.env.LAZY_DECIMALS ?? 1;
 const LAZY_MAX_SUPPLY = process.env.LAZY_MAX_SUPPLY ?? 250_000_000;
@@ -1808,7 +1808,7 @@ describe('Test out WL functions...', function() {
 		expect(Number(result[1][0])).to.be.greaterThanOrEqual(2);
 
 		// let mirror node catch up
-		await sleep(4000);
+		await sleep(5000);
 
 		// expect operator to have 1 WL slot and alice to have 2
 		// call getWhitelist from the mirror node
@@ -1948,7 +1948,7 @@ describe('Test out Discount mint functions...', function() {
 		expect(Number(result[1][0]) == 2).to.be.true;
 
 		// let mirror node catch up
-		await sleep(4000);
+		await sleep(5000);
 
 		// call getWhitelist from the mirror node
 		const encodedCommand = minterIface.encodeFunctionData('getWhitelist');
@@ -2002,7 +2002,7 @@ describe('Test out Discount mint functions...', function() {
 		}
 
 		// let mirror node catch up
-		await sleep(4000);
+		await sleep(5000);
 
 		// get the cost again expect discount
 		result = await readOnlyEVMFromMirrorNode(

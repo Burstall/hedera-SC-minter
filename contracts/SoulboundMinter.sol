@@ -36,11 +36,11 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     // list of WL addresses
     EnumerableMap.AddressToUintMap private whitelistedAddressQtyMap;
     LazyDetails private lazyDetails;
-    string private cid;
+    string public cid;
     string[] private metadata;
     uint256 private batchSize;
     uint256 public totalMinted;
-    uint256 private maxSupply;
+    uint256 public maxSupply;
     // map address to timestamps
     // for cooldown mechanic
     EnumerableMap.AddressToUintMap private walletMintTimeMap;
@@ -101,13 +101,19 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         bool lazyFromContract;
         // in tinybar
         uint256 mintPriceHbar;
-        // adjusted for decimal 1
+        // adjusted for decimal [e.g. 1 $LAZY = 10 given decimal of 1]
         uint256 mintPriceLazy;
+		// as a percentage (whole % -> 20% = 20)
         uint256 wlDiscount;
+		// maximum number of mints in a single transaction
         uint256 maxMint;
+		// if > 0 the amount of the fungible $LAZY token to buy a WL slot(s)
         uint256 buyWlWithLazy;
+		// 0 = uncapped mints per WL, > 0 = X mints per WL purchase ($LAZY or via serial)
         uint256 maxWlAddressMint;
+		// maximum number of mints per wallet (default = 0 = uncapped)
         uint256 maxMintPerWallet;
+		// address of the token to use for WL purchase (once per serial)
         address wlToken;
     }
 
@@ -198,6 +204,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _maxSupply must be > 0 if _fixedEdition is true
 	/// @param _fixedEdition boolean to indicate if the token is a fixed edition (repeated metadata)
     /// @return _createdTokenAddress the address of the new token
+	/// @return _tokenSupply the total supply of the token
     function initialiseNFTMint(
         string memory _name,
         string memory _symbol,
@@ -211,6 +218,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         onlyOwner
         returns (address _createdTokenAddress, uint256 _tokenSupply)
     {
+		// block the method if the token has already been set
         if (token != address(0)) revert NotReset(token);
         if (bytes(_memo).length > 100) revert MemoTooLong();
 		if (_fixedEdition && _maxSupply == 0) revert BadArguments();
@@ -468,16 +476,14 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         _serials = mintedSerials;
     }
 
-    /// Use HTS to transfer FT - add the burn
-    /// @param _amount Non-negative value to take as pmt. a negative value will result in a failure.
+    /// @param _amount Non-negative value to take as pmt.
     /// @param _payer the address of the payer
-	/// @return _responseCode the response code from the HTS
     function takeLazyPayment(
         uint256 _amount,
         address _payer
-    ) internal returns (int256 _responseCode) {
+    ) internal {
         // check the payer has the required amount && the allowance is in place
-        if (IERC721(lazyDetails.lazyToken).balanceOf(_payer) < _amount)
+        if (IERC20(lazyDetails.lazyToken).balanceOf(_payer) < _amount)
             revert NotEnoughLazy();
 
         if (_payer != address(this)) {
@@ -496,7 +502,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         // This is a safe cast to uint32 as max value is >> max supply of Lazy
 
         if (burnAmt > 0) {
-            _responseCode = lazyDetails.lazySCT.burn(
+            int256 _responseCode = lazyDetails.lazySCT.burn(
                 lazyDetails.lazyToken,
                 SafeCast.toUint32(burnAmt)
             );
@@ -545,29 +551,24 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         );
     }
 
-    /// Use HTS to retrieve LAZY
-    /// @param _receiver The receiver of the transaction
+     /// @param _receiver The receiver of the transaction
     /// @param _amount Non-negative value to send. a negative value will result in a failure.
-	/// @return responseCode the response code from the HTS
     function retrieveLazy(
         address _receiver,
-        int64 _amount
-    ) external onlyOwner returns (int32 responseCode) {
+        uint256 _amount
+    ) external onlyOwner {
         if (
             block.timestamp <
             (mintTiming.lastMintTime + mintTiming.refundWindow)
         ) revert LazyCooldown();
-
-        responseCode = HederaTokenService.transferToken(
-            lazyDetails.lazyToken,
-            address(this),
-            _receiver,
-            _amount
-        );
-
-        if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert FailedToPayLazy();
-        }
+		
+		bool success = IERC20(lazyDetails.lazyToken).transfer(
+                _receiver,
+                _amount
+		);
+		if (!success) {
+			revert FailedToPayLazy();
+		}
     }
 
     /// @return _wlSpotsPurchased number of spots purchased
@@ -688,7 +689,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         );
     }
 
-    // Only way to remove the token form an account is via this method
+    // Only way to remove the token from an account is via this method
 	// contract will unfreeze, transfer and then burn the token atomicly
     /// @param _serialNumbers array of serials to burn
     /// @return _newTotalSupply the new total supply of the NFT
@@ -709,7 +710,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             }
         }
 
-		// TODO: UNFREEZE
+		// unfreeze the token to allow transfer and burn
 		int32 responseCode = unfreezeToken(token, msg.sender);
 		if (responseCode != HederaResponseCodes.SUCCESS) {
 			revert UnFreezingFailed();
@@ -1004,12 +1005,12 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     function resetContract(
         bool _removeToken,
         uint256 _batch
-    ) external onlyOwner {
+    ) external onlyOwner returns (uint256 _remaingItems) {
         if (_removeToken) {
             token = address(0);
             totalMinted = 0;
         }
-        MinterLibrary.resetContract(
+        _remaingItems = MinterLibrary.resetContract(
             addressToNumMintedMap,
             metadata,
             walletMintTimeMap,
@@ -1114,7 +1115,6 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
     // Likely only viable with smaller mints
     // else gather via events emitted.
-    // TODO: Create a batched retrieval
     /// @return _wlWalletList list of wallets who minted
     /// @return _wlNumMintedList lst of number minted
     function getNumberMintedByAllWlAddresses()
