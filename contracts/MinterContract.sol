@@ -485,11 +485,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         uint256 _amount,
         address _payer
     ) internal {
-        // check the payer has the required amount && the allowance is in place
-        if (IERC20(lazyDetails.lazyToken).balanceOf(_payer) < _amount)
-            revert NotEnoughLazy();
-
         if (_payer != address(this)) {
+            // check the payer has the required amount && the allowance is in place
+            if (IERC20(lazyDetails.lazyToken).balanceOf(_payer) < _amount && IERC20(lazyDetails.lazyToken).allowance(_payer, address(this)) >= _amount)
+                revert NotEnoughLazy();
             bool success = IERC20(lazyDetails.lazyToken).transferFrom(
                 _payer,
                 address(this),
