@@ -281,14 +281,46 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         );
     }
 
-    /// @param _numberToMint the number of serials to mint
+	/// @param _numberToMint the number of NFTs to mint
+	/// Regular method with user paying for their own gas
 	/// @return _serials the serials minted
 	/// @return _metadataForMint the metadata for the minted serials
-    function mintNFT(
+	function mintNFT(
         uint256 _numberToMint
     )
         external
         payable
+		returns (int64[] memory _serials, bytes[] memory _metadataForMint)
+	{
+		(_serials, _metadataForMint) = _mintNFT(_numberToMint, msg.sender);
+	}
+
+	/// @param _numberToMint the number of NFTs to mint
+	/// Alternative method to allow a user to mint on behalf of another
+	/// paying the gas in quasi abstraction. Given a user must associtate the token
+	/// on Hedera there is less room for greifing (no association == failed mint)
+	/// @return _serials the serials minted
+	/// @return _metadataForMint the metadata for the minted serials
+	function mintNFTOnBehalf(
+		uint256 _numberToMint,
+		address _onBehalfOf
+	)
+		external
+		payable
+		returns (int64[] memory _serials, bytes[] memory _metadataForMint)
+	{
+		(_serials, _metadataForMint) = _mintNFT(_numberToMint, _onBehalfOf);
+	}
+
+    /// @param _numberToMint the number of serials to mint
+	/// @return _serials the serials minted
+	/// Internal function to mint the NFTs to allow users to mint on behalf of others
+	/// @return _metadataForMint the metadata for the minted serials
+    function _mintNFT(
+        uint256 _numberToMint,
+		address _onBehalfOf
+    )
+        internal
         nonReentrant
         returns (int64[] memory _serials, bytes[] memory _metadataForMint)
     {
@@ -320,18 +352,18 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             if (mintEconomics.maxWlAddressMint > 0) {
                 // we know the address is in the list to get here.
                 uint256 wlMintsRemaining = whitelistedAddressQtyMap.get(
-                    msg.sender
+                    _onBehalfOf
                 );
                 if (wlMintsRemaining < _numberToMint) revert NotEnoughWLSlots();
                 whitelistedAddressQtyMap.set(
-                    msg.sender,
+                    _onBehalfOf,
                     wlMintsRemaining -= _numberToMint
                 );
             }
             isWlMint = true;
         } else if (mintEconomics.maxMintPerWallet > 0) {
             (bool found, uint256 numPreviouslyMinted) = addressToNumMintedMap
-                .tryGet(msg.sender);
+                .tryGet(_onBehalfOf);
             if (!found) {
                 numPreviouslyMinted = 0;
             }
@@ -351,7 +383,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         if (totalLazyCost > 0) {
             takeLazyPayment(
                 totalLazyCost,
-                mintEconomics.lazyFromContract ? address(this) : msg.sender
+                mintEconomics.lazyFromContract ? address(this) : _onBehalfOf
             );
         }
 
@@ -374,80 +406,23 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 			);
 		}
 
-        int64[] memory mintedSerials = new int64[](_numberToMint);
-        for (uint256 outer = 0; outer < _numberToMint; outer += batchSize) {
-            uint256 thisBatch = (_numberToMint - outer) >= batchSize
-                ? batchSize
-                : (_numberToMint - outer);
-            bytes[] memory batchMetadataForMint = new bytes[](thisBatch);
-            for (
-                uint256 inner = 0;
-                ((outer + inner) < _numberToMint) && (inner < thisBatch);
-                inner++
-            ) {
-                batchMetadataForMint[inner] = _metadataForMint[inner + outer];
-            }
-
-            (int32 response, , int64[] memory serialNumbers) = mintToken(
-                token,
-                0,
-                batchMetadataForMint
-            );
-
-            if (response != HederaResponseCodes.SUCCESS) {
-                revert FailedNFTMint();
-            }
-
-            // transfer the token to the user
-            address[] memory senderList = new address[](serialNumbers.length);
-            address[] memory receiverList = new address[](serialNumbers.length);
-            uint256 length = serialNumbers.length;
-            for (uint256 s = 0; s < length; ) {
-                emitMintEvent(
-                    isWlMint,
-                    serialNumbers[s],
-                    batchMetadataForMint[s]
-                );
-                senderList[s] = address(this);
-                receiverList[s] = msg.sender;
-                mintedSerials[s + outer] = serialNumbers[s];
-                serialMintTimeMap.set(
-                    SafeCast.toUint256(serialNumbers[s]),
-                    block.timestamp
-                );
-
-                unchecked {
-                    ++s;
-                }
-            }
-
-            response = transferNFTs(
-                token,
-                senderList,
-                receiverList,
-                serialNumbers
-            );
-
-            if (response != HederaResponseCodes.SUCCESS) {
-                revert NFTTransferFailed();
-            }
-        }
+        int64[] memory mintedSerials = executeMint(_numberToMint, _metadataForMint, _onBehalfOf, isWlMint);
 
         mintTiming.lastMintTime = block.timestamp;
-        walletMintTimeMap.set(msg.sender, block.timestamp);
+        walletMintTimeMap.set(_onBehalfOf, block.timestamp);
 
         if (isWlMint) {
             (
                 bool wlFound,
                 uint256 wlNumPreviouslyMinted
-            ) = wlAddressToNumMintedMap.tryGet(msg.sender);
+            ) = wlAddressToNumMintedMap.tryGet(_onBehalfOf);
             if (wlFound) {
                 wlAddressToNumMintedMap.set(
-                    msg.sender,
+                    _onBehalfOf,
                     wlNumPreviouslyMinted + _numberToMint
                 );
             } else {
-                wlAddressToNumMintedMap.set(msg.sender, _numberToMint);
+                wlAddressToNumMintedMap.set(_onBehalfOf, _numberToMint);
             }
         }
 
@@ -455,18 +430,18 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         (
             bool numMintfound,
             uint256 totalNumPreviouslyMinted
-        ) = addressToNumMintedMap.tryGet(msg.sender);
+        ) = addressToNumMintedMap.tryGet(_onBehalfOf);
         if (numMintfound) {
             addressToNumMintedMap.set(
-                msg.sender,
+                _onBehalfOf,
                 totalNumPreviouslyMinted + _numberToMint
             );
         } else {
-            addressToNumMintedMap.set(msg.sender, _numberToMint);
+            addressToNumMintedMap.set(_onBehalfOf, _numberToMint);
         }
 
 		// now freeze the mints to make them SBT
-		int32 responseCode = freezeToken(token, msg.sender);
+		int32 responseCode = freezeToken(token, _onBehalfOf);
 		if (responseCode != HederaResponseCodes.SUCCESS) {
 			revert FreezingFailed();
 		}
@@ -475,6 +450,80 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
         _serials = mintedSerials;
     }
+
+	/// @param _numberToMint the number of NFTs to mint
+	/// @param _metadataForMint the metadata for the minted serials
+	/// @param _onBehalfOf the address to mint on behalf of
+	/// @param isWlMint boolean to indicate if the mint is a WL mint
+	/// internal method to encapsulate the actual minting and avoid stack too deep
+	/// @return mintedSerials the serials minted
+	function executeMint(
+		uint256 _numberToMint,
+		bytes[] memory _metadataForMint,
+		address _onBehalfOf,
+		bool isWlMint
+	)
+	internal
+	returns (int64[] memory mintedSerials) {
+		mintedSerials = new int64[](_numberToMint);
+		for (uint256 outer = 0; outer < _numberToMint; outer += batchSize) {
+			uint256 thisBatch = (_numberToMint - outer) >= batchSize
+				? batchSize
+				: (_numberToMint - outer);
+			bytes[] memory batchMetadataForMint = new bytes[](thisBatch);
+			for (
+				uint256 inner = 0;
+				((outer + inner) < _numberToMint) && (inner < thisBatch);
+				inner++
+			) {
+				batchMetadataForMint[inner] = _metadataForMint[inner + outer];
+			}
+
+			(int32 response, , int64[] memory serialNumbers) = mintToken(
+				token,
+				0,
+				batchMetadataForMint
+			);
+
+			if (response != HederaResponseCodes.SUCCESS) {
+				revert FailedNFTMint();
+			}
+
+			// transfer the token to the user
+			address[] memory senderList = new address[](serialNumbers.length);
+			address[] memory receiverList = new address[](serialNumbers.length);
+			uint256 length = serialNumbers.length;
+			for (uint256 s = 0; s < length; ) {
+				emitMintEvent(
+					isWlMint,
+					serialNumbers[s],
+					batchMetadataForMint[s]
+				);
+				senderList[s] = address(this);
+				receiverList[s] = _onBehalfOf;
+				mintedSerials[s + outer] = serialNumbers[s];
+				serialMintTimeMap.set(
+					SafeCast.toUint256(serialNumbers[s]),
+					block.timestamp
+				);
+
+				unchecked {
+					++s;
+				}
+			}
+
+			response = transferNFTs(
+				token,
+				senderList,
+				receiverList,
+				serialNumbers
+			);
+
+			if (response != HederaResponseCodes.SUCCESS) {
+				revert NFTTransferFailed();
+			}
+		}
+	}
 
     /// @param _amount Non-negative value to take as pmt.
     /// @param _payer the address of the payer
