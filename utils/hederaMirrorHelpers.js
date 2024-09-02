@@ -296,6 +296,30 @@ async function checkMirrorHbarBalance(env, _userId) {
 	return rtnVal;
 }
 
+async function getTokenBalancesForAccount(env, _userId) {
+	const baseUrl = getBaseURL(env);
+	let url = `/api/v1/accounts/${_userId.toString()}/tokens?limit=100`;
+
+	let rtnVal = [];
+	// use do while to get all the tokens until links is null
+	do {
+		await axios.get(`${baseUrl}${url}`)
+			.then((response) => {
+				const jsonResponse = response.data;
+				jsonResponse.tokens.forEach(token => {
+					rtnVal.push(token);
+				});
+				url = jsonResponse.links.next;
+			})
+			.catch(function(err) {
+				console.error(err);
+				return null;
+			});
+	} while (url != null);
+
+	return rtnVal;
+}
+
 /**
  * Get the token decimal form mirror
  * @param {string} env
@@ -431,4 +455,5 @@ module.exports = {
 	getContractEVMAddress,
 	checkMirrorHbarBalance,
 	checkMirrorHbarAllowance,
+	getTokenBalancesForAccount,
 };
