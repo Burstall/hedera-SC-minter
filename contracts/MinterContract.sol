@@ -329,6 +329,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             if (
                 !MinterLibrary.checkWhitelistConditions(
                     whitelistedAddressQtyMap,
+                    msg.sender,
                     mintEconomics.maxWlAddressMint
                 )
             ) revert NotWL();
@@ -548,6 +549,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         (_hbarCost, _lazyCost) = getCostInternal(
             MinterLibrary.checkWhitelistConditions(
                 whitelistedAddressQtyMap,
+                msg.sender,
                 mintEconomics.maxWlAddressMint
             )
         );

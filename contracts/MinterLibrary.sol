@@ -82,9 +82,10 @@ library MinterLibrary {
 
     function checkWhitelistConditions(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
+        address _user,
         uint256 maxWlAddressMint
     ) public view returns (bool allowedToMint) {
-        (bool found, uint256 qty) = whitelistedAddressQtyMap.tryGet(msg.sender);
+        (bool found, uint256 qty) = whitelistedAddressQtyMap.tryGet(_user);
         if (found) {
             if (maxWlAddressMint > 0) {
                 allowedToMint = qty > 0 ? true : false;

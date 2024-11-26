@@ -345,6 +345,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             if (
                 !MinterLibrary.checkWhitelistConditions(
                     whitelistedAddressQtyMap,
+                    _onBehalfOf,
                     mintEconomics.maxWlAddressMint
                 )
             ) revert NotWL();
@@ -595,6 +596,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         (_hbarCost, _lazyCost) = getCostInternal(
             MinterLibrary.checkWhitelistConditions(
                 whitelistedAddressQtyMap,
+                msg.sender,
                 mintEconomics.maxWlAddressMint
             )
         );
