@@ -311,8 +311,13 @@ const main = async () => {
 			const fixedEdition = readlineSync.keyInYNStrict('Is this a fixed edition mint?');
 
 			let maxSupply = 0;
+			let unlimited = false;
 			if (fixedEdition) {
-				maxSupply = Number(readlineSync.questionInt('Enter the number of editions:'));
+				maxSupply = Number(readlineSync.questionInt('Enter the number of editions (0 == unlimited):'));
+
+				if (maxSupply == 0) {
+					unlimited = true;
+				}
 			}
 			else {
 				maxSupply = getArg('max') ?? 0;
@@ -349,7 +354,7 @@ const main = async () => {
 					client,
 					1_600_000,
 					'initialiseNFTMint',
-					[nftName, nftSymbol, nftDesc, cid, maxSupply, fixedEdition],
+					[nftName, nftSymbol, nftDesc, cid, maxSupply, fixedEdition, unlimited],
 					MINT_PAYMENT,
 				);
 

@@ -203,6 +203,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _cid root _cid for the _metadata files
     /// @param _maxSupply must be > 0 if _fixedEdition is true
 	/// @param _fixedEdition boolean to indicate if the token is a fixed edition (repeated metadata)
+    /// @param _unlimitedSupply boolean to indicate if the token has an unlimited supply (used with _fixedEdition)
     /// @return _createdTokenAddress the address of the new token
 	/// @return _tokenSupply the total supply of the token
     function initialiseNFTMint(
@@ -211,7 +212,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         string memory _memo,
         string memory _cid,
         int64 _maxSupply,
-		bool _fixedEdition
+		bool _fixedEdition,
+        bool _unlimitedSupply
     )
         external
         payable
@@ -221,7 +223,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 		// block the method if the token has already been set
         if (token != address(0)) revert NotReset(token);
         if (bytes(_memo).length > 100) revert MemoTooLong();
-		if (_fixedEdition && _maxSupply == 0) revert BadArguments();
+		if (_fixedEdition && !_unlimitedSupply && _maxSupply == 0) revert BadArguments();
 
         cid = _cid;
 
@@ -243,18 +245,27 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         _token.memo = _memo;
         _token.treasury = address(this);
         _token.tokenKeys = _keys;
-        _token.tokenSupplyType = true;
-		if (_fixedEdition || _maxSupply > 0) {
-    		// check that there is not already too much metadats in the contract
-            if (metadata.length > _maxSupply.toUint256())
-                revert TooMuchMetadata();
-            _token.maxSupply = _maxSupply;
-        } else {
-            if (metadata.length == 0) revert EmptyMetadata();
-            _token.maxSupply = metadata.length.toInt256().toInt64();
+        if (_fixedEdition && _unlimitedSupply) {
+            // if any metadata is present, revert as contract likely misconfigured (or needs reset)
+            if (metadata.length > 0) revert TooMuchMetadata();
+            _token.tokenSupplyType = false;
+            // int64 max value
+            maxSupply = 0x7FFFFFFFFFFFFFFF;
+        }
+        else {
+            _token.tokenSupplyType = true;
+            if (_fixedEdition || _maxSupply > 0) {
+                // check that there is not already too much metadata in the contract
+                if (metadata.length > _maxSupply.toUint256())
+                    revert TooMuchMetadata();
+                _token.maxSupply = _maxSupply;
+            } else {
+                if (metadata.length == 0) revert EmptyMetadata();
+                _token.maxSupply = metadata.length.toInt256().toInt64();
+            }
+            maxSupply = _token.maxSupply.toUint256();
         }
 
-        maxSupply = _token.maxSupply.toUint256();
 		fixedEdition = _fixedEdition;
         // create the expiry schedule for the token using ExpiryHelper
         _token.expiry = createAutoRenewExpiry(

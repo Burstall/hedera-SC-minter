@@ -445,6 +445,7 @@ describe('Check SC deployment...', function() {
 				'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
 				0,
 				false,
+				false,
 			],
 			MINT_PAYMENT,
 		);
@@ -528,6 +529,7 @@ describe('Check SC deployment...', function() {
 				'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/',
 				3,
 				false,
+				false,
 			],
 			MINT_PAYMENT,
 		);
@@ -591,6 +593,56 @@ describe('Check SC deployment...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
+	it('Re-initialise the minter **AS SBT EDITION (unlimited)**', async function() {
+		// testing with one fallback and one without fallback for generalised case
+		client.setOperator(operatorId, operatorKey);
+
+		// reset metadata
+		const reset = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			800_000,
+			'resetContract',
+			[true, 10],
+		);
+		if (reset[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', reset);
+			fail();
+		}
+
+		const newMint = await contractExecuteFunction(
+			contractId,
+			minterIface,
+			client,
+			1_600_000,
+			'initialiseNFTMint',
+			[
+				'MC-test-unlimited',
+				'MCt-ultd',
+				'MC testing memo unltd',
+				'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/metadata.json',
+				0,
+				true,
+				true,
+			],
+			MINT_PAYMENT,
+		);
+
+		if (newMint[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', newMint);
+			fail();
+		}
+
+		const tokenId = TokenId.fromSolidityAddress(newMint[1][0]);
+		console.log('Token Created:', tokenId.toString(), ' / ', tokenId.toSolidityAddress());
+		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// pass the token on to the later methods.
+		extendedTestingTokenId = tokenId;
+		console.log('Token ID for Extended Testing (Unlimited mints):', tokenId.toString(), 'Supply:', Number(newMint[1][1]));
+	});
+
 	it('Re-initialise the minter **AS SBT EDITION**', async function() {
 		// testing with one fallback and one without fallback for generalised case
 		client.setOperator(operatorId, operatorKey);
@@ -622,6 +674,7 @@ describe('Check SC deployment...', function() {
 				'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/metadata.json',
 				180,
 				true,
+				false,
 			],
 			MINT_PAYMENT,
 		);
