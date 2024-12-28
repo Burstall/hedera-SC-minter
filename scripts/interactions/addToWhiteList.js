@@ -116,7 +116,7 @@ const main = async () => {
 			client,
 			250_000 + (125_000 * evmAddressList.length),
 			'addToWhitelist',
-			[evmAddressList],
+			[evmAddressList.map(a => `0x${a.toString()}`)],
 		);
 
 		console.log('Result:', result[0]?.status.toString(), 'transaction ID:', result[2].transactionId.toString());
