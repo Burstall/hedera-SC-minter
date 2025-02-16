@@ -56,13 +56,13 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     // track mints per wallet for max cap
     EnumerableMap.AddressToUintMap private addressToNumMintedMap;
 
-    error NotReset(address token);
+    error NotReset();
     error MemoTooLong();
     error TooManyFees();
     error TooMuchMetadata();
     error EmptyMetadata();
     error FailedToMint();
-    error BadQuantity(uint256 quantity);
+    error BadQuantity();
     error NotOpen();
     error Paused();
     error NotWL();
@@ -80,13 +80,13 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     error LazyCooldown();
     error HbarCooldown();
     error WLPurchaseFailed();
-    error NoWLToken();
-    error WLTokenUsed();
     error NotTokenOwner();
     error MaxSerials();
     error BadArguments();
 	error FreezingFailed();
 	error UnFreezingFailed();
+    error NotRevokable();
+    error NFTNotOwned();
 
     struct MintTiming {
         uint256 lastMintTime;
@@ -123,44 +123,18 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         IBurnableHTS lazySCT;
     }
 
+    // decidion to allow wipe of SBT to be made on deployment
+    bool public immutable REVOCABLE;
+
     MintTiming private mintTiming;
     MintEconomics private mintEconomics;
 
     address private token;
-	address public prngGenerator;
+	address private prngGenerator;
 	bool public fixedEdition;
 
-    enum ContractEventType {
-        INITIALISE,
-        REFUND,
-        PAUSE,
-        UNPAUSE,
-        LAZY_PMT,
-        WL_PURCHASE_TOKEN,
-        WL_PURCHASE_LAZY,
-        WL_ADD,
-        WL_REMOVE,
-        RESET_CONTRACT,
-        RESET_INC_TOKEN,
-        UPDATE_WL_TOKEN,
-        UPDATE_WL_LAZY_BUY,
-        UPDATE_WL_ONLY,
-        UPDATE_WL_MAX,
-        UPDATE_WL_DISCOUNT,
-        UPDATE_MAX_MINT,
-        UPDATE_MAX_WALLET_MINT,
-        UPDATE_COOLDOWN,
-        UPDATE_MINT_PRICE,
-        UPDATE_MINT_PRICE_LAZY,
-        UPDATE_LAZY_BURN_PERCENTAGE,
-        UPDATE_LAZY_FROM_CONTRACT,
-        UPDATE_CID,
-        UPDATE_MINT_START_TIME,
-        UPDATE_REFUND_WINDOW
-    }
-
     event MinterContractMessage(
-        ContractEventType _eventType,
+        MinterLibrary.ContractEventType _eventType,
         address indexed _msgAddress,
         uint256 _msgNumeric
     );
@@ -181,7 +155,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
 	/// @param lazy the address of the Lazy Token
 	/// @param lazyBurnPerc the percentage of Lazy to burn on each mint
-    constructor(address lsct, address lazy, uint256 lazyBurnPerc) {
+    constructor(address lsct, address lazy, uint256 lazyBurnPerc, bool _revocable) {
         lazyDetails = LazyDetails(lazy, lazyBurnPerc, IBurnableHTS(lsct));
 
         uint256 responseCode = IHRC719(lazyDetails.lazyToken).associate();
@@ -193,6 +167,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         mintEconomics = MintEconomics(false, 0, 0, 0, 1, 0, 1, 1, address(0));
         mintTiming = MintTiming(0, 0, true, 0, 0, false);
         batchSize = 1;
+
+        REVOCABLE = _revocable;
     }
 
     // Supply the contract with token details and _metadata
@@ -221,7 +197,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         returns (address _createdTokenAddress, uint256 _tokenSupply)
     {
 		// block the method if the token has already been set
-        if (token != address(0)) revert NotReset(token);
+        if (token != address(0)) revert NotReset();
         if (bytes(_memo).length > 100) revert MemoTooLong();
 		if (_fixedEdition && !_unlimitedSupply && _maxSupply == 0) revert BadArguments();
 
@@ -231,13 +207,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         IHederaTokenService.TokenKey[]
             memory _keys = new IHederaTokenService.TokenKey[](1);
 
-		// need to upgrade to a freeze key to make the token a SBT atomically at mint.
-		_keys[0] = getSingleKey(
-			KeyType.SUPPLY, 
-			KeyType.FREEZE, 
-			KeyValueType.CONTRACT_ID,
-            address(this)
-		);
+        // create the key for the token - moved to library for space saving
+        _keys[0] = MinterLibrary.getSBTContractMintKey(REVOCABLE, address(this));        
 
         IHederaTokenService.HederaToken memory _token;
         _token.name = _name;
@@ -285,8 +256,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         _createdTokenAddress = token;
 		_tokenSupply = maxSupply;
 
-        emit MinterContractMessage(
-            ContractEventType.INITIALISE,
+        emitMessage(
+            MinterLibrary.ContractEventType.INITIALISE,
             token,
             maxSupply
         );
@@ -335,7 +306,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         nonReentrant
         returns (int64[] memory _serials, bytes[] memory _metadataForMint)
     {
-        if (_numberToMint == 0) revert BadQuantity(_numberToMint);
+        if (_numberToMint == 0) revert BadQuantity();
         if (
             mintTiming.mintStartTime != 0 &&
             mintTiming.mintStartTime > block.timestamp
@@ -405,8 +376,11 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
         if (fixedEdition) {
 			_metadataForMint = new bytes[](_numberToMint);
-			for (uint256 i = 0; i < _numberToMint; i++) {
+			for (uint256 i = 0; i < _numberToMint; ) {
 				_metadataForMint[i] = bytes(cid);
+                unchecked {
+                    ++i;
+                }
 			}
 		}
 		else {
@@ -486,9 +460,11 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 			for (
 				uint256 inner = 0;
 				((outer + inner) < _numberToMint) && (inner < thisBatch);
-				inner++
 			) {
 				batchMetadataForMint[inner] = _metadataForMint[inner + outer];
+                unchecked {
+                    ++inner;
+                }
 			}
 
 			(int32 response, , int64[] memory serialNumbers) = mintToken(
@@ -571,7 +547,12 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
                 revert BurnFailed();
             }
         }
-        emit MinterContractMessage(ContractEventType.LAZY_PMT, _payer, _amount);
+
+        emitMessage(
+            MinterLibrary.ContractEventType.LAZY_PMT,
+            _payer,
+            _amount
+        );
     }
 
 	/// @param _isWlMint boolean to indicate if the mint is a WL mint
@@ -593,6 +574,14 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             _hbarCost = mintEconomics.mintPriceHbar;
             _lazyCost = mintEconomics.mintPriceLazy;
         }
+    }
+
+    function emitMessage(
+        MinterLibrary.ContractEventType _eventType,
+        address _msgAddress,
+        uint256 _msgNumeric
+    ) internal {
+        emit MinterContractMessage(_eventType, _msgAddress, _msgNumeric);
     }
 
     // function to asses the cost to mint for a user
@@ -644,8 +633,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
         whitelistedAddressQtyMap.set(msg.sender, _wlSpotsPurchased);
         takeLazyPayment(mintEconomics.buyWlWithLazy, msg.sender);
-        emit MinterContractMessage(
-            ContractEventType.WL_PURCHASE_LAZY,
+        emitMessage(
+            MinterLibrary.ContractEventType.WL_PURCHASE_LAZY,
             msg.sender,
             _wlSpotsPurchased
         );
@@ -656,29 +645,13 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     function buyWlWithTokens(
         uint256[] memory _serials
     ) external returns (uint256 _wlSpotsPurchased) {
-        if (mintEconomics.wlToken == address(0)) revert NoWLToken();
-
-        for (uint8 i = 0; i < _serials.length; i++) {
-            // check no double dipping
-            if (wlSerialsUsed.contains(_serials[i])) revert WLTokenUsed();
-            // check user owns the token
-            if (
-                IERC721(mintEconomics.wlToken).ownerOf(_serials[i]) !=
-                msg.sender
-            ) revert NotTokenOwner();
-            wlSerialsUsed.add(_serials[i]);
-            emit MinterContractMessage(
-                ContractEventType.WL_PURCHASE_TOKEN,
-                msg.sender,
-                _serials[i]
-            );
-        }
-
-        _wlSpotsPurchased = whitelistedAddressQtyMap.contains(msg.sender)
-            ? whitelistedAddressQtyMap.get(msg.sender) +
-                (mintEconomics.maxWlAddressMint * _serials.length)
-            : (mintEconomics.maxWlAddressMint * _serials.length);
-        whitelistedAddressQtyMap.set(msg.sender, _wlSpotsPurchased);
+        _wlSpotsPurchased = MinterLibrary.buyWlWithTokens(
+            _serials,
+            mintEconomics.wlToken,
+            mintEconomics.maxWlAddressMint,
+            whitelistedAddressQtyMap,
+            wlSerialsUsed
+        );
     }
 
     // Transfer hbar out of the contract
@@ -701,42 +674,22 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     // Add an address to the allowance WL
     /// @param _newAddresses array of addresses to add
     function addToWhitelist(address[] memory _newAddresses) external onlyOwner {
-        uint256 _length = _newAddresses.length;
-        for (uint256 a = 0; a < _length; ) {
-            bool result = whitelistedAddressQtyMap.set(
-                _newAddresses[a],
-                mintEconomics.maxWlAddressMint
-            );
-            emit MinterContractMessage(
-                ContractEventType.WL_ADD,
-                _newAddresses[a],
-                result ? 1 : 0
-            );
-
-            unchecked {
-                ++a;
-            }
-        }
+        MinterLibrary.addToWhitelist(
+            whitelistedAddressQtyMap,
+            _newAddresses,
+            mintEconomics.maxWlAddressMint
+        );
     }
 
     // Remove an address to the allowance WL
     /// @param _oldAddresses the address to remove
     function removeFromWhitelist(
         address[] memory _oldAddresses
-    ) external onlyOwner {
-        uint256 _length = _oldAddresses.length;
-        for (uint256 a = 0; a < _length; ) {
-            bool result = whitelistedAddressQtyMap.remove(_oldAddresses[a]);
-            emit MinterContractMessage(
-                ContractEventType.WL_REMOVE,
-                _oldAddresses[a],
-                result ? 1 : 0
-            );
-
-            unchecked {
-                ++a;
-            }
-        }
+    ) public onlyOwner {
+        MinterLibrary.removeFromWhitelist(
+            whitelistedAddressQtyMap,
+            _oldAddresses
+        );
     }
 
     // clear the whole WL
@@ -749,6 +702,48 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         _numAddressesRemoved = MinterLibrary.clearWhitelist(
             whitelistedAddressQtyMap
         );
+    }
+
+    function revokeSBT(address _user, uint256 serialToBurn) external onlyOwner returns (int256 responseCode) {
+        if (!REVOCABLE) revert NotRevokable();
+        // remove the user from the WL
+        address[] memory addresses = new address[](1);
+        addresses[0] = _user;
+        removeFromWhitelist(addresses);
+        // wipe their key
+        // work out serial of the SBT NFT held by the user
+        if (IERC721(token).ownerOf(serialToBurn) != _user) {
+            revert NFTNotOwned();
+        }
+
+        int64[] memory serials = new int64[](1);
+        serials[0] = serialToBurn.toInt256().toInt64();
+
+        // need to unfreeze the token to allow the wipe
+        responseCode = unfreezeToken(token, _user);
+		if (responseCode != HederaResponseCodes.SUCCESS) {
+			revert UnFreezingFailed();
+		}
+
+        responseCode = wipeTokenAccountNFT(
+            token,
+            _user,
+            serials
+        );
+
+        emitMessage(
+            MinterLibrary.ContractEventType.REVOKE_SBT,
+            _user,
+            serialToBurn
+        );
+
+        // if the user has more of the token refeeze it
+		if (IERC721(token).balanceOf(_user) > 0) {
+			responseCode = freezeToken(token, _user);
+			if (responseCode != HederaResponseCodes.SUCCESS) {
+				revert FreezingFailed();
+			}
+		}
     }
 
     // Only way to remove the token from an account is via this method
@@ -817,8 +812,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     ) external onlyOwner {
         if (mintEconomics.mintPriceHbar != _hbarCost) {
             mintEconomics.mintPriceHbar = _hbarCost;
-            emit MinterContractMessage(
-                ContractEventType.UPDATE_MINT_PRICE,
+            emitMessage(
+                MinterLibrary.ContractEventType.UPDATE_MINT_PRICE,
                 msg.sender,
                 mintEconomics.mintPriceHbar
             );
@@ -826,8 +821,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
         if (mintEconomics.mintPriceLazy != _lazyCost) {
             mintEconomics.mintPriceLazy = _lazyCost;
-            emit MinterContractMessage(
-                ContractEventType.UPDATE_MINT_PRICE_LAZY,
+            emitMessage(
+                MinterLibrary.ContractEventType.UPDATE_MINT_PRICE_LAZY,
                 msg.sender,
                 mintEconomics.mintPriceLazy
             );
@@ -841,10 +836,10 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     ) external onlyOwner returns (bool _changed) {
         _changed = mintTiming.mintPaused == _mintPaused ? false : true;
         if (_changed)
-            emit MinterContractMessage(
+            emitMessage(
                 _mintPaused
-                    ? ContractEventType.PAUSE
-                    : ContractEventType.UNPAUSE,
+                    ? MinterLibrary.ContractEventType.PAUSE
+                    : MinterLibrary.ContractEventType.UNPAUSE,
                 msg.sender,
                 _mintPaused ? 1 : 0
             );
@@ -858,8 +853,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     ) external onlyOwner returns (bool _changed) {
         _changed = mintTiming.wlOnly == _wlOnly ? false : true;
         if (_changed)
-            emit MinterContractMessage(
-                ContractEventType.UPDATE_WL_ONLY,
+            emitMessage(
+                MinterLibrary.ContractEventType.UPDATE_WL_ONLY,
                 msg.sender,
                 _wlOnly ? 1 : 0
             );
@@ -877,8 +872,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     ) external onlyOwner returns (bool _changed) {
         _changed = mintEconomics.buyWlWithLazy == _lazyAmt ? false : true;
         if (_changed)
-            emit MinterContractMessage(
-                ContractEventType.UPDATE_WL_LAZY_BUY,
+            emitMessage(
+                MinterLibrary.ContractEventType.UPDATE_WL_LAZY_BUY,
                 msg.sender,
                 _lazyAmt
             );
@@ -891,8 +886,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     ) external onlyOwner returns (bool _changed) {
         _changed = mintEconomics.maxWlAddressMint == _maxMint ? false : true;
         if (_changed)
-            emit MinterContractMessage(
-                ContractEventType.UPDATE_WL_MAX,
+            emitMessage(
+                MinterLibrary.ContractEventType.UPDATE_WL_MAX,
                 msg.sender,
                 _maxMint
             );
@@ -908,8 +903,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             ? false
             : true;
         if (_changed)
-            emit MinterContractMessage(
-                ContractEventType.UPDATE_LAZY_FROM_CONTRACT,
+            emitMessage(
+                MinterLibrary.ContractEventType.UPDATE_LAZY_FROM_CONTRACT,
                 msg.sender,
                 _lazyFromContract ? 1 : 0
             );
@@ -919,8 +914,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _startTime new start time in seconds
     function updateMintStartTime(uint256 _startTime) external onlyOwner {
         mintTiming.mintStartTime = _startTime;
-        emit MinterContractMessage(
-            ContractEventType.UPDATE_MINT_START_TIME,
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_MINT_START_TIME,
             msg.sender,
             _startTime
         );
@@ -938,8 +933,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _lbp new Lazy SC Treasury address
     function updateLazyBurnPercentage(uint256 _lbp) external onlyOwner {
         lazyDetails.lazyBurnPerc = _lbp;
-        emit MinterContractMessage(
-            ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE,
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE,
             msg.sender,
             _lbp
         );
@@ -948,8 +943,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _maxMint new max mint (0 = uncapped)
     function updateMaxMint(uint256 _maxMint) external onlyOwner {
         mintEconomics.maxMint = _maxMint;
-        emit MinterContractMessage(
-            ContractEventType.UPDATE_MAX_MINT,
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_MAX_MINT,
             msg.sender,
             _maxMint
         );
@@ -958,8 +953,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _wlDiscount as percentage
     function updateWlDiscount(uint256 _wlDiscount) external onlyOwner {
         mintEconomics.wlDiscount = _wlDiscount;
-        emit MinterContractMessage(
-            ContractEventType.UPDATE_WL_DISCOUNT,
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_WL_DISCOUNT,
             msg.sender,
             _wlDiscount
         );
@@ -968,8 +963,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _cooldownPeriod cooldown period as seconds
     function updateCooldown(uint256 _cooldownPeriod) external onlyOwner {
         mintTiming.cooldownPeriod = _cooldownPeriod;
-        emit MinterContractMessage(
-            ContractEventType.UPDATE_COOLDOWN,
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_COOLDOWN,
             msg.sender,
             _cooldownPeriod
         );
@@ -978,8 +973,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _refundWindow refund period in seconds / cap on withdrawals
     function updateRefundWindow(uint256 _refundWindow) external onlyOwner {
         mintTiming.refundWindow = _refundWindow;
-        emit MinterContractMessage(
-            ContractEventType.UPDATE_REFUND_WINDOW,
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_REFUND_WINDOW,
             msg.sender,
             _refundWindow
         );
@@ -1002,17 +997,17 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
     function updateWlToken(address _wlToken) external onlyOwner {
         mintEconomics.wlToken = _wlToken;
-        emit MinterContractMessage(
-            ContractEventType.UPDATE_WL_TOKEN,
-            _wlToken,
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_WL_TOKEN,
+            msg.sender,
             0
         );
     }
 
     function updateMaxMintPerWallet(uint256 _max) external onlyOwner {
         mintEconomics.maxMintPerWallet = _max;
-        emit MinterContractMessage(
-            ContractEventType.UPDATE_MAX_WALLET_MINT,
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_MAX_WALLET_MINT,
             msg.sender,
             _max
         );
@@ -1021,7 +1016,11 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _cid new _cid
     function updateCID(string memory _cid) external onlyOwner {
         cid = _cid;
-        emit MinterContractMessage(ContractEventType.UPDATE_CID, msg.sender, 0);
+        emitMessage(
+            MinterLibrary.ContractEventType.UPDATE_CID,
+            msg.sender,
+            0
+        );
     }
 
 	/// @param _metadata new _metadata array
@@ -1082,10 +1081,10 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             _batch
         );
 
-        emit MinterContractMessage(
+        emitMessage(
             _removeToken
-                ? ContractEventType.RESET_INC_TOKEN
-                : ContractEventType.RESET_CONTRACT,
+                ? MinterLibrary.ContractEventType.RESET_INC_TOKEN
+                : MinterLibrary.ContractEventType.RESET_CONTRACT,
             msg.sender,
             _batch
         );
@@ -1114,6 +1113,10 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @return _token the address for the NFT to be minted
     function getNFTTokenAddress() external view returns (address _token) {
         _token = token;
+    }
+
+    function getPRNGContractAddress() external view returns (address _prng) {
+        _prng = prngGenerator;
     }
 
     /// @return _lazy the address set for Lazy FT token

@@ -13,8 +13,7 @@ const fs = require('fs');
 const { ethers } = require('ethers');
 const { hex_to_ascii } = require('../../utils/nodeHelpers');
 const { contractExecuteFunction, readOnlyEVMFromMirrorNode } = require('../../utils/solidityHelpers');
-const { getTokenDetails, checkMirrorBalance, checkMirrorAllowance } = require('../../utils/hederaMirrorHelpers');
-const { associateTokenToAccount, setFTAllowance } = require('../../utils/hederaHelpers');
+const { getTokenDetails, checkMirrorBalance, homebrewPopulateAccountEvmAddress } = require('../../utils/hederaMirrorHelpers');
 
 
 // Get operator from .env file
@@ -128,49 +127,33 @@ const main = async () => {
 
 	const nftToken = TokenId.fromSolidityAddress(mintIface.decodeFunctionResult('getNFTTokenAddress', nftTokenOutput)[0]);
 
-	const userTokenBalance = await checkMirrorBalance(env, operatorId, nftToken);
+	// request the user to mint on behalf of and pattern check it for \d\.d\.\d+
+	const pattern = /\d\.\d\.\d+/;
+	let mintOnBehalfOf = readlineSync.question('Enter the account ID to mint on behalf of (e.g. 0.0.1234): ');
+
+	if (!pattern.test(mintOnBehalfOf)) {
+		console.log('Invalid account ID entered, aborting.');
+		return;
+	}
+
+	mintOnBehalfOf = AccountId.fromString(mintOnBehalfOf);
+
+	const mintOnBehalfOfAsEVM = await homebrewPopulateAccountEvmAddress(env, mintOnBehalfOf);
+
+	console.log('Minting on behalf of:', mintOnBehalfOf.toString(), 'EVM:', mintOnBehalfOfAsEVM);
+
+	const userTokenBalance = await checkMirrorBalance(env, mintOnBehalfOf, nftToken);
 
 	if (userTokenBalance === null || userTokenBalance === undefined) {
-		console.log('User neeeds to associate NFT token with account before minting NFTs.');
-
-		const proceed = readlineSync.keyInYNStrict('Do you wish to associate the NFT token with this account?');
-		if (proceed) {
-			const result = await associateTokenToAccount(client, operatorId, operatorKey, nftToken);
-
-			console.log('Result:', result);
-		}
-		else {
-			console.log('User aborted.');
-			return;
-		}
+		console.log('User neeeds to associate NFT token with account before minting NFTs. Exiting.');
+		process.exit(1);
 	}
 
 	// ask the user how many they want to mint
 	const qty = readlineSync.questionInt('How many NFTs do you want to mint? ');
 
-	// need to set the $LAZY allowance to the contract
-	const lazyAllowance = Number(costs[1]) * qty;
-	const lazyAllowanceStr = `${lazyAllowance / 10 ** lazyTokenDetails.decimals} ${lazyTokenDetails.symbol}`;
-
-	// get the user's $LAZY allowance
-	const userLazyAllowance = await checkMirrorAllowance(env, operatorId, lazyToken, contractId);
-
-	if (userLazyAllowance === null || userLazyAllowance === undefined || userLazyAllowance < lazyAllowance) {
-
-		const lazyAllowanceProceed = readlineSync.keyInYNStrict(`Do you wish to allow the contract to spend ${lazyAllowanceStr}?`);
-		if (lazyAllowanceProceed) {
-			const result = await setFTAllowance(client, lazyToken, operatorId, AccountId.fromString(contractId.toString()), lazyAllowance);
-
-			console.log('Result:', result);
-		}
-		else {
-			console.log('User aborted.');
-			return;
-		}
-	}
-
 	// check gas estimate
-	// const gasEstimateCmd = mintIface.encodeFunctionData('mint', [qty]);
+	// const gasEstimateCmd = mintIface.encodeFunctionData('mintNFTOnBehalf', [qty, operatorId.toSolidityAddress()]);
 
 	// console.log('Getting gas estimate... for command:', gasEstimateCmd);
 
@@ -193,8 +176,8 @@ const main = async () => {
 			mintIface,
 			client,
 			500_000 + 325_000 * qty,
-			'mintNFT',
-			[qty],
+			'mintNFTOnBehalf',
+			[qty, mintOnBehalfOfAsEVM],
 			new Hbar(Number(costs[0]) * qty, HbarUnit.Tinybar),
 		);
 		if (result[0]?.status?.toString() != 'SUCCESS') {

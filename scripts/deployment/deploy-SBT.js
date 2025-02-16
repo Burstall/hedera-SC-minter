@@ -22,6 +22,7 @@ const libraryName = 'MinterLibrary';
 const lazyContractId = ContractId.fromString(process.env.LAZY_SCT_CONTRACT_ID);
 const lazyTokenId = TokenId.fromString(process.env.LAZY_TOKEN_ID);
 const lazyBurnPerc = process.env.LAZY_BURN_PERC || 25;
+let revocable = process.env.REVOCABLE || false;
 
 const env = process.env.ENVIRONMENT ?? null;
 
@@ -36,7 +37,8 @@ async function contractDeployFcn(bytecode, gasLim) {
 			new ContractFunctionParameters()
 				.addAddress(lazyContractId.toSolidityAddress())
 				.addAddress(lazyTokenId.toSolidityAddress())
-				.addUint256(lazyBurnPerc),
+				.addUint256(lazyBurnPerc)
+				.addBool(revocable),
 		);
 	const contractCreateSubmit = await contractCreateTx.execute(client);
 	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
@@ -54,7 +56,8 @@ async function contractCreateFcn(bytecodeFileId, gasLim) {
 			new ContractFunctionParameters()
 				.addAddress(lazyContractId.toSolidityAddress())
 				.addAddress(lazyTokenId.toSolidityAddress())
-				.addUint256(lazyBurnPerc),
+				.addUint256(lazyBurnPerc)
+				.addBool(revocable),
 		);
 	const contractCreateSubmit = await contractCreateTx.execute(client);
 	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
@@ -70,6 +73,15 @@ const main = async () => {
 	console.log('\n-Using LSCT:', lazyContractId.toString());
 	console.log('\n-Using LAZY Token:', lazyTokenId.toString());
 	console.log('\n-Using LAZY Burn %:', lazyBurnPerc);
+	console.log('\n-Revocable SBT Mints:', revocable);
+
+	// ask user to confirm revocable status given it is immutable
+	const revocableUpdate = readlineSync.keyInYNStrict('Do you want to update the revocable status?');
+	if (revocableUpdate) {
+		revocable = readlineSync.keyInYNStrict('Is the SBT Minter revocable?');
+
+		console.log('\n-*NEW* Revocable SBT Mints:', revocable);
+	}
 
 	const proceed = readlineSync.keyInYNStrict('Do you want to deploy the SBT minter?');
 

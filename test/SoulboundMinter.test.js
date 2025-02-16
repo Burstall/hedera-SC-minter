@@ -213,7 +213,8 @@ describe('Deployment: ', function() {
 		const constructorParams = new ContractFunctionParameters()
 			.addAddress(lazySCT.toSolidityAddress())
 			.addAddress(lazyTokenId.toSolidityAddress())
-			.addUint256(lazyBurnPerc);
+			.addUint256(lazyBurnPerc)
+			.addBool(false);
 
 		[contractId, contractAddress] = await contractDeployFunction(client, readyToDeployBytecode, gasLimit, constructorParams);
 
@@ -506,7 +507,7 @@ describe('Check SC deployment...', function() {
 			fail();
 		}
 
-		console.log('Contract Reset TX:', reset[2][0]?.transactionId?.toString());
+		console.log('Contract Reset TX:', reset[2]?.transactionId?.toString());
 
 		const metadataList = ['metadata.json'];
 
@@ -1899,8 +1900,10 @@ describe('Test out WL functions...', function() {
 				[[1]],
 			);
 
-			if (result[0]?.status?.name != 'WLTokenUsed') {
-				console.log('ERROR expecting WLTokenUsed:', result);
+			// custom erro now in the MinterLibrary so name no longer available based on our
+			// single interface error chacing.
+			if (result[0]?.status != null) {
+				console.log('ERROR expecting null (WLTokenUsed):', result);
 				unexpectedErrors++;
 			}
 			else {

@@ -532,7 +532,7 @@ abstract contract HederaTokenService is HederaResponseCodes {
     /// @param  serialNumbers The serial numbers of token to wipe
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
     function wipeTokenAccountNFT(address token, address account, int64[] memory serialNumbers) internal
-    returns (int responseCode)
+    returns (int32 responseCode)
     {
         (bool success, bytes memory result) = precompileAddress.call(
             abi.encodeWithSelector(IHederaTokenService.wipeTokenAccountNFT.selector, token, account, serialNumbers));

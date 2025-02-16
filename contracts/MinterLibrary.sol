@@ -3,8 +3,10 @@ pragma solidity >=0.8.12 <0.9.0;
 
 import { EnumerableMap } from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import { IERC721 } from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import { IHederaTokenService } from "./IHederaTokenService.sol";
 import { IPrngGenerator } from "./IPrngGenerator.sol";
 
 library MinterLibrary {
@@ -12,7 +14,59 @@ library MinterLibrary {
     using EnumerableMap for EnumerableMap.UintToUintMap;
     using EnumerableSet for EnumerableSet.UintSet;
 
+    uint256 internal constant ONE = uint256(1);
+
+    event MinterLibraryContractMessage(
+        address indexed _caller,
+        ContractEventType _eventType,
+        address indexed _msgAddress,
+        uint256 _msgNumeric
+    );
+
+    enum ContractEventType {
+        INITIALISE,
+        REFUND,
+        PAUSE,
+        UNPAUSE,
+        LAZY_PMT,
+        WL_PURCHASE_TOKEN,
+        WL_PURCHASE_LAZY,
+        WL_ADD,
+        WL_REMOVE,
+        RESET_CONTRACT,
+        RESET_INC_TOKEN,
+        UPDATE_WL_TOKEN,
+        UPDATE_WL_LAZY_BUY,
+        UPDATE_WL_ONLY,
+        UPDATE_WL_MAX,
+        UPDATE_WL_DISCOUNT,
+        UPDATE_MAX_MINT,
+        UPDATE_MAX_WALLET_MINT,
+        UPDATE_COOLDOWN,
+        UPDATE_MINT_PRICE,
+        UPDATE_MINT_PRICE_LAZY,
+        UPDATE_LAZY_BURN_PERCENTAGE,
+        UPDATE_LAZY_FROM_CONTRACT,
+        UPDATE_CID,
+        UPDATE_MINT_START_TIME,
+        UPDATE_REFUND_WINDOW,
+        REVOKE_SBT
+    }
+
+    enum KeyType {
+        ADMIN,
+        KYC,
+        FREEZE,
+        WIPE,
+        SUPPLY,
+        FEE,
+        PAUSE
+    }
+
     error BadArguments();
+    error NoWLToken();
+    error WLTokenUsed();
+    error NotTokenOwner();
 
 	function selectMetdataToMint(
 		string[] storage metadata, 
@@ -57,6 +111,109 @@ library MinterLibrary {
 		}
 	}
 
+    function removeFromWhitelist(
+        EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
+        address[] memory _oldAddresses
+    ) public {
+        uint256 _length = _oldAddresses.length;
+        for (uint256 a = 0; a < _length; ) {
+            bool result = whitelistedAddressQtyMap.remove(_oldAddresses[a]);
+            emit MinterLibraryContractMessage(
+                msg.sender,
+                ContractEventType.WL_REMOVE,
+                _oldAddresses[a],
+                result ? 1 : 0
+            );
+
+            unchecked {
+                ++a;
+            }
+        }
+    }
+
+    function addToWhitelist(
+        EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
+        address[] memory _newAddresses,
+        uint256 maxWlAddressMint
+    ) public {
+        uint256 _length = _newAddresses.length;
+        for (uint256 a = 0; a < _length; ) {
+            bool result = whitelistedAddressQtyMap.set(
+                _newAddresses[a],
+                maxWlAddressMint
+            );
+            emit MinterLibraryContractMessage(
+                msg.sender,
+                ContractEventType.WL_ADD,
+                _newAddresses[a],
+                result ? 1 : 0
+            );
+
+            unchecked {
+                ++a;
+            }
+        }
+    }
+
+    function getSBTContractMintKey(
+        bool _revocable,
+        address _contract
+    ) public pure returns (IHederaTokenService.TokenKey memory mintKey) {
+        uint256 keyType;
+        keyType = setBit(keyType, uint8(KeyType.SUPPLY));
+        keyType = setBit(keyType, uint8(KeyType.FREEZE));
+
+         if (_revocable) {
+            keyType = setBit(keyType, uint8(KeyType.WIPE));
+        }
+
+        IHederaTokenService.KeyValue memory keyValue;
+        keyValue.contractId = _contract;
+
+        mintKey = IHederaTokenService.TokenKey(
+            keyType,
+            keyValue
+        );
+
+    }
+
+    function setBit(uint256 self, uint8 index) internal pure returns (uint256) {
+        return self | (ONE << index);
+    }
+
+    function buyWlWithTokens(
+        uint256[] memory _serials,
+        address _wlToken,
+        uint256 _maxWlAddressMint,
+        EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
+        EnumerableSet.UintSet storage wlSerialsUsed
+    ) public returns (uint256 _wlSpotsPurchased) {
+        if (_wlToken == address(0)) revert NoWLToken();
+
+        for (uint8 i = 0; i < _serials.length; i++) {
+            // check no double dipping
+            if (wlSerialsUsed.contains(_serials[i])) revert WLTokenUsed();
+            // check user owns the token
+            if (
+                IERC721(_wlToken).ownerOf(_serials[i]) !=
+                msg.sender
+            ) revert NotTokenOwner();
+            wlSerialsUsed.add(_serials[i]);
+            emit MinterLibraryContractMessage(
+                msg.sender,
+                ContractEventType.WL_PURCHASE_TOKEN,
+                tx.origin,
+                _serials[i]
+            );
+        }
+
+        _wlSpotsPurchased = whitelistedAddressQtyMap.contains(msg.sender)
+            ? whitelistedAddressQtyMap.get(msg.sender) +
+                (_maxWlAddressMint * _serials.length)
+            : (_maxWlAddressMint * _serials.length);
+        whitelistedAddressQtyMap.set(msg.sender, _wlSpotsPurchased);
+    }
+
     function getNumberMintedByAllWlAddressesBatch(
         EnumerableMap.AddressToUintMap storage wlAddressToNumMintedMap,
         uint256 offset,
@@ -73,10 +230,13 @@ library MinterLibrary {
             revert BadArguments();
         wlWalletList = new address[](batchSize);
         wlNumMintedList = new uint256[](batchSize);
-        for (uint256 a = 0; a < batchSize; a++) {
+        for (uint256 a = 0; a < batchSize; ) {
             (wlWalletList[a], wlNumMintedList[a]) = wlAddressToNumMintedMap.at(
                 a + offset
             );
+            unchecked {
+                ++a;
+            }
         }
     }
 
