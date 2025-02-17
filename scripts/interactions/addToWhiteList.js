@@ -9,6 +9,7 @@ const fs = require('fs');
 const { ethers } = require('ethers');
 const readlineSync = require('readline-sync');
 const { contractExecuteFunction } = require('../../utils/solidityHelpers');
+const { homebrewPopulateAccountEvmAddress } = require('../../utils/hederaMirrorHelpers');
 
 // Get operator from .env file
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
@@ -93,7 +94,7 @@ const main = async () => {
 			return;
 		}
 		try {
-			const evmAddress = (await accountId.populateAccountEvmAddress(client)).evmAddress;
+			const evmAddress = await homebrewPopulateAccountEvmAddress(env, accountId);
 			evmAddressList.push(evmAddress);
 		}
 		catch {
@@ -116,7 +117,7 @@ const main = async () => {
 			client,
 			250_000 + (125_000 * evmAddressList.length),
 			'addToWhitelist',
-			[evmAddressList.map(a => `0x${a.toString()}`)],
+			[evmAddressList.map(a => a.toString())],
 		);
 
 		console.log('Result:', result[0]?.status.toString(), 'transaction ID:', result[2].transactionId.toString());

@@ -27,7 +27,7 @@ const {
 	sweepHbar,
 	sendNFT,
 } = require('../utils/hederaHelpers');
-const { checkMirrorBalance, checkMirrorHbarBalance } = require('../utils/hederaMirrorHelpers');
+const { checkMirrorBalance, checkMirrorHbarBalance, getTokenDetails } = require('../utils/hederaMirrorHelpers');
 const { fail } = require('assert');
 const { ethers } = require('ethers');
 
@@ -50,6 +50,7 @@ const addressRegex = /(\d+\.\d+\.[1-9]\d+)/i;
 // reused variable
 let contractId;
 let contractAddress;
+let revocableContractId;
 let client, clientAlice;
 let alicePK, aliceId;
 let wlTokenId, extendedTestingTokenId;
@@ -223,6 +224,18 @@ describe('Deployment: ', function() {
 		console.log('\n-Testing:', contractName);
 
 		expect(contractId.toString().match(addressRegex).length == 2).to.be.true;
+
+		// deploy a revocable contract
+		const revocableConstructorParams = new ContractFunctionParameters()
+			.addAddress(lazySCT.toSolidityAddress())
+			.addAddress(lazyTokenId.toSolidityAddress())
+			.addUint256(lazyBurnPerc)
+			.addBool(true);
+
+		[revocableContractId] = await contractDeployFunction(client, readyToDeployBytecode, gasLimit, revocableConstructorParams);
+
+		console.log(`Revocable Contract created with ID: ${revocableContractId} / ${revocableContractId.toSolidityAddress()}`);
+		expect(revocableContractId.toString().match(addressRegex).length == 2).to.be.true;
 
 		// check if Alice has $LAZY associated else associate the token
 		const aliceLazyBal = await checkMirrorBalance(env, aliceId, lazyTokenId);
@@ -2117,6 +2130,138 @@ describe('Test out burn functions...', function() {
 			console.log('Error:', result);
 			fail();
 		}
+	});
+});
+
+describe('Test revocable SBT functions...', function() {
+	it('Check Owner can revoke SBT', async function() {
+		client.setOperator(operatorId, operatorKey);
+
+		// execute the initialiseNFTMint function
+		let result = await contractExecuteFunction(
+			revocableContractId,
+			minterIface,
+			client,
+			1_000_000,
+			'initialiseNFTMint',
+			[
+				'MC-test',
+				'MCt',
+				'MC testing memo',
+				'ipfs://bafybeihbyr6ldwpowrejyzq623lv374kggemmvebdyanrayuviufdhi6xu/metadata.json',
+				0,
+				true,
+				true,
+			],
+			MINT_PAYMENT,
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+		const revocableToken = TokenId.fromSolidityAddress(result[1][0]);
+		console.log('Token Created:', revocableToken.toString(), 'tx:', result[2]?.transactionId?.toString());
+		expect(revocableToken.toString().match(addressRegex).length == 2).to.be.true;
+
+		// associate the token to the alice account
+		result = await associateTokenToAccount(client, aliceId, alicePK, revocableToken);
+		expect(result).to.be.equal('SUCCESS');
+
+		// unpause the contract
+		result = await contractExecuteFunction(
+			revocableContractId,
+			minterIface,
+			client,
+			300_000,
+			'updatePauseStatus',
+			[false],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// as operator use mintOnBehalfOf to mint a token for Alice
+		result = await contractExecuteFunction(
+			revocableContractId,
+			minterIface,
+			client,
+			800_000,
+			'mintNFTOnBehalf',
+			[1, aliceId.toSolidityAddress()],
+		);
+
+		const mintedSerial = Number(result[1][0][0]);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// Alice to try and call revokeSBT but fail due to not being the owner
+		client.setOperator(aliceId, alicePK);
+
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
+		try {
+			result = await contractExecuteFunction(
+				revocableContractId,
+				minterIface,
+				client,
+				500_000,
+				'revokeSBT',
+				[aliceId.toSolidityAddress(), mintedSerial],
+			);
+
+			if (result[0]?.status == 'REVERT: Ownable: caller is not the owner') {
+				expectedErrors++;
+			}
+			else {
+				unexpectedErrors++;
+			}
+		}
+		catch (err) {
+			if (result[0]?.status == 'REVERT: Ownable: caller is not the owner') {
+				console.log('ERROR expecting REVERT: Ownable:', result);
+				expectedErrors++;
+			}
+			else {
+				console.log('Unxpected Error:', err);
+				console.log('Error:', result);
+				unexpectedErrors++;
+			}
+		}
+
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
+
+		client.setOperator(operatorId, operatorKey);
+
+		// revoke the token minted for Alice
+		result = await contractExecuteFunction(
+			revocableContractId,
+			minterIface,
+			client,
+			500_000,
+			'revokeSBT',
+			[aliceId.toSolidityAddress(), mintedSerial],
+		);
+
+		if (result[0]?.status?.toString() != 'SUCCESS') {
+			console.log('Error:', result);
+			fail();
+		}
+
+		// wait for the mirror node to catch up
+		await sleep(7000);
+
+		// check the token supply is back to 0
+		result = await getTokenDetails(env, revocableToken);
+
+		expect(Number(result.total_supply) == 0).to.be.true;
 	});
 });
 
