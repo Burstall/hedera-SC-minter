@@ -89,7 +89,9 @@ function parseError(iface, errorData) {
 
 	try {
 		const errDescription = iface.parseError(errorData);
-		return errDescription;
+		// Format the error with name and args properly displayed
+		const argsFormatted = errDescription.args.map(arg => arg.toString()).join(', ');
+		return `${errDescription.name}(${argsFormatted})`;
 	}
 	catch (e) {
 		console.error(errorData, e);
@@ -356,7 +358,7 @@ async function contractDeployFunction(client, bytecode, gasLim = 800_000, params
 	const contractCreateSubmit = await contractCreateTx.execute(client);
 	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
 	const contractId = contractCreateRx.contractId;
-	const contractAddress = contractId.toSolidityAddress();
+	const contractAddress = contractId.toEvmAddress();
 	return [contractId, contractAddress];
 }
 

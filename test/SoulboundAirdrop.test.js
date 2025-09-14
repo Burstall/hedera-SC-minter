@@ -36,8 +36,8 @@ require('dotenv').config();
 // Get operator from .env file
 let operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 let operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
-const contractName = 'SoulboundMinter';
-const libraryName = 'MinterLibrary';
+const contractName = 'SoulboundAirdrop';
+const libraryName = 'MinterLibraryV2';
 const lazyContractCreator = 'FungibleTokenCreator';
 const env = process.env.ENVIRONMENT ?? null;
 const lazyBurnPerc = 25;
@@ -141,7 +141,7 @@ describe('Deployment: ', function () {
 			console.log('\n-Using existing LAZY Token ID:', lazyTokenId.toString());
 		}
 		else {
-			const gasLimit = 4_500_000;
+			const gasLimit = 4_600_000;
 
 			console.log(
 				'\n- Deploying contract...',
@@ -188,15 +188,30 @@ describe('Deployment: ', function () {
 			expect(result).to.be.equal('SUCCESS');
 		}
 
-		// deploy library contract
-		console.log('\n-Deploying library:', libraryName);
-
-		const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
-
 		let gasLimit = 4_500_000;
 
-		const [libContractId] = await contractDeployFunction(client, libraryBytecode, gasLimit);
-		console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
+		let libContractId;
+		// check if there was a MinterLibarayV2 deployed already
+		if (process.env.MINTER_LIBRARY_ID) {
+			console.log(
+				'\n-Using existing Minter Library:',
+				libraryName,
+				'@',
+				process.env.MINTER_LIBRARY_ID,
+			);
+			libContractId = ContractId.fromString(process.env.MINTER_LIBRARY_ID);
+			expect(libContractId.toString().match(addressRegex).length == 2).to.be.true;
+		}
+		else {
+			// deploy library contract
+			console.log('\n-Deploying library:', libraryName);
+
+			const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
+
+			[libContractId] = await contractDeployFunction(client, libraryBytecode, gasLimit);
+			console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
+			expect(libContractId.toString().match(addressRegex).length == 2).to.be.true;
+		}
 
 		const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`));
 
@@ -209,7 +224,7 @@ describe('Deployment: ', function () {
 		// import ABI
 		minterIface = new ethers.Interface(json.abi);
 
-		gasLimit = 6_500_000;
+		gasLimit = 6_750_000;
 
 		console.log('\n- Deploying contract...', contractName, '\n\tgas@', gasLimit);
 
@@ -470,7 +485,7 @@ describe('Check SC deployment...', function () {
 			console.log('Error:', result);
 			fail();
 		}
-		const tokenId = TokenId.fromSolidityAddress(result[1][0]);
+		const tokenId = TokenId.fromEvmAddress(0, 0, result[1][0]);
 		console.log('Token Created:', tokenId.toString(), 'tx:', result[2]?.transactionId?.toString());
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
 	});
@@ -490,7 +505,7 @@ describe('Check SC deployment...', function () {
 			);
 
 			if (result[0]?.status?.name != 'TooMuchMetadata') {
-				console.log('ERROR expecting TooMuchMetadata:', result);
+				console.log('ERROR expecting TooMuchMetadata:', result.toString());
 				unexpectedErrors++;
 			}
 			else {
@@ -594,7 +609,7 @@ describe('Check SC deployment...', function () {
 			);
 
 			if (result[0]?.status?.name != 'TooMuchMetadata') {
-				console.log('ERROR expecting TooMuchMetadata:', result);
+				console.log('ERROR expecting TooMuchMetadata:', result.toString());
 				unexpectedErrors++;
 			}
 			else {
@@ -749,7 +764,7 @@ describe('Check SC deployment...', function () {
 			);
 
 			if (result[0]?.status?.name != 'BadArguments') {
-				console.log('ERROR expecting BadArguments:', result);
+				console.log('ERROR expecting BadArguments:', result.toString());
 				unexpectedErrors++;
 			}
 			else {
@@ -887,7 +902,7 @@ describe('Check access control permission...', function () {
 			);
 
 			if (result[0]?.status != 'REVERT: Ownable: caller is not the owner') {
-				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result);
+				console.log('ERROR expecting REVERT: Ownable: caller is not the owner:', result.toString());
 				unexpectedErrors++;
 			}
 			else {
@@ -2514,7 +2529,7 @@ async function mintLazy(
 	tokenMaxSupply,
 	payment,
 ) {
-	const gasLim = 5_800_000;
+	const gasLim = 4_500_000;
 	// call associate method
 	const params = [
 		tokenName,
