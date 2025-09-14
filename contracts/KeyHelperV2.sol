@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity >=0.8.12 <0.9.0;
 pragma experimental ABIEncoderV2;
-
-import {HederaTokenService} from "./HederaTokenServiceV2.sol";
 import {IHederaTokenService} from "./IHederaTokenServiceV2.sol";
-
-abstract contract KeyHelper is HederaTokenService {
+import {HederaTokenService} from "./HederaTokenServiceV2.sol";
+abstract contract KeyHelper {
     using Bits for uint256;
+
     address supplyContract;
 
     mapping(KeyType => uint256) keyTypes;
@@ -18,8 +17,10 @@ abstract contract KeyHelper is HederaTokenService {
         WIPE,
         SUPPLY,
         FEE,
-        PAUSE
+        PAUSE,
+        METADATA
     }
+
     enum KeyValueType {
         INHERIT_ACCOUNT_KEY,
         CONTRACT_ID,
@@ -36,6 +37,7 @@ abstract contract KeyHelper is HederaTokenService {
         keyTypes[KeyType.SUPPLY] = 16;
         keyTypes[KeyType.FEE] = 32;
         keyTypes[KeyType.PAUSE] = 64;
+        keyTypes[KeyType.METADATA] = 128;
     }
 
     function getDefaultKeys()
@@ -113,18 +115,6 @@ abstract contract KeyHelper is HederaTokenService {
         KeyType firstType,
         KeyType secondType,
         KeyValueType keyValueType,
-        address key
-    ) internal pure returns (IHederaTokenService.TokenKey memory tokenKey) {
-        tokenKey = IHederaTokenService.TokenKey(
-            getDuplexKeyType(firstType, secondType),
-            getKeyValueType(keyValueType, key)
-        );
-    }
-
-    function getSingleKey(
-        KeyType firstType,
-        KeyType secondType,
-        KeyValueType keyValueType,
         bytes memory key
     ) internal view returns (IHederaTokenService.TokenKey memory tokenKey) {
         tokenKey = IHederaTokenService.TokenKey(
@@ -149,6 +139,7 @@ abstract contract KeyHelper is HederaTokenService {
         keyType = keyType.setBit(uint8(KeyType.SUPPLY));
         keyType = keyType.setBit(uint8(KeyType.FEE));
         keyType = keyType.setBit(uint8(KeyType.PAUSE));
+        keyType = keyType.setBit(uint8(KeyType.METADATA));
     }
 
     function getKeyType(KeyType keyType) internal view returns (uint256) {
@@ -186,7 +177,6 @@ abstract contract KeyHelper is HederaTokenService {
 
 library Bits {
     uint256 internal constant ONE = uint256(1);
-
     // Sets the bit at the given 'index' in 'self' to '1'.
     // Returns the modified value.
     function setBit(uint256 self, uint8 index) internal pure returns (uint256) {

@@ -61,12 +61,12 @@ interface IHederaTokenService {
     struct Expiry {
         // The epoch second at which the token should expire; if an auto-renew account and period are
         // specified, this is coerced to the current epoch second plus the autoRenewPeriod
-        uint32 second;
+        int64 second;
         // ID of an account which will be automatically charged to renew the token's expiration, at
         // autoRenewPeriod interval, expressed as a solidity address
         address autoRenewAccount;
         // The interval at which the auto-renew account will be charged to extend the token's expiry
-        uint32 autoRenewPeriod;
+        int64 autoRenewPeriod;
     }
 
     /// A Key can be a public key from either the Ed25519 or ECDSA(secp256k1) signature schemes, where

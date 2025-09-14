@@ -8,7 +8,7 @@ import {IHederaTokenService} from "./IHederaTokenServiceV2.sol";
 abstract contract HederaTokenService {
     address constant precompileAddress = address(0x16c);
     // 90 days in seconds
-    uint32 constant defaultAutoRenewPeriod = 7776000;
+    int32 constant defaultAutoRenewPeriod = 7776000;
 
     modifier nonEmptyExpiry(IHederaTokenService.HederaToken memory token) {
         if (token.expiry.second == 0 && token.expiry.autoRenewPeriod == 0) {
