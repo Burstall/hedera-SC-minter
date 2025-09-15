@@ -54,15 +54,15 @@ async function contractCreateFcn(bytecodeFileId, gasLim) {
 		.setAutoRenewAccountId(operatorId)
 		.setConstructorParameters(
 			new ContractFunctionParameters()
-				.addAddress(lazyContractId.toSolidityAddress())
-				.addAddress(lazyTokenId.toSolidityAddress())
+				.addAddress(lazyContractId.toEvmAddress())
+				.addAddress(lazyTokenId.toEvmAddress())
 				.addUint256(lazyBurnPerc)
 				.addBool(revocable),
 		);
 	const contractCreateSubmit = await contractCreateTx.execute(client);
 	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
 	const contractId = contractCreateRx.contractId;
-	const contractAddress = contractId.toSolidityAddress();
+	const contractAddress = contractId.toEvmAddress();
 	return [contractId, contractAddress];
 }
 
@@ -122,8 +122,8 @@ const main = async () => {
 
 			const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
 
-			[libContractId] = await contractDeployFunction(client, libraryBytecode, 500_000);
-			console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
+			[libContractId] = await contractDeployFunction(client, libraryBytecode, 4_600_000);
+			console.log(`Library created with ID: ${libContractId} / ${libContractId.toEvmAddress()}`);
 		}
 
 		const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`));
@@ -135,7 +135,7 @@ const main = async () => {
 		const readyToDeployBytecode = linkBytecode(contractBytecode, [libraryName], [libContractId]);
 
 		console.log('\n- Deploying contract...');
-		const gasLimit = 1_600_000;
+		const gasLimit = 4_600_000;
 
 		const args = process.argv.slice(2);
 

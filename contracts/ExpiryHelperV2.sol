@@ -4,7 +4,7 @@ pragma experimental ABIEncoderV2;
 
 import {HederaTokenService} from "./HederaTokenServiceV2.sol";
 import {FeeHelper} from "./FeeHelperV2.sol";
-import {IHederaTokenService} from "./IHederaTokenServiceV2.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenServiceV2.sol";
 
 contract ExpiryHelper is FeeHelper {
     function createAutoRenewExpiry(

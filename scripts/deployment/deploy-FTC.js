@@ -21,7 +21,7 @@ async function contractDeployFcn(bytecode, gasLim) {
 	const contractCreateSubmit = await contractCreateTx.execute(client);
 	const contractCreateRx = await contractCreateSubmit.getReceipt(client);
 	const contractId = contractCreateRx.contractId;
-	const contractAddress = contractId.toSolidityAddress();
+	const contractAddress = contractId.toEvmAddress();
 	return [contractId, contractAddress];
 }
 
@@ -60,7 +60,7 @@ const main = async () => {
 	const contractBytecode = json.bytecode;
 
 	console.log('\n- Deploying contract...');
-	const gasLimit = 1200000;
+	const gasLimit = 4_600_000;
 
 	const [contractId, contractAddress] = await contractDeployFcn(contractBytecode, gasLimit);
 

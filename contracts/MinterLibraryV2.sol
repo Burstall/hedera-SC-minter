@@ -6,8 +6,8 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {IHederaTokenService} from "./IHederaTokenServiceV2.sol";
-import {IPrngGenerator} from "./IPrngGenerator.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenServiceV2.sol";
+import {IPrngGenerator} from "./interfaces/IPrngGenerator.sol";
 
 library MinterLibraryV2 {
     using EnumerableMap for EnumerableMap.AddressToUintMap;

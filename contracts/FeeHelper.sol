@@ -4,15 +4,14 @@ pragma experimental ABIEncoderV2;
 
 import "./HederaTokenService.sol";
 import "./HederaResponseCodes.sol";
-import "./IHederaTokenService.sol";
+import "./interfaces/IHederaTokenService.sol";
 import "./KeyHelper.sol";
 
 abstract contract FeeHelper is KeyHelper {
-    function createFixedHbarFee(uint32 amount, address feeCollector)
-        internal
-        pure
-        returns (IHederaTokenService.FixedFee memory fixedFee)
-    {
+    function createFixedHbarFee(
+        uint32 amount,
+        address feeCollector
+    ) internal pure returns (IHederaTokenService.FixedFee memory fixedFee) {
         fixedFee.amount = amount;
         fixedFee.useHbarsForPayment = true;
         fixedFee.feeCollector = feeCollector;
@@ -28,11 +27,10 @@ abstract contract FeeHelper is KeyHelper {
         fixedFee.feeCollector = feeCollector;
     }
 
-    function createFixedSelfDenominatedFee(uint32 amount, address feeCollector)
-        internal
-        pure
-        returns (IHederaTokenService.FixedFee memory fixedFee)
-    {
+    function createFixedSelfDenominatedFee(
+        uint32 amount,
+        address feeCollector
+    ) internal pure returns (IHederaTokenService.FixedFee memory fixedFee) {
         fixedFee.amount = amount;
         fixedFee.useCurrentTokenForPayment = true;
         fixedFee.feeCollector = feeCollector;
@@ -180,11 +178,10 @@ abstract contract FeeHelper is KeyHelper {
         fixedFees[0] = fixedFee2;
     }
 
-    function createSingleFixedFeeForHbars(uint32 amount, address feeCollector)
-        internal
-        pure
-        returns (IHederaTokenService.FixedFee[] memory fixedFees)
-    {
+    function createSingleFixedFeeForHbars(
+        uint32 amount,
+        address feeCollector
+    ) internal pure returns (IHederaTokenService.FixedFee[] memory fixedFees) {
         fixedFees = new IHederaTokenService.FixedFee[](1);
         IHederaTokenService.FixedFee memory fixedFee = createFixedFeeForHbars(
             amount,
@@ -271,32 +268,29 @@ abstract contract FeeHelper is KeyHelper {
         fixedFee.feeCollector = feeCollector;
     }
 
-    function createFixedFeeForHbars(uint32 amount, address feeCollector)
-        internal
-        pure
-        returns (IHederaTokenService.FixedFee memory fixedFee)
-    {
+    function createFixedFeeForHbars(
+        uint32 amount,
+        address feeCollector
+    ) internal pure returns (IHederaTokenService.FixedFee memory fixedFee) {
         fixedFee.amount = amount;
         fixedFee.useHbarsForPayment = true;
         fixedFee.feeCollector = feeCollector;
     }
 
-    function createFixedFeeForCurrentToken(uint32 amount, address feeCollector)
-        internal
-        pure
-        returns (IHederaTokenService.FixedFee memory fixedFee)
-    {
+    function createFixedFeeForCurrentToken(
+        uint32 amount,
+        address feeCollector
+    ) internal pure returns (IHederaTokenService.FixedFee memory fixedFee) {
         fixedFee.amount = amount;
         fixedFee.useCurrentTokenForPayment = true;
         fixedFee.feeCollector = feeCollector;
     }
 
     //Used for negative scenarios
-    function createFixedFeeWithInvalidFlags(uint32 amount, address feeCollector)
-        internal
-        pure
-        returns (IHederaTokenService.FixedFee memory fixedFee)
-    {
+    function createFixedFeeWithInvalidFlags(
+        uint32 amount,
+        address feeCollector
+    ) internal pure returns (IHederaTokenService.FixedFee memory fixedFee) {
         fixedFee.amount = amount;
         fixedFee.useHbarsForPayment = true;
         fixedFee.useCurrentTokenForPayment = true;

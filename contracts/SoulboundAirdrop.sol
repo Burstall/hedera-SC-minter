@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import {HederaResponseCodes} from "./HederaResponseCodesV2.sol";
-import {HederaTokenService} from "./HederaTokenServiceV2.sol";
-import {IHederaTokenService} from "./IHederaTokenServiceV2.sol";
-import {ExpiryHelper} from "./ExpiryHelperV2.sol";
-import {IHRC719} from "./IHRC719.sol";
+import {HederaResponseCodes} from "./HederaResponseCodes.sol";
+import {HederaTokenService} from "./HederaTokenService.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
+import {ExpiryHelper} from "./ExpiryHelper.sol";
+import {IHRC719} from "./interfaces/IHRC719.sol";
 
 // functionality moved to library for space saving
-import {MinterLibraryV2} from "./MinterLibraryV2.sol";
-import {IBurnableHTS} from "./IBurnableHTS.sol";
+import {MinterLibrary} from "./MinterLibrary.sol";
+import {IBurnableHTS} from "./interfaces/IBurnableHTS.sol";
 
 // Import OpenZeppelin Contracts libraries where needed
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -140,7 +140,7 @@ contract SoulboundAirdrop is
     bool public fixedEdition;
 
     event MinterContractMessage(
-        MinterLibraryV2.ContractEventType _eventType,
+        MinterLibrary.ContractEventType _eventType,
         address indexed _msgAddress,
         uint256 _msgNumeric
     );
@@ -155,7 +155,7 @@ contract SoulboundAirdrop is
     event BurnEvent(
         address indexed _burnerAddress,
         int64[] _serials,
-        int64 _newSupply
+        uint64 _newSupply
     );
 
     /// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
@@ -216,8 +216,14 @@ contract SoulboundAirdrop is
         cid = _cid;
 
         // instantiate the list of keys we'll use for token create
-        IHederaTokenService.TokenKey[] memory _keys = MinterLibraryV2
-            .getSBTContractMintKey(REVOCABLE, address(this));
+        IHederaTokenService.TokenKey[]
+            memory _keys = new IHederaTokenService.TokenKey[](1);
+
+        // create the key for the token - moved to library for space saving
+        _keys[0] = MinterLibrary.getSBTContractMintKey(
+            REVOCABLE,
+            address(this)
+        );
 
         IHederaTokenService.HederaToken memory _token;
         _token.name = _name;
@@ -225,7 +231,7 @@ contract SoulboundAirdrop is
         _token.memo = _memo;
         _token.treasury = address(this);
         _token.tokenKeys = _keys;
-        _token.metadata = bytes(_cid);
+
         if (_fixedEdition && _unlimitedSupply) {
             // if any metadata is present, revert as contract likely misconfigured (or needs reset)
             if (metadata.length > 0) revert TooMuchMetadata();
@@ -266,7 +272,7 @@ contract SoulboundAirdrop is
         _tokenSupply = maxSupply;
 
         emitMessage(
-            MinterLibraryV2.ContractEventType.INITIALISE,
+            MinterLibrary.ContractEventType.INITIALISE,
             token,
             maxSupply
         );
@@ -330,7 +336,7 @@ contract SoulboundAirdrop is
                 }
             }
         } else {
-            _metadataForMint = MinterLibraryV2.selectMetdataToMint(
+            _metadataForMint = MinterLibrary.selectMetdataToMint(
                 metadata,
                 numRecipients,
                 cid,
@@ -394,7 +400,7 @@ contract SoulboundAirdrop is
         }
 
         emitMessage(
-            MinterLibraryV2.ContractEventType.AIRDROP,
+            MinterLibrary.ContractEventType.AIRDROP,
             address(this),
             numRecipients
         );
@@ -430,7 +436,7 @@ contract SoulboundAirdrop is
         // over max mint per wallet
         if (mintTiming.wlOnly) {
             if (
-                !MinterLibraryV2.checkWhitelistConditions(
+                !MinterLibrary.checkWhitelistConditions(
                     whitelistedAddressQtyMap,
                     _onBehalfOf,
                     mintEconomics.maxWlAddressMint
@@ -488,7 +494,7 @@ contract SoulboundAirdrop is
                 }
             }
         } else {
-            _metadataForMint = MinterLibraryV2.selectMetdataToMint(
+            _metadataForMint = MinterLibrary.selectMetdataToMint(
                 metadata,
                 _numberToMint,
                 cid,
@@ -670,11 +676,7 @@ contract SoulboundAirdrop is
             }
         }
 
-        emitMessage(
-            MinterLibraryV2.ContractEventType.LAZY_PMT,
-            _payer,
-            _amount
-        );
+        emitMessage(MinterLibrary.ContractEventType.LAZY_PMT, _payer, _amount);
     }
 
     /// @param _isWlMint boolean to indicate if the mint is a WL mint
@@ -699,7 +701,7 @@ contract SoulboundAirdrop is
     }
 
     function emitMessage(
-        MinterLibraryV2.ContractEventType _eventType,
+        MinterLibrary.ContractEventType _eventType,
         address _msgAddress,
         uint256 _msgNumeric
     ) internal {
@@ -716,7 +718,7 @@ contract SoulboundAirdrop is
         returns (uint256 _hbarCost, uint256 _lazyCost)
     {
         (_hbarCost, _lazyCost) = getCostInternal(
-            MinterLibraryV2.checkWhitelistConditions(
+            MinterLibrary.checkWhitelistConditions(
                 whitelistedAddressQtyMap,
                 msg.sender,
                 mintEconomics.maxWlAddressMint
@@ -756,7 +758,7 @@ contract SoulboundAirdrop is
         whitelistedAddressQtyMap.set(msg.sender, _wlSpotsPurchased);
         takeLazyPayment(mintEconomics.buyWlWithLazy, msg.sender);
         emitMessage(
-            MinterLibraryV2.ContractEventType.WL_PURCHASE_LAZY,
+            MinterLibrary.ContractEventType.WL_PURCHASE_LAZY,
             msg.sender,
             _wlSpotsPurchased
         );
@@ -767,7 +769,7 @@ contract SoulboundAirdrop is
     function buyWlWithTokens(
         uint256[] memory _serials
     ) external returns (uint256 _wlSpotsPurchased) {
-        _wlSpotsPurchased = MinterLibraryV2.buyWlWithTokens(
+        _wlSpotsPurchased = MinterLibrary.buyWlWithTokens(
             _serials,
             mintEconomics.wlToken,
             mintEconomics.maxWlAddressMint,
@@ -796,7 +798,7 @@ contract SoulboundAirdrop is
     // Add an address to the allowance WL
     /// @param _newAddresses array of addresses to add
     function addToWhitelist(address[] memory _newAddresses) external onlyOwner {
-        MinterLibraryV2.addToWhitelist(
+        MinterLibrary.addToWhitelist(
             whitelistedAddressQtyMap,
             _newAddresses,
             mintEconomics.maxWlAddressMint
@@ -808,7 +810,7 @@ contract SoulboundAirdrop is
     function removeFromWhitelist(
         address[] memory _oldAddresses
     ) public onlyOwner {
-        MinterLibraryV2.removeFromWhitelist(
+        MinterLibrary.removeFromWhitelist(
             whitelistedAddressQtyMap,
             _oldAddresses
         );
@@ -821,7 +823,7 @@ contract SoulboundAirdrop is
         onlyOwner
         returns (uint256 _numAddressesRemoved)
     {
-        _numAddressesRemoved = MinterLibraryV2.clearWhitelist(
+        _numAddressesRemoved = MinterLibrary.clearWhitelist(
             whitelistedAddressQtyMap
         );
     }
@@ -853,7 +855,7 @@ contract SoulboundAirdrop is
         responseCode = wipeTokenAccountNFT(token, _user, serials);
 
         emitMessage(
-            MinterLibraryV2.ContractEventType.REVOKE_SBT,
+            MinterLibrary.ContractEventType.REVOKE_SBT,
             _user,
             serialToBurn
         );
@@ -873,7 +875,7 @@ contract SoulboundAirdrop is
     /// @return _newTotalSupply the new total supply of the NFT
     function burnNFTs(
         int64[] memory _serialNumbers
-    ) external returns (int64 _newTotalSupply) {
+    ) external returns (uint64 _newTotalSupply) {
         if (_serialNumbers.length > 10) revert MaxSerials();
         // need to transfer back to treasury to burn
         address[] memory senderList = new address[](_serialNumbers.length);
@@ -889,7 +891,7 @@ contract SoulboundAirdrop is
         }
 
         // unfreeze the token to allow transfer and burn
-        int256 responseCode = unfreezeToken(token, msg.sender);
+        int32 responseCode = unfreezeToken(token, msg.sender);
         if (responseCode != HederaResponseCodes.SUCCESS) {
             revert UnFreezingFailed();
         }
@@ -934,7 +936,7 @@ contract SoulboundAirdrop is
         if (mintEconomics.mintPriceHbar != _hbarCost) {
             mintEconomics.mintPriceHbar = _hbarCost;
             emitMessage(
-                MinterLibraryV2.ContractEventType.UPDATE_MINT_PRICE,
+                MinterLibrary.ContractEventType.UPDATE_MINT_PRICE,
                 msg.sender,
                 mintEconomics.mintPriceHbar
             );
@@ -943,7 +945,7 @@ contract SoulboundAirdrop is
         if (mintEconomics.mintPriceLazy != _lazyCost) {
             mintEconomics.mintPriceLazy = _lazyCost;
             emitMessage(
-                MinterLibraryV2.ContractEventType.UPDATE_MINT_PRICE_LAZY,
+                MinterLibrary.ContractEventType.UPDATE_MINT_PRICE_LAZY,
                 msg.sender,
                 mintEconomics.mintPriceLazy
             );
@@ -960,8 +962,8 @@ contract SoulboundAirdrop is
         if (_changed)
             emitMessage(
                 _mintPaused
-                    ? MinterLibraryV2.ContractEventType.PAUSE
-                    : MinterLibraryV2.ContractEventType.UNPAUSE,
+                    ? MinterLibrary.ContractEventType.PAUSE
+                    : MinterLibrary.ContractEventType.UNPAUSE,
                 msg.sender,
                 _mintPaused ? 1 : 0
             );
@@ -976,7 +978,7 @@ contract SoulboundAirdrop is
         _changed = mintTiming.wlOnly == _wlOnly ? false : true;
         if (_changed)
             emitMessage(
-                MinterLibraryV2.ContractEventType.UPDATE_WL_ONLY,
+                MinterLibrary.ContractEventType.UPDATE_WL_ONLY,
                 msg.sender,
                 _wlOnly ? 1 : 0
             );
@@ -995,7 +997,7 @@ contract SoulboundAirdrop is
         _changed = mintEconomics.buyWlWithLazy == _lazyAmt ? false : true;
         if (_changed)
             emitMessage(
-                MinterLibraryV2.ContractEventType.UPDATE_WL_LAZY_BUY,
+                MinterLibrary.ContractEventType.UPDATE_WL_LAZY_BUY,
                 msg.sender,
                 _lazyAmt
             );
@@ -1009,7 +1011,7 @@ contract SoulboundAirdrop is
         _changed = mintEconomics.maxWlAddressMint == _maxMint ? false : true;
         if (_changed)
             emitMessage(
-                MinterLibraryV2.ContractEventType.UPDATE_WL_MAX,
+                MinterLibrary.ContractEventType.UPDATE_WL_MAX,
                 msg.sender,
                 _maxMint
             );
@@ -1026,7 +1028,7 @@ contract SoulboundAirdrop is
             : true;
         if (_changed)
             emitMessage(
-                MinterLibraryV2.ContractEventType.UPDATE_LAZY_FROM_CONTRACT,
+                MinterLibrary.ContractEventType.UPDATE_LAZY_FROM_CONTRACT,
                 msg.sender,
                 _lazyFromContract ? 1 : 0
             );
@@ -1037,7 +1039,7 @@ contract SoulboundAirdrop is
     function updateMintStartTime(uint256 _startTime) external onlyOwner {
         mintTiming.mintStartTime = _startTime;
         emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_MINT_START_TIME,
+            MinterLibrary.ContractEventType.UPDATE_MINT_START_TIME,
             msg.sender,
             _startTime
         );
@@ -1056,7 +1058,7 @@ contract SoulboundAirdrop is
     function updateLazyBurnPercentage(uint256 _lbp) external onlyOwner {
         lazyDetails.lazyBurnPerc = _lbp;
         emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE,
+            MinterLibrary.ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE,
             msg.sender,
             _lbp
         );
@@ -1066,7 +1068,7 @@ contract SoulboundAirdrop is
     function updateMaxMint(uint256 _maxMint) external onlyOwner {
         mintEconomics.maxMint = _maxMint;
         emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_MAX_MINT,
+            MinterLibrary.ContractEventType.UPDATE_MAX_MINT,
             msg.sender,
             _maxMint
         );
@@ -1076,7 +1078,7 @@ contract SoulboundAirdrop is
     function updateWlDiscount(uint256 _wlDiscount) external onlyOwner {
         mintEconomics.wlDiscount = _wlDiscount;
         emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_WL_DISCOUNT,
+            MinterLibrary.ContractEventType.UPDATE_WL_DISCOUNT,
             msg.sender,
             _wlDiscount
         );
@@ -1086,7 +1088,7 @@ contract SoulboundAirdrop is
     function updateCooldown(uint256 _cooldownPeriod) external onlyOwner {
         mintTiming.cooldownPeriod = _cooldownPeriod;
         emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_COOLDOWN,
+            MinterLibrary.ContractEventType.UPDATE_COOLDOWN,
             msg.sender,
             _cooldownPeriod
         );
@@ -1096,7 +1098,7 @@ contract SoulboundAirdrop is
     function updateRefundWindow(uint256 _refundWindow) external onlyOwner {
         mintTiming.refundWindow = _refundWindow;
         emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_REFUND_WINDOW,
+            MinterLibrary.ContractEventType.UPDATE_REFUND_WINDOW,
             msg.sender,
             _refundWindow
         );
@@ -1120,7 +1122,7 @@ contract SoulboundAirdrop is
     function updateWlToken(address _wlToken) external onlyOwner {
         mintEconomics.wlToken = _wlToken;
         emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_WL_TOKEN,
+            MinterLibrary.ContractEventType.UPDATE_WL_TOKEN,
             msg.sender,
             0
         );
@@ -1129,7 +1131,7 @@ contract SoulboundAirdrop is
     function updateMaxMintPerWallet(uint256 _max) external onlyOwner {
         mintEconomics.maxMintPerWallet = _max;
         emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_MAX_WALLET_MINT,
+            MinterLibrary.ContractEventType.UPDATE_MAX_WALLET_MINT,
             msg.sender,
             _max
         );
@@ -1138,11 +1140,7 @@ contract SoulboundAirdrop is
     /// @param _cid new _cid
     function updateCID(string memory _cid) external onlyOwner {
         cid = _cid;
-        emitMessage(
-            MinterLibraryV2.ContractEventType.UPDATE_CID,
-            msg.sender,
-            0
-        );
+        emitMessage(MinterLibrary.ContractEventType.UPDATE_CID, msg.sender, 0);
     }
 
     /// @param _metadata new _metadata array
@@ -1195,7 +1193,7 @@ contract SoulboundAirdrop is
             // also reset to paused
             mintTiming.mintPaused = true;
         }
-        _remaingItems = MinterLibraryV2.resetContract(
+        _remaingItems = MinterLibrary.resetContract(
             addressToNumMintedMap,
             metadata,
             walletMintTimeMap,
@@ -1207,8 +1205,8 @@ contract SoulboundAirdrop is
 
         emitMessage(
             _removeToken
-                ? MinterLibraryV2.ContractEventType.RESET_INC_TOKEN
-                : MinterLibraryV2.ContractEventType.RESET_CONTRACT,
+                ? MinterLibrary.ContractEventType.RESET_INC_TOKEN
+                : MinterLibrary.ContractEventType.RESET_CONTRACT,
             msg.sender,
             _batch
         );
@@ -1314,7 +1312,7 @@ contract SoulboundAirdrop is
             uint256[] memory _wlNumMintedList
         )
     {
-        (_wlWalletList, _wlNumMintedList) = MinterLibraryV2
+        (_wlWalletList, _wlNumMintedList) = MinterLibrary
             .getNumberMintedByAllWlAddressesBatch(
                 wlAddressToNumMintedMap,
                 0,
@@ -1333,7 +1331,7 @@ contract SoulboundAirdrop is
             uint256[] memory _wlNumMintedList
         )
     {
-        (_wlWalletList, _wlNumMintedList) = MinterLibraryV2
+        (_wlWalletList, _wlNumMintedList) = MinterLibrary
             .getNumberMintedByAllWlAddressesBatch(
                 wlAddressToNumMintedMap,
                 _offset,

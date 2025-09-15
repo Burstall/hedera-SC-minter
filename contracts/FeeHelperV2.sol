@@ -4,7 +4,7 @@ pragma experimental ABIEncoderV2;
 
 import {HederaTokenService} from "./HederaTokenServiceV2.sol";
 import {HederaResponseCodes} from "./HederaResponseCodesV2.sol";
-import {IHederaTokenService} from "./IHederaTokenServiceV2.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenServiceV2.sol";
 import {KeyHelper} from "./KeyHelperV2.sol";
 
 abstract contract FeeHelper is KeyHelper {

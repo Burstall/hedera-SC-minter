@@ -3,13 +3,13 @@ pragma solidity >=0.8.12 <0.9.0;
 
 import {HederaResponseCodes} from "./HederaResponseCodes.sol";
 import {HederaTokenService} from "./HederaTokenService.sol";
-import {IHederaTokenService} from "./IHederaTokenService.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 import {ExpiryHelper} from "./ExpiryHelper.sol";
-import {IHRC719} from "./IHRC719.sol";
+import {IHRC719} from "./interfaces/IHRC719.sol";
 
 // functionality moved to library for space saving
 import {MinterLibrary} from "./MinterLibrary.sol";
-import {IBurnableHTS} from "./IBurnableHTS.sol";
+import {IBurnableHTS} from "./interfaces/IBurnableHTS.sol";
 
 // Import OpenZeppelin Contracts libraries where needed
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -178,8 +178,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     );
 
     /// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
-	/// @param lazy the address of the Lazy Token
-	/// @param lazyBurnPerc the percentage of Lazy to burn on each mint
+    /// @param lazy the address of the Lazy Token
+    /// @param lazyBurnPerc the percentage of Lazy to burn on each mint
     constructor(address lsct, address lazy, uint256 lazyBurnPerc) {
         lazyDetails = LazyDetails(lazy, lazyBurnPerc, IBurnableHTS(lsct));
 
@@ -199,7 +199,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _symbol token symbol
     /// @param _memo token longer form description as a string
     /// @param _cid root _cid for the _metadata files
-	/// @param _royalties array of NFTFeeObject to set the royalties
+    /// @param _royalties array of NFTFeeObject to set the royalties
     /// @param _maxIssuance 0 or less to size based off _metadata else will override
     /// @return _createdTokenAddress the address of the new token
     function initialiseNFTMint(
@@ -303,8 +303,8 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     }
 
     /// @param _numberToMint the number of serials to mint
-	/// @return _serials the serials minted
-	/// @return _metadataForMint the metadata for the minted serials
+    /// @return _serials the serials minted
+    /// @return _metadataForMint the metadata for the minted serials
     function mintNFT(
         uint256 _numberToMint
     )
@@ -482,14 +482,17 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
     /// @param _amount Non-negative value to take as pmt.
     /// @param _payer the address of the payer
-    function takeLazyPayment(
-        uint256 _amount,
-        address _payer
-    ) internal {
+    function takeLazyPayment(uint256 _amount, address _payer) internal {
         if (_payer != address(this)) {
             // check the payer has the required amount && the allowance is in place
-            if (IERC20(lazyDetails.lazyToken).balanceOf(_payer) < _amount && IERC20(lazyDetails.lazyToken).allowance(_payer, address(this)) >= _amount)
-                revert NotEnoughLazy();
+            if (
+                IERC20(lazyDetails.lazyToken).balanceOf(_payer) < _amount &&
+                IERC20(lazyDetails.lazyToken).allowance(
+                    _payer,
+                    address(this)
+                ) >=
+                _amount
+            ) revert NotEnoughLazy();
             bool success = IERC20(lazyDetails.lazyToken).transferFrom(
                 _payer,
                 address(this),
@@ -516,9 +519,9 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         emit MinterContractMessage(ContractEventType.LAZY_PMT, _payer, _amount);
     }
 
-	/// @param _isWlMint boolean to indicate if the mint is a WL mint
-	/// @return _hbarCost the cost in Hbar
-	/// @return _lazyCost the cost in Lazy
+    /// @param _isWlMint boolean to indicate if the mint is a WL mint
+    /// @return _hbarCost the cost in Hbar
+    /// @return _lazyCost the cost in Lazy
     function getCostInternal(
         bool _isWlMint
     ) internal view returns (uint256 _hbarCost, uint256 _lazyCost) {
@@ -565,14 +568,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             block.timestamp <
             (mintTiming.lastMintTime + mintTiming.refundWindow)
         ) revert LazyCooldown();
-		
-		bool success = IERC20(lazyDetails.lazyToken).transfer(
-                _receiver,
-                _amount
-		);
-		if (!success) {
-			revert FailedToPayLazy();
-		}
+
+        bool success = IERC20(lazyDetails.lazyToken).transfer(
+            _receiver,
+            _amount
+        );
+        if (!success) {
+            revert FailedToPayLazy();
+        }
     }
 
     /// @return _wlSpotsPurchased number of spots purchased
@@ -593,7 +596,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         );
     }
 
-	/// @param _serials array of serials to use for purchase
+    /// @param _serials array of serials to use for purchase
     /// @return _wlSpotsPurchased number of sports purchased
     function buyWlWithTokens(
         uint256[] memory _serials

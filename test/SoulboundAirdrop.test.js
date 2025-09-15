@@ -37,7 +37,7 @@ require('dotenv').config();
 let operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 let operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'SoulboundAirdrop';
-const libraryName = 'MinterLibraryV2';
+const libraryName = 'MinterLibrary';
 const lazyContractCreator = 'FungibleTokenCreator';
 const env = process.env.ENVIRONMENT ?? null;
 const lazyBurnPerc = 25;

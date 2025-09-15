@@ -89,9 +89,7 @@ function parseError(iface, errorData) {
 
 	try {
 		const errDescription = iface.parseError(errorData);
-		// Format the error with name and args properly displayed
-		const argsFormatted = errDescription.args.map(arg => arg.toString()).join(', ');
-		return `${errDescription.name}(${argsFormatted})`;
+		return errDescription;
 	}
 	catch (e) {
 		console.error(errorData, e);

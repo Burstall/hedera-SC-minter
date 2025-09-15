@@ -1,10 +1,12 @@
-require('@nomicfoundation/hardhat-toolbox');
 require('hardhat-contract-sizer');
+require('@nomicfoundation/hardhat-toolbox');
+require('hardhat-docgen');
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
 	mocha: {
-		timeout: 10000000,
+		timeout: 100000000,
+		slow: 100000,
 	},
 	solidity: {
 		version: '0.8.18',
@@ -13,6 +15,7 @@ module.exports = {
 				enabled: true,
 				runs: 200,
 			},
+			viaIR: true,
 		},
 	},
 	contractSizer: {
@@ -20,5 +23,10 @@ module.exports = {
 		runOnCompile: true,
 		disambiguatePaths: false,
 		strict: true,
+	},
+	docgen: {
+		path: './docs',
+		clear: true,
+		runOnCompile: true,
 	},
 };
