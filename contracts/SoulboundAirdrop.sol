@@ -314,6 +314,7 @@ contract SoulboundAirdrop is
 
     /// @param recipients the addresses to airdrop the minted NFTs to
     /// assumed quantity of 1 per recipient
+    /// max 10 recipients at a time to avoid gas issues
     /// bypasses whitelist, payment, max per wallet etc
     function airdropMintedNFTs(
         address[] memory recipients
@@ -323,7 +324,7 @@ contract SoulboundAirdrop is
         returns (int64[] memory _serials, bytes[] memory _metadataForMint)
     {
         uint256 numRecipients = recipients.length;
-        if (numRecipients == 0) revert BadQuantity();
+        if (numRecipients == 0 || numRecipients > 10) revert BadQuantity();
         if (totalMinted + numRecipients > maxSupply) revert MintedOut();
         if (mintTiming.mintPaused) revert Paused();
 
@@ -404,6 +405,11 @@ contract SoulboundAirdrop is
             address(this),
             numRecipients
         );
+    }
+
+    /// @return _paused boolean to indicate if the contract is paused
+    function isPaused() external view returns (bool) {
+        return mintTiming.mintPaused;
     }
 
     /// @param _numberToMint the number of serials to mint
