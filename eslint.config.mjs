@@ -75,7 +75,7 @@ export default [...compat.extends('eslint:recommended'), {
 		'space-before-blocks': 'error',
 
 		'space-before-function-paren': ['error', {
-			anonymous: 'never',
+			anonymous: 'ignore',
 			named: 'never',
 			asyncArrow: 'always',
 		}],

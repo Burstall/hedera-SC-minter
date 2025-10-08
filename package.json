@@ -8,6 +8,7 @@
     "test-ft": "npx hardhat test test/FungibleTokenCreator.test.js",
     "test-nft": "npx hardhat test test/MinterContract.test.js",
     "test-sbt": "npx hardhat test test/SoulboundMinter.test.js",
+    "test-badges": "npx hardhat test test/SoulboundBadgeMinter.test.js",
     "deploy-ft": "npx hardhat run scripts/deployment/deploy-FTC.js",
     "deploy-nft": "npx hardhat run scripts/deployment/deploy-MC.js",
     "deploy-sbt": "npx hardhat run scripts/deployment/deploy-SBT.js",
