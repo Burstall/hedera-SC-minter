@@ -120,7 +120,6 @@ const main = async () => {
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
 			console.log('✅ Badge updated successfully!');
-			logTransactionResult(result, 'Badge Update', gasInfo);
 		}
 		else {
 			console.log('❌ Failed to update badge:', result[0]?.status?.toString());
@@ -137,6 +136,9 @@ const main = async () => {
 				console.log('Error: New max supply would exceed available token capacity.');
 			}
 		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'Badge Update', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error updating badge:', error.message);

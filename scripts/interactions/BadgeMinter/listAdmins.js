@@ -8,6 +8,7 @@ require('dotenv').config();
 const fs = require('fs');
 const { ethers } = require('ethers');
 const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
+const { homebrewPopulateAccountNum } = require('../../../utils/hederaMirrorHelpers');
 
 // Get operator from .env file
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
@@ -92,7 +93,7 @@ const main = async () => {
 
 				// Try to convert EVM address back to Hedera account ID
 				try {
-					const accountId = AccountId.fromEvmAddress(0, 0, adminAddress);
+					const accountId = await homebrewPopulateAccountNum(env, adminAddress);
 					console.log(`${i + 1}. ${accountId.toString()} (${adminAddress})`);
 				}
 				catch {

@@ -6,6 +6,115 @@
             "inputs": [],
             "name": "BadArguments",
             "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NoWLToken",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotTokenOwner",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "WLTokenUsed",
+            "type": "error"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "_caller",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "enum MinterLibrary.ContractEventType",
+                    "name": "_eventType",
+                    "type": "uint8"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "_msgAddress",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "_msgNumeric",
+                    "type": "uint256"
+                }
+            ],
+            "name": "MinterLibraryContractMessage",
+            "type": "event"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_revocable",
+                    "type": "bool"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_contract",
+                    "type": "address"
+                }
+            ],
+            "name": "getSBTContractMintKey",
+            "outputs": [
+                {
+                    "components": [
+                        {
+                            "internalType": "uint256",
+                            "name": "keyType",
+                            "type": "uint256"
+                        },
+                        {
+                            "components": [
+                                {
+                                    "internalType": "bool",
+                                    "name": "inheritAccountKey",
+                                    "type": "bool"
+                                },
+                                {
+                                    "internalType": "address",
+                                    "name": "contractId",
+                                    "type": "address"
+                                },
+                                {
+                                    "internalType": "bytes",
+                                    "name": "ed25519",
+                                    "type": "bytes"
+                                },
+                                {
+                                    "internalType": "bytes",
+                                    "name": "ECDSA_secp256k1",
+                                    "type": "bytes"
+                                },
+                                {
+                                    "internalType": "address",
+                                    "name": "delegatableContractId",
+                                    "type": "address"
+                                }
+                            ],
+                            "internalType": "struct IHederaTokenService.KeyValue",
+                            "name": "key",
+                            "type": "tuple"
+                        }
+                    ],
+                    "internalType": "struct IHederaTokenService.TokenKey",
+                    "name": "mintKey",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "pure",
+            "type": "function"
         }
     ]
 }

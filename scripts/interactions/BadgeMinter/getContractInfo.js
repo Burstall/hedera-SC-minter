@@ -227,8 +227,22 @@ const main = async () => {
 		console.log('Whitelist Management: ✅ Yes');
 		console.log('Admin Management: ✅ Yes');
 
-		// Note: REVOCABLE is immutable, would need to be queried if exposed
-		console.log('Revocable SBTs: ❓ Check contract deployment');
+		// Get revocable status from contract
+		try {
+			const revocableCommand = minterIface.encodeFunctionData('REVOCABLE');
+			const revocableResult = await readOnlyEVMFromMirrorNode(
+				env,
+				contractId,
+				revocableCommand,
+				operatorId,
+				false,
+			);
+			const revocable = minterIface.decodeFunctionResult('REVOCABLE', revocableResult);
+			console.log('Revocable SBTs:', revocable[0] ? '✅ Yes' : '❌ No');
+		}
+		catch (error) {
+			console.log('Revocable SBTs: ❓ Could not determine -', error.message);
+		}
 
 	}
 	catch (error) {

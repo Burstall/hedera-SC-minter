@@ -119,7 +119,6 @@ const main = async () => {
 			const badgeId = Number(result[1][0]);
 			console.log('✅ Badge created successfully!');
 			console.log('Badge ID:', badgeId);
-			logTransactionResult(result, 'Badge Creation', gasInfo);
 		}
 		else {
 			console.log('❌ Failed to create badge:', result[0]?.status?.toString());
@@ -136,6 +135,9 @@ const main = async () => {
 				console.log('Error: Insufficient token supply for this badge capacity.');
 			}
 		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'Badge Creation', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error creating badge:', error.message);

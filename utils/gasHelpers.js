@@ -1,4 +1,4 @@
-const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
+const { readOnlyEVMFromMirrorNode } = require('./solidityHelpers');
 
 /**
  * Estimate gas for a contract function call using mirror node
@@ -27,9 +27,9 @@ async function estimateGas(env, contractId, contractInterface, operatorId, funct
 		);
 
 		const estimatedGas = Number(gasEstimate);
-		const gasWithBuffer = Math.ceil(estimatedGas * 1.15);
+		const gasWithBuffer = Math.ceil(estimatedGas * 1.05);
 
-		console.log(`📊 Gas Estimate: ${estimatedGas.toLocaleString()} | With 15% buffer: ${gasWithBuffer.toLocaleString()}`);
+		console.log(`📊 Gas Estimate: ${estimatedGas.toLocaleString()} | With 5% buffer: ${gasWithBuffer.toLocaleString()}`);
 
 		return {
 			gasLimit: gasWithBuffer,
@@ -57,7 +57,10 @@ async function estimateGas(env, contractId, contractInterface, operatorId, funct
 function logTransactionResult(result, operation, gasInfo) {
 	const [status, , receipt] = result;
 
-	if (status?.toString() === 'SUCCESS') {
+	// Handle both simple status strings and complex status objects
+	const statusString = typeof status === 'object' && status.status ? status.status.toString() : status?.toString();
+
+	if (statusString === 'SUCCESS') {
 		console.log(`✅ ${operation} completed successfully!`);
 
 		if (receipt?.transactionId) {
@@ -65,7 +68,7 @@ function logTransactionResult(result, operation, gasInfo) {
 		}
 
 		// Log gas usage comparison if available
-		if (receipt?.contractFunctionResult?.gasUsed && gasInfo.isEstimated) {
+		if (receipt?.contractFunctionResult?.gasUsed) {
 			const gasUsed = Number(receipt.contractFunctionResult.gasUsed);
 			const gasLimit = gasInfo.gasLimit;
 			const efficiency = ((gasUsed / gasLimit) * 100).toFixed(1);
@@ -79,10 +82,14 @@ function logTransactionResult(result, operation, gasInfo) {
 		}
 	}
 	else {
-		console.log(`❌ ${operation} failed:`, status?.toString());
-		if (receipt?.transactionId) {
-			console.log(`📝 Failed Transaction ID: ${receipt.transactionId.toString()}`);
-		}
+		console.log(`❌ ${operation} failed:`, statusString?.name);
+
+		// Log detailed failure information
+		// if (typeof result === 'object') {
+		// 	console.log('📋 Full status details:', JSON.stringify(result, null, 2));
+		// }
+
+		console.log(`📝 Failed Transaction ID: ${result[1].toString()}`);
 	}
 }
 

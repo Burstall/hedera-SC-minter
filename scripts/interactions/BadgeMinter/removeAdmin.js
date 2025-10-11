@@ -9,7 +9,7 @@ const fs = require('fs');
 const { ethers } = require('ethers');
 const readlineSync = require('readline-sync');
 const { contractExecuteFunction } = require('../../../utils/solidityHelpers');
-const { homebrewPopulateAccountEvmAddress } = require('../../../utils/hederaMirrorHelpers');
+const { homebrewPopulateAccountEvmAddress, homebrewPopulateAccountNum } = require('../../../utils/hederaMirrorHelpers');
 const { estimateGas, logTransactionResult } = require('../../../utils/gasHelpers');
 
 // Get operator from .env file
@@ -75,10 +75,11 @@ const main = async () => {
 
 	const accountToRemove = process.argv[2];
 	let adminAddress;
+	let accountId;
 
 	// Convert account ID to EVM address if needed
 	if (accountToRemove.startsWith('0.0.')) {
-		const accountId = AccountId.fromString(accountToRemove);
+		accountId = AccountId.fromString(accountToRemove);
 		try {
 			adminAddress = await homebrewPopulateAccountEvmAddress(env, accountId);
 		}
@@ -88,6 +89,7 @@ const main = async () => {
 	}
 	else if (accountToRemove.startsWith('0x')) {
 		adminAddress = accountToRemove;
+		accountId = await homebrewPopulateAccountNum(env, accountToRemove);
 	}
 	else {
 		console.log('Invalid account format. Use either 0.0.xxxxx or 0x...');
@@ -97,7 +99,7 @@ const main = async () => {
 	console.log('\n===========================================');
 	console.log('REMOVING ADMIN');
 	console.log('===========================================');
-	console.log('Account to remove:', accountToRemove);
+	console.log('Account to remove:', accountId.toString());
 	console.log('EVM Address:', adminAddress);
 
 	console.log('\n⚠️  WARNING: This will remove admin privileges from this account.');
@@ -132,23 +134,10 @@ const main = async () => {
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
 			console.log('✅ Admin removed successfully!');
-			logTransactionResult(result, 'Remove Admin', gasInfo);
 		}
-		else {
-			console.log('❌ Failed to remove admin:', result[0]?.status?.toString());
-			if (result[2]?.transactionId) {
-				console.log('📝 Failed Transaction ID:', result[2].transactionId.toString());
-			}
-			if (result[0]?.status?.name === 'NotAdmin') {
-				console.log('Error: You are not an admin of this contract.');
-			}
-			else if (result[0]?.status?.name === 'CannotRemoveLastAdmin') {
-				console.log('Error: Cannot remove the last admin. Add another admin first.');
-			}
-			else if (result[0]?.status?.name === 'AdminDoesNotExist') {
-				console.log('Error: This address is not currently an admin.');
-			}
-		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'Remove Admin', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error removing admin:', error.message);

@@ -8,7 +8,7 @@ require('dotenv').config();
 const fs = require('fs');
 const { ethers } = require('ethers');
 const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
-const { homebrewPopulateAccountEvmAddress } = require('../../../utils/hederaMirrorHelpers');
+const { homebrewPopulateAccountEvmAddress, homebrewPopulateAccountNum } = require('../../../utils/hederaMirrorHelpers');
 
 // Get operator from .env file
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
@@ -93,7 +93,7 @@ const main = async () => {
 	const minterIface = new ethers.Interface(json.abi);
 
 	// Default to operator if no user specified
-	const targetUser = userAccount || operatorId.toString();
+	let targetUser = userAccount || operatorId.toString();
 
 	// Convert to EVM address
 	let userEvmAddress;
@@ -108,6 +108,7 @@ const main = async () => {
 	}
 	else if (targetUser.startsWith('0x')) {
 		userEvmAddress = targetUser;
+		targetUser = (await homebrewPopulateAccountNum(env, userEvmAddress)).toString();
 	}
 	else {
 		console.log('Invalid account format. Use either 0.0.xxxxx or 0x...');

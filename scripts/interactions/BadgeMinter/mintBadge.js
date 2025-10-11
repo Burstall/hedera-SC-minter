@@ -11,7 +11,7 @@ const { ethers } = require('ethers');
 const readlineSync = require('readline-sync');
 const { contractExecuteFunction, readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
 const { associateTokenToAccount } = require('../../../utils/hederaHelpers');
-const { homebrewPopulateAccountEvmAddress } = require('../../../utils/hederaMirrorHelpers');
+const { homebrewPopulateAccountEvmAddress, checkMirrorBalance } = require('../../../utils/hederaMirrorHelpers');
 const { estimateGas, logTransactionResult } = require('../../../utils/gasHelpers');
 
 // Get operator from .env file
@@ -170,8 +170,23 @@ const main = async () => {
 
 		if (isMintOnBehalf) {
 			// For mint-on-behalf, we can't auto-associate - the recipient must have done it themselves
-			console.log('⚠️  Warning: For mint-on-behalf, the recipient must have already associated the token.');
-			console.log('    The transaction will fail if the recipient has not associated the token.');
+			// Check if the recipient has associated the token using mirror node
+			const recipientAccountId = AccountId.fromString(recipientId.toString());
+			const balance = await checkMirrorBalance(env, recipientAccountId, tokenId);
+
+			if (balance === null) {
+				console.log('❌ Token NOT associated to recipient account!');
+				console.log('   The recipient must associate the token before minting on their behalf.');
+				console.log(`   Token ID: ${tokenId.toString()}`);
+				console.log(`   Recipient: ${recipientId.toString()}`);
+				return;
+			}
+			else {
+				console.log('✅ Token is associated to recipient account');
+				if (balance > 0) {
+					console.log(`   Current balance: ${balance}`);
+				}
+			}
 		}
 		else {
 			// For self-mint, we can auto-associate
@@ -250,7 +265,6 @@ const main = async () => {
 			const serialNumbers = result[1][0];
 			console.log('✅ Badges minted successfully!');
 			console.log('Serial Numbers:', serialNumbers.map(s => Number(s)));
-			logTransactionResult(result, 'Badge Minting', gasInfo);
 		}
 		else {
 			console.log('❌ Failed to mint badges:', result[0]?.status?.toString());
@@ -273,6 +287,9 @@ const main = async () => {
 				console.log('Error: Recipient account has not associated the token. They must associate it first.');
 			}
 		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'Badge Minting', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error during minting:', error.message);

@@ -8,8 +8,8 @@ require('dotenv').config();
 const fs = require('fs');
 const { ethers } = require('ethers');
 const readlineSync = require('readline-sync');
-const { contractExecuteFunction } = require('../../../utils/solidityHelpers');
-const { homebrewPopulateAccountEvmAddress } = require('../../../utils/hederaMirrorHelpers');
+const { contractExecuteFunction, readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
+const { homebrewPopulateAccountEvmAddress, homebrewPopulateAccountNum } = require('../../../utils/hederaMirrorHelpers');
 const { estimateGas, logTransactionResult } = require('../../../utils/gasHelpers');
 
 // Get operator from .env file
@@ -89,7 +89,8 @@ const main = async () => {
 
 	// Convert accounts to EVM addresses
 	const evmAddresses = [];
-	for (const accountString of accountStrings) {
+	for (let i = 0; i < accountStrings.length; i++) {
+		const accountString = accountStrings[i];
 		try {
 			let evmAddress;
 			if (accountString.startsWith('0.0.')) {
@@ -105,6 +106,7 @@ const main = async () => {
 			else if (accountString.startsWith('0x')) {
 				// Already EVM address
 				evmAddress = accountString;
+				accountStrings[i] = (await homebrewPopulateAccountNum(env, accountString)).toString();
 			}
 			else {
 				// Try to lookup account by alias using mirror node
@@ -129,11 +131,65 @@ const main = async () => {
 	console.log('ADD TO BADGE WHITELIST');
 	console.log('===========================================');
 	console.log('Badge ID:', badgeId);
-	console.log('Accounts to whitelist:');
+
+	// Check current whitelist status for each address
+	console.log('\nValidating accounts...');
+	const validationResults = [];
+
+	// Fetch the entire whitelist for this badge once
+	const existingWhitelist = { addresses: [], quantities: [] };
+	try {
+		const whitelistCommand = minterIface.encodeFunctionData('getBadgeWhitelist', [badgeId]);
+		const whitelistResult = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			whitelistCommand,
+			operatorId,
+			false,
+		);
+		const decoded = minterIface.decodeFunctionResult('getBadgeWhitelist', whitelistResult);
+		existingWhitelist.addresses = decoded[0].map(addr => addr.toLowerCase());
+		existingWhitelist.quantities = decoded[1].map(q => Number(q));
+	}
+	catch (error) {
+		console.log('Note: Could not fetch existing whitelist:', error.message);
+	}
 
 	for (let i = 0; i < accountStrings.length; i++) {
-		console.log(`  ${i + 1}. ${accountStrings[i]} (${evmAddresses[i]})`);
-		console.log(`     Quantity: ${quantities[i] === 0 ? 'Unlimited' : quantities[i]}`);
+		const evmAddress = evmAddresses[i];
+		const accountString = accountStrings[i];
+		const quantity = quantities[i];
+
+		// Check if address is already in whitelist
+		const existingIndex = existingWhitelist.addresses.indexOf(evmAddress.toLowerCase());
+		const isAlreadyWhitelisted = existingIndex !== -1;
+		const currentWLQuantity = isAlreadyWhitelisted ? existingWhitelist.quantities[existingIndex] : 0;
+
+		validationResults.push({
+			accountString,
+			evmAddress,
+			quantity,
+			currentWLQuantity,
+			isAlreadyWhitelisted,
+		});
+	} console.log('\nAccounts to whitelist:');
+	let hasWarnings = false;
+
+	for (let i = 0; i < validationResults.length; i++) {
+		const result = validationResults[i];
+		console.log(`  ${i + 1}. ${result.accountString} (${result.evmAddress})`);
+		console.log(`     New Quantity: ${result.quantity === 0 ? 'Unlimited' : result.quantity}`);
+
+		if (result.isAlreadyWhitelisted) {
+			console.log(`     ⚠️  Already whitelisted with ${result.currentWLQuantity === 0 ? 'unlimited' : result.currentWLQuantity} allocation`);
+			hasWarnings = true;
+		}
+		else {
+			console.log('     ✅ New user - no previous allocation');
+		}
+	} if (hasWarnings) {
+		console.log('\n⚠️  WARNING: Some accounts are already whitelisted or have validation issues.');
+		console.log('Adding them again will UPDATE their whitelist allocation.');
 	}
 
 	const proceed = readlineSync.question('\nProceed to add these addresses to the whitelist? (y/N): ');
@@ -169,20 +225,10 @@ const main = async () => {
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
 			console.log('✅ Addresses added to whitelist successfully!');
-			logTransactionResult(result, 'Whitelist Update', gasInfo);
 		}
-		else {
-			console.log('❌ Failed to add to whitelist:', result[0]?.status?.toString());
-			if (result[2]?.transactionId) {
-				console.log('📝 Failed Transaction ID:', result[2].transactionId.toString());
-			}
-			if (result[0]?.status?.name === 'NotAdmin') {
-				console.log('Error: You are not an admin of this contract.');
-			}
-			else if (result[0]?.status?.name === 'TypeNotFound') {
-				console.log('Error: Badge ID not found.');
-			}
-		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'Whitelist Update', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error adding to whitelist:', error.message);

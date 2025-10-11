@@ -77,12 +77,6 @@ const main = async () => {
 	if (getArgFlag('init')) {
 		await initialiseContract();
 	}
-	else if (getArgFlag('reset')) {
-		await resetContract();
-	}
-	else if (getArgFlag('hardreset')) {
-		await hardResetContract();
-	}
 	else {
 		console.log('No action specified. Use -h for help.');
 	}
@@ -94,8 +88,9 @@ async function initialiseContract() {
 	const name = getArg('name') || readlineSync.question('Enter token name: ');
 	const symbol = getArg('symbol') || readlineSync.question('Enter token symbol: ');
 	const memo = getArg('memo') || readlineSync.question('Enter token memo: ');
-	const maxSupply = getArg('max') || readlineSync.question('Enter max supply (0 for unlimited): ');
-	const unlimited = parseInt(maxSupply) === 0;
+	const maxSupplyInput = getArg('max') || readlineSync.question('Enter max supply (0 for unlimited): ');
+	const maxSupply = maxSupplyInput === '' ? 0 : parseInt(maxSupplyInput);
+	const unlimited = maxSupply === 0;
 
 	console.log('\nInitializing with:');
 	console.log('Name:', name);
@@ -117,7 +112,7 @@ async function initialiseContract() {
 			minterIface,
 			operatorId,
 			'initialiseNFTMint',
-			[name, symbol, memo, unlimited ? 0 : parseInt(maxSupply), unlimited],
+			[name, symbol, memo, unlimited ? 0 : maxSupply, unlimited],
 			gas,
 		);
 
@@ -131,7 +126,7 @@ async function initialiseContract() {
 				name,
 				symbol,
 				memo,
-				unlimited ? 0 : parseInt(maxSupply),
+				unlimited ? 0 : maxSupply,
 				unlimited,
 			],
 			MINT_PAYMENT,
@@ -141,46 +136,12 @@ async function initialiseContract() {
 			console.log('✅ Token initialized successfully!');
 			console.log('Token Address:', result[1][0]);
 			console.log('Max Supply:', result[1][1].toString());
-			logTransactionResult(result, 'Token Initialization', gasInfo);
 		}
-		else {
-			console.log('❌ Initialization failed:', result[0]?.status?.toString());
-			if (result[2]?.transactionId) {
-				console.log('📝 Failed Transaction ID:', result[2].transactionId.toString());
-			}
-		}
+		logTransactionResult(result, 'Token Initialization', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error during initialization:', error.message);
 	}
-}
-
-async function resetContract() {
-	console.log('\n-Resetting SoulboundBadgeMinter data...');
-	console.log('⚠️  This will remove all badge configurations but keep the token.');
-
-	const proceed = readlineSync.question('Are you sure? (y/N): ');
-	if (proceed.toLowerCase() !== 'y') {
-		console.log('Cancelled.');
-		return;
-	}
-
-	// Implementation would depend on if there's a reset function in the contract
-	console.log('Reset functionality would need to be implemented in the contract.');
-}
-
-async function hardResetContract() {
-	console.log('\n-Hard resetting SoulboundBadgeMinter...');
-	console.log('⚠️  This will remove ALL data including the token ID.');
-
-	const proceed = readlineSync.question('Are you ABSOLUTELY sure? (y/N): ');
-	if (proceed.toLowerCase() !== 'y') {
-		console.log('Cancelled.');
-		return;
-	}
-
-	// Implementation would depend on if there's a hard reset function in the contract
-	console.log('Hard reset functionality would need to be implemented in the contract.');
 }
 
 main()

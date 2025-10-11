@@ -9,7 +9,7 @@ const fs = require('fs');
 const { ethers } = require('ethers');
 const readlineSync = require('readline-sync');
 const { contractExecuteFunction } = require('../../../utils/solidityHelpers');
-const { homebrewPopulateAccountEvmAddress } = require('../../../utils/hederaMirrorHelpers');
+const { homebrewPopulateAccountEvmAddress, homebrewPopulateAccountNum } = require('../../../utils/hederaMirrorHelpers');
 const { estimateGas, logTransactionResult } = require('../../../utils/gasHelpers');
 
 // Get operator from .env file
@@ -76,9 +76,11 @@ const main = async () => {
 	const accountToAdd = process.argv[2];
 	let adminAddress;
 
+	let accountId;
+
 	// Convert account ID to EVM address if needed
 	if (accountToAdd.startsWith('0.0.')) {
-		const accountId = AccountId.fromString(accountToAdd);
+		accountId = AccountId.fromString(accountToAdd);
 		try {
 			adminAddress = await homebrewPopulateAccountEvmAddress(env, accountId);
 		}
@@ -88,6 +90,7 @@ const main = async () => {
 	}
 	else if (accountToAdd.startsWith('0x')) {
 		adminAddress = accountToAdd;
+		accountId = await homebrewPopulateAccountNum(env, accountToAdd);
 	}
 	else {
 		console.log('Invalid account format. Use either 0.0.xxxxx or 0x...');
@@ -97,7 +100,7 @@ const main = async () => {
 	console.log('\n===========================================');
 	console.log('ADDING ADMIN');
 	console.log('===========================================');
-	console.log('Account to add:', accountToAdd);
+	console.log('Account to add:', accountId.toString());
 	console.log('EVM Address:', adminAddress);
 
 	const proceed = readlineSync.question('\nProceed to add this admin? (y/N): ');
@@ -129,20 +132,10 @@ const main = async () => {
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
 			console.log('✅ Admin added successfully!');
-			logTransactionResult(result, 'Add Admin', gasInfo);
 		}
-		else {
-			console.log('❌ Failed to add admin:', result[0]?.status?.toString());
-			if (result[2]?.transactionId) {
-				console.log('📝 Failed Transaction ID:', result[2].transactionId.toString());
-			}
-			if (result[0]?.status?.name === 'NotAdmin') {
-				console.log('Error: You are not an admin of this contract.');
-			}
-			else if (result[0]?.status?.name === 'AdminAlreadyExists') {
-				console.log('Error: This address is already an admin.');
-			}
-		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'Add Admin', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error adding admin:', error.message);

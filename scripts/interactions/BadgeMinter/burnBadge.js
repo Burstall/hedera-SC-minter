@@ -242,7 +242,6 @@ const main = async () => {
 			console.log('✅ Badges burned successfully!');
 			console.log('Burned Serials:', serialNumbers);
 			console.log('New Total Supply:', newTotalSupply);
-			logTransactionResult(result, 'Badge Burning', gasInfo);
 
 			// Show updated mint counts
 			console.log('\n📊 Updated badge counts:');
@@ -283,6 +282,9 @@ const main = async () => {
 				console.log('Error: Too many serials specified (max 10).');
 			}
 		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'Badge Burning', gasInfo);
 
 	}
 	catch (error) {

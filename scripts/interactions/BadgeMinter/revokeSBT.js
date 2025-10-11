@@ -8,8 +8,8 @@ require('dotenv').config();
 const fs = require('fs');
 const { ethers } = require('ethers');
 const readlineSync = require('readline-sync');
-const { contractExecuteFunction } = require('../../../utils/solidityHelpers');
-const { homebrewPopulateAccountEvmAddress } = require('../../../utils/hederaMirrorHelpers');
+const { contractExecuteFunction, readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
+const { homebrewPopulateAccountEvmAddress, checkNFTOwnership } = require('../../../utils/hederaMirrorHelpers');
 const { estimateGas, logTransactionResult } = require('../../../utils/gasHelpers');
 
 // Get operator from .env file
@@ -103,11 +103,119 @@ const main = async () => {
 	console.log('EVM Address:', userEvmAddress);
 	console.log('Serial Number:', serialNumber);
 
+	// Check if contract is revocable
+	console.log('\n🔍 Validating revocation...');
+	try {
+		const revocableCommand = minterIface.encodeFunctionData('REVOCABLE');
+		const revocableResult = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			revocableCommand,
+			operatorId,
+			false,
+		);
+		const revocable = minterIface.decodeFunctionResult('REVOCABLE', revocableResult);
+
+		if (!revocable[0]) {
+			console.log('❌ Contract is NOT revocable!');
+			console.log('   This contract was deployed without revocation capability.');
+			console.log('   SBTs cannot be revoked from this contract.');
+			return;
+		}
+		console.log('✅ Contract is revocable');
+	}
+	catch (error) {
+		console.log('⚠️  Could not verify contract revocability:', error.message);
+	}
+
+	// Get token address
+	let tokenIdString;
+	try {
+		const tokenCommand = minterIface.encodeFunctionData('getToken');
+		const tokenResult = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			tokenCommand,
+			operatorId,
+			false,
+		);
+		const tokenAddress = minterIface.decodeFunctionResult('getToken', tokenResult);
+
+		// Convert token address to token ID
+		const tokenEvmAddress = tokenAddress[0];
+		if (tokenEvmAddress === '0x0000000000000000000000000000000000000000') {
+			console.log('❌ Token not initialized in contract');
+			return;
+		}
+
+		// Extract token ID from EVM address (last 8 bytes)
+		const tokenNum = parseInt(tokenEvmAddress.slice(-8), 16);
+		tokenIdString = `0.0.${tokenNum}`;
+		console.log('Token ID:', tokenIdString);
+	}
+	catch (error) {
+		console.log('⚠️  Could not retrieve token information:', error.message);
+		return;
+	}
+
+	// Verify NFT ownership and status
+	try {
+		const nftInfo = await checkNFTOwnership(env, tokenIdString, serialNumber);
+
+		if (!nftInfo) {
+			console.log('❌ NFT serial not found or query failed');
+			return;
+		}
+
+		if (nftInfo.deleted) {
+			console.log('❌ NFT serial', serialNumber, 'has already been deleted');
+			return;
+		}
+
+		if (nftInfo.owner !== userAccountInput && !nftInfo.owner.includes(userAccountInput)) {
+			console.log('❌ NFT ownership mismatch!');
+			console.log(`   Expected owner: ${userAccountInput}`);
+			console.log(`   Actual owner: ${nftInfo.owner}`);
+			return;
+		}
+
+		console.log('✅ NFT serial', serialNumber, 'is owned by', nftInfo.owner);
+
+		// Get badge type for this serial
+		const badgeIdCommand = minterIface.encodeFunctionData('getSerialBadgeId', [serialNumber]);
+		const badgeIdResult = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			badgeIdCommand,
+			operatorId,
+			false,
+		);
+		const badgeId = minterIface.decodeFunctionResult('getSerialBadgeId', badgeIdResult);
+		console.log('Badge Type ID:', Number(badgeId[0]));
+
+		// Get badge details
+		const badgeCommand = minterIface.encodeFunctionData('getBadge', [badgeId[0]]);
+		const badgeResult = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			badgeCommand,
+			operatorId,
+			false,
+		);
+		const badgeInfo = minterIface.decodeFunctionResult('getBadge', badgeResult);
+		console.log('Badge Name:', badgeInfo[0]);
+	}
+	catch (error) {
+		console.log('⚠️  Could not verify NFT ownership:', error.message);
+		return;
+	}
+
 	console.log('\n⚠️  WARNING: This action will:');
 	console.log('   - Permanently remove the NFT from the user\'s account');
 	console.log('   - Remove the user from the whitelist for this badge type');
-	console.log('   - Cannot be undone');
-	console.log('   - Only works if contract was deployed as revocable');
+	console.log('   - Cannot be undone (NFT will be burned)');
+	console.log('\n💡 NOTE: You can add the user back to the whitelist later if needed');
+	console.log('   Use addToBadgeWhitelist.js to re-whitelist the user for future mints');
 
 	const proceed = readlineSync.question('\nAre you sure you want to revoke this SBT? (y/N): ');
 	if (proceed.toLowerCase() !== 'y') {
@@ -149,7 +257,6 @@ const main = async () => {
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
 			console.log('✅ SBT revoked successfully!');
-			logTransactionResult(result, 'SBT Revocation', gasInfo);
 			console.log('\nThe NFT has been removed from the user\'s account and they have been removed from the whitelist.');
 		}
 		else {
@@ -170,6 +277,9 @@ const main = async () => {
 				console.log('Error: Badge type not found for this serial.');
 			}
 		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'SBT Revocation', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error revoking SBT:', error.message);

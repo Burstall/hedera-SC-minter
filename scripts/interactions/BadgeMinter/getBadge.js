@@ -20,15 +20,24 @@ const env = process.env.ENVIRONMENT ?? null;
 let client;
 
 const main = async () => {
-	// Check for optional badge ID argument
+	// Check for optional badge ID or "all" argument
 	let badgeId = null;
+	let showAll = false;
+
 	if (process.argv.length === 3) {
-		badgeId = parseInt(process.argv[2]);
-		if (isNaN(badgeId)) {
-			console.log('Usage: node getBadge.js [badgeId]');
-			console.log('Example: node getBadge.js 1     # Get info for badge ID 1');
-			console.log('Example: node getBadge.js       # Get info for all badges');
-			return;
+		const arg = process.argv[2];
+		if (arg.toLowerCase() === 'all') {
+			showAll = true;
+		}
+		else {
+			badgeId = parseInt(arg);
+			if (isNaN(badgeId)) {
+				console.log('Usage: node getBadge.js [badgeId|all]');
+				console.log('Example: node getBadge.js 1     # Get info for badge ID 1');
+				console.log('Example: node getBadge.js       # Get info for active badges only');
+				console.log('Example: node getBadge.js all   # Get info for all badges (active and inactive)');
+				return;
+			}
 		}
 	}
 
@@ -80,8 +89,8 @@ const main = async () => {
 			await getBadgeInfo(minterIface, badgeId);
 		}
 		else {
-			// Get all badges info
-			await getAllBadgesInfo(minterIface);
+			// Get all badges info (active only or all badges)
+			await getAllBadgesInfo(minterIface, showAll);
 		}
 	}
 	catch (error) {
@@ -144,55 +153,109 @@ async function getBadgeInfo(minterIface, badgeId) {
 	}
 }
 
-async function getAllBadgesInfo(minterIface) {
+async function getAllBadgesInfo(minterIface, showAll = false) {
 	console.log('\n===========================================');
-	console.log('ALL BADGES INFORMATION');
+	console.log(showAll ? 'ALL BADGES INFORMATION (ACTIVE & INACTIVE)' : 'ACTIVE BADGES INFORMATION');
 	console.log('===========================================');
 
 	try {
-		// Get active badge IDs first
-		const activeCommand = minterIface.encodeFunctionData('getActiveBadgeIds');
-		const activeResult = await readOnlyEVMFromMirrorNode(
-			env,
-			contractId,
-			activeCommand,
-			operatorId,
-			false,
-		);
-		const activeBadgeIds = minterIface.decodeFunctionResult('getActiveBadgeIds', activeResult);
+		let badgeIds = [];
 
-		if (activeBadgeIds[0].length === 0) {
-			console.log('No active badges found.');
-			return;
+		if (showAll) {
+			// Try to get all badges by iterating through IDs until we hit TypeNotFound
+			// Start from ID 1 and keep going until we get an error
+			let currentId = 1;
+			// Safety limit to prevent infinite loops
+			const maxAttempts = 100;
+
+			while (currentId <= maxAttempts) {
+				try {
+					const testCommand = minterIface.encodeFunctionData('getBadge', [currentId]);
+					await readOnlyEVMFromMirrorNode(
+						env,
+						contractId,
+						testCommand,
+						operatorId,
+						false,
+					);
+					// If we got here, the badge exists
+					badgeIds.push(currentId);
+					currentId++;
+				}
+				catch (error) {
+					if (error.message.includes('TypeNotFound')) {
+						// We've reached the end of existing badges
+						break;
+					}
+					else {
+						// Some other error, skip this ID and continue
+						currentId++;
+					}
+				}
+			}
+
+			if (badgeIds.length === 0) {
+				console.log('No badges found.');
+				return;
+			}
 		}
-
-		console.log(`Found ${activeBadgeIds[0].length} active badge(s):\n`);
-
-		for (let i = 0; i < activeBadgeIds[0].length; i++) {
-			const badgeId = Number(activeBadgeIds[0][i]);
-
-			console.log(`--- Badge ID: ${badgeId} ---`);
-
-			const encodedCommand = minterIface.encodeFunctionData('getBadge', [badgeId]);
-			const result = await readOnlyEVMFromMirrorNode(
+		else {
+			// Get active badge IDs only
+			const activeCommand = minterIface.encodeFunctionData('getActiveBadgeIds');
+			const activeResult = await readOnlyEVMFromMirrorNode(
 				env,
 				contractId,
-				encodedCommand,
+				activeCommand,
 				operatorId,
 				false,
 			);
+			const activeBadgeIds = minterIface.decodeFunctionResult('getActiveBadgeIds', activeResult);
 
-			const [name, metadata, totalMinted, maxSupply, active] = minterIface.decodeFunctionResult('getBadge', result);
+			if (activeBadgeIds[0].length === 0) {
+				console.log('No active badges found.');
+				return;
+			}
 
-			console.log('Name:', name);
-			console.log('Metadata:', metadata);
-			console.log('Total Minted:', Number(totalMinted));
-			console.log('Max Supply:', Number(maxSupply) === 0 ? 'Unlimited' : Number(maxSupply));
-			console.log('Active:', active ? '✅' : '❌');
+			badgeIds = activeBadgeIds[0].map(id => Number(id));
+		}
 
-			if (Number(maxSupply) > 0) {
-				const percentage = ((Number(totalMinted) / Number(maxSupply)) * 100).toFixed(2);
-				console.log('Progress:', `${percentage}%`);
+		console.log(`Found ${badgeIds.length} badge(s):\n`);
+
+		for (let i = 0; i < badgeIds.length; i++) {
+			const badgeId = badgeIds[i];
+
+			console.log(`--- Badge ID: ${badgeId} ---`);
+
+			try {
+				const encodedCommand = minterIface.encodeFunctionData('getBadge', [badgeId]);
+				const result = await readOnlyEVMFromMirrorNode(
+					env,
+					contractId,
+					encodedCommand,
+					operatorId,
+					false,
+				);
+
+				const [name, metadata, totalMinted, maxSupply, active] = minterIface.decodeFunctionResult('getBadge', result);
+
+				console.log('Name:', name);
+				console.log('Metadata:', metadata);
+				console.log('Total Minted:', Number(totalMinted));
+				console.log('Max Supply:', Number(maxSupply) === 0 ? 'Unlimited' : Number(maxSupply));
+				console.log('Active:', active ? '✅' : '❌');
+
+				if (Number(maxSupply) > 0) {
+					const percentage = ((Number(totalMinted) / Number(maxSupply)) * 100).toFixed(2);
+					console.log('Progress:', `${percentage}%`);
+				}
+			}
+			catch (error) {
+				if (error.message.includes('TypeNotFound')) {
+					console.log(`❌ Badge ID ${badgeId} does not exist.`);
+				}
+				else {
+					console.log('❌ Error fetching badge info:', error.message);
+				}
 			}
 
 			console.log('');

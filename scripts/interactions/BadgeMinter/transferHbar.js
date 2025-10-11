@@ -143,7 +143,6 @@ const main = async () => {
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
 			console.log('✅ HBAR transferred successfully!');
-			logTransactionResult(result, 'HBAR Transfer', gasInfo);
 		}
 		else {
 			console.log('❌ Failed to transfer HBAR:', result[0]?.status?.toString());
@@ -160,6 +159,9 @@ const main = async () => {
 				console.log('Error: Invalid recipient address.');
 			}
 		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, 'HBAR Transfer', gasInfo);
 	}
 	catch (error) {
 		console.log('❌ Error transferring HBAR:', error.message);

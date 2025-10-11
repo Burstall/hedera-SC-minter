@@ -127,7 +127,6 @@ const main = async () => {
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
 			console.log(`✅ Badge ${active ? 'activated' : 'deactivated'} successfully!`);
-			logTransactionResult(result, `Badge ${active ? 'Activation' : 'Deactivation'}`, gasInfo);
 		}
 		else {
 			console.log(`❌ Failed to ${active ? 'activate' : 'deactivate'} badge:`, result[0]?.status?.toString());
@@ -141,6 +140,9 @@ const main = async () => {
 				console.log('Error: Badge ID not found.');
 			}
 		}
+
+		// Centralized transaction result logging
+		logTransactionResult(result, `Badge ${active ? 'Activation' : 'Deactivation'}`, gasInfo);
 	}
 	catch (error) {
 		console.log(`❌ Error ${active ? 'activating' : 'deactivating'} badge:`, error.message);

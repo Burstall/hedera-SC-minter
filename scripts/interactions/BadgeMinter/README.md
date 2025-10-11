@@ -30,12 +30,7 @@ node prepareBadgeMinter.js -init -name "MyBadges" -symbol "BADGE" -memo "Badge C
 # Initialize unlimited supply token
 node prepareBadgeMinter.js -init -name "MyBadges" -symbol "BADGE" -memo "Badge Collection" -max 0
 
-# Reset contract data (if supported)
-node prepareBadgeMinter.js -reset
-
-# Hard reset including token ID (if supported)
-node prepareBadgeMinter.js -hardreset
-```
+# There is no reset - deploy a fresh contract if needed.
 
 #### **addAdmin.js**
 Add new administrators to the contract.
