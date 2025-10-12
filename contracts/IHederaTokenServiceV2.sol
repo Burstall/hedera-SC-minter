@@ -2,7 +2,7 @@
 pragma solidity >=0.8.12 <0.9.0;
 pragma experimental ABIEncoderV2;
 
-interface IHederaTokenService {
+interface IHederaTokenServiceV2 {
     /// Transfers cryptocurrency among two or more accounts by making the desired adjustments to their
     /// balances. Each transfer list can specify up to 10 adjustments. Each negative amount is withdrawn
     /// from the corresponding account (a sender), and each positive one is added to the corresponding
@@ -826,8 +826,8 @@ interface IHederaTokenService {
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
     function updateFungibleTokenCustomFees(
         address token,
-        IHederaTokenService.FixedFee[] memory fixedFees,
-        IHederaTokenService.FractionalFee[] memory fractionalFees
+        IHederaTokenServiceV2.FixedFee[] memory fixedFees,
+        IHederaTokenServiceV2.FractionalFee[] memory fractionalFees
     ) external returns (int64 responseCode);
 
     /// Update the custom fees for a non-fungible token
@@ -837,8 +837,8 @@ interface IHederaTokenService {
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
     function updateNonFungibleTokenCustomFees(
         address token,
-        IHederaTokenService.FixedFee[] memory fixedFees,
-        IHederaTokenService.RoyaltyFee[] memory royaltyFees
+        IHederaTokenServiceV2.FixedFee[] memory fixedFees,
+        IHederaTokenServiceV2.RoyaltyFee[] memory royaltyFees
     ) external returns (int64 responseCode);
 
     /// @notice Airdrop one or more tokens to one or more accounts

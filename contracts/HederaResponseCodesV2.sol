@@ -2,7 +2,7 @@
 pragma solidity >=0.8.12 <0.9.0;
 pragma experimental ABIEncoderV2;
 
-library HederaResponseCodes {
+library HederaResponseCodesV2 {
     // response codes
     int32 internal constant OK = 0; // The transaction passed the precheck validations.
     int32 internal constant INVALID_TRANSACTION = 1; // For any error not handled by specific error codes listed below.

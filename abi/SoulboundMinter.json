@@ -18,6 +18,11 @@
                     "internalType": "uint256",
                     "name": "lazyBurnPerc",
                     "type": "uint256"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_revocable",
+                    "type": "bool"
                 }
             ],
             "stateMutability": "nonpayable",
@@ -34,13 +39,7 @@
             "type": "error"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "quantity",
-                    "type": "uint256"
-                }
-            ],
+            "inputs": [],
             "name": "BadQuantity",
             "type": "error"
         },
@@ -111,12 +110,12 @@
         },
         {
             "inputs": [],
-            "name": "NFTTransferFailed",
+            "name": "NFTNotOwned",
             "type": "error"
         },
         {
             "inputs": [],
-            "name": "NoWLToken",
+            "name": "NFTTransferFailed",
             "type": "error"
         },
         {
@@ -140,14 +139,13 @@
             "type": "error"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                }
-            ],
+            "inputs": [],
             "name": "NotReset",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotRevokable",
             "type": "error"
         },
         {
@@ -183,11 +181,6 @@
         {
             "inputs": [],
             "name": "WLPurchaseFailed",
-            "type": "error"
-        },
-        {
-            "inputs": [],
-            "name": "WLTokenUsed",
             "type": "error"
         },
         {
@@ -251,7 +244,7 @@
             "inputs": [
                 {
                     "indexed": false,
-                    "internalType": "enum SoulboundMinter.ContractEventType",
+                    "internalType": "enum MinterLibrary.ContractEventType",
                     "name": "_eventType",
                     "type": "uint8"
                 },
@@ -293,6 +286,19 @@
         {
             "stateMutability": "payable",
             "type": "fallback"
+        },
+        {
+            "inputs": [],
+            "name": "REVOCABLE",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
         },
         {
             "inputs": [
@@ -721,6 +727,19 @@
         },
         {
             "inputs": [],
+            "name": "getPRNGContractAddress",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "_prng",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
             "name": "getRemainingMint",
             "outputs": [
                 {
@@ -874,6 +893,11 @@
                 {
                     "internalType": "bool",
                     "name": "_fixedEdition",
+                    "type": "bool"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_unlimitedSupply",
                     "type": "bool"
                 }
             ],
@@ -1045,19 +1069,6 @@
             "type": "function"
         },
         {
-            "inputs": [],
-            "name": "prngGenerator",
-            "outputs": [
-                {
-                    "internalType": "address",
-                    "name": "",
-                    "type": "address"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
             "inputs": [
                 {
                     "internalType": "address[]",
@@ -1116,6 +1127,30 @@
             ],
             "name": "retrieveLazy",
             "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "serialToBurn",
+                    "type": "uint256"
+                }
+            ],
+            "name": "revokeSBT",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
             "stateMutability": "nonpayable",
             "type": "function"
         },

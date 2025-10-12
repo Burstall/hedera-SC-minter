@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity >=0.8.12 <0.9.0;
 pragma experimental ABIEncoderV2;
-import {IHederaTokenService} from "./IHederaTokenServiceV2.sol";
-import {HederaTokenService} from "./HederaTokenServiceV2.sol";
-abstract contract KeyHelper {
+import {IHederaTokenServiceV2} from "./IHederaTokenServiceV2.sol";
+
+abstract contract KeyHelperV2 {
     using Bits for uint256;
 
     address supplyContract;
@@ -43,11 +43,11 @@ abstract contract KeyHelper {
     function getDefaultKeys()
         internal
         view
-        returns (IHederaTokenService.TokenKey[] memory keys)
+        returns (IHederaTokenServiceV2.TokenKey[] memory keys)
     {
-        keys = new IHederaTokenService.TokenKey[](2);
+        keys = new IHederaTokenServiceV2.TokenKey[](2);
         keys[0] = getSingleKey(KeyType.KYC, KeyValueType.CONTRACT_ID, "");
-        keys[1] = IHederaTokenService.TokenKey(
+        keys[1] = IHederaTokenServiceV2.TokenKey(
             getDuplexKeyType(KeyType.SUPPLY, KeyType.PAUSE),
             getKeyValueType(KeyValueType.CONTRACT_ID, "")
         );
@@ -56,9 +56,9 @@ abstract contract KeyHelper {
     function getAllTypeKeys(
         KeyValueType keyValueType,
         bytes memory key
-    ) internal view returns (IHederaTokenService.TokenKey[] memory keys) {
-        keys = new IHederaTokenService.TokenKey[](1);
-        keys[0] = IHederaTokenService.TokenKey(
+    ) internal view returns (IHederaTokenServiceV2.TokenKey[] memory keys) {
+        keys = new IHederaTokenServiceV2.TokenKey[](1);
+        keys[0] = IHederaTokenServiceV2.TokenKey(
             getAllKeyTypes(),
             getKeyValueType(keyValueType, key)
         );
@@ -68,9 +68,9 @@ abstract contract KeyHelper {
         KeyType keyType,
         KeyValueType keyValueType,
         bytes memory key
-    ) internal view returns (IHederaTokenService.TokenKey[] memory keys) {
-        keys = new IHederaTokenService.TokenKey[](1);
-        keys[0] = IHederaTokenService.TokenKey(
+    ) internal view returns (IHederaTokenServiceV2.TokenKey[] memory keys) {
+        keys = new IHederaTokenServiceV2.TokenKey[](1);
+        keys[0] = IHederaTokenServiceV2.TokenKey(
             getKeyType(keyType),
             getKeyValueType(keyValueType, key)
         );
@@ -81,9 +81,9 @@ abstract contract KeyHelper {
         KeyType secondType,
         KeyValueType keyValueType,
         bytes memory key
-    ) internal view returns (IHederaTokenService.TokenKey[] memory keys) {
-        keys = new IHederaTokenService.TokenKey[](1);
-        keys[0] = IHederaTokenService.TokenKey(
+    ) internal view returns (IHederaTokenServiceV2.TokenKey[] memory keys) {
+        keys = new IHederaTokenServiceV2.TokenKey[](1);
+        keys[0] = IHederaTokenServiceV2.TokenKey(
             getDuplexKeyType(firstType, secondType),
             getKeyValueType(keyValueType, key)
         );
@@ -93,8 +93,8 @@ abstract contract KeyHelper {
         KeyType keyType,
         KeyValueType keyValueType,
         bytes memory key
-    ) internal view returns (IHederaTokenService.TokenKey memory tokenKey) {
-        tokenKey = IHederaTokenService.TokenKey(
+    ) internal view returns (IHederaTokenServiceV2.TokenKey memory tokenKey) {
+        tokenKey = IHederaTokenServiceV2.TokenKey(
             getKeyType(keyType),
             getKeyValueType(keyValueType, key)
         );
@@ -104,8 +104,8 @@ abstract contract KeyHelper {
         KeyType keyType,
         KeyValueType keyValueType,
         address key
-    ) internal view returns (IHederaTokenService.TokenKey memory tokenKey) {
-        tokenKey = IHederaTokenService.TokenKey(
+    ) internal view returns (IHederaTokenServiceV2.TokenKey memory tokenKey) {
+        tokenKey = IHederaTokenServiceV2.TokenKey(
             getKeyType(keyType),
             getKeyValueType(keyValueType, key)
         );
@@ -116,8 +116,8 @@ abstract contract KeyHelper {
         KeyType secondType,
         KeyValueType keyValueType,
         bytes memory key
-    ) internal view returns (IHederaTokenService.TokenKey memory tokenKey) {
-        tokenKey = IHederaTokenService.TokenKey(
+    ) internal view returns (IHederaTokenServiceV2.TokenKey memory tokenKey) {
+        tokenKey = IHederaTokenServiceV2.TokenKey(
             getDuplexKeyType(firstType, secondType),
             getKeyValueType(keyValueType, key)
         );
@@ -149,7 +149,7 @@ abstract contract KeyHelper {
     function getKeyValueType(
         KeyValueType keyValueType,
         bytes memory key
-    ) internal view returns (IHederaTokenService.KeyValue memory keyValue) {
+    ) internal view returns (IHederaTokenServiceV2.KeyValue memory keyValue) {
         if (keyValueType == KeyValueType.INHERIT_ACCOUNT_KEY) {
             keyValue.inheritAccountKey = true;
         } else if (keyValueType == KeyValueType.CONTRACT_ID) {
@@ -166,7 +166,7 @@ abstract contract KeyHelper {
     function getKeyValueType(
         KeyValueType keyValueType,
         address keyAddress
-    ) internal pure returns (IHederaTokenService.KeyValue memory keyValue) {
+    ) internal pure returns (IHederaTokenServiceV2.KeyValue memory keyValue) {
         if (keyValueType == KeyValueType.CONTRACT_ID) {
             keyValue.contractId = keyAddress;
         } else if (keyValueType == KeyValueType.DELEGETABLE_CONTRACT_ID) {

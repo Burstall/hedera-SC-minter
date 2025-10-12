@@ -59,8 +59,8 @@ let minterIface, lazyIface;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-describe('Deployment: ', function() {
-	it('Should deploy the contract and setup conditions', async function() {
+describe('Deployment: ', function () {
+	it('Should deploy the contract and setup conditions', async function () {
 		if (contractName === undefined || contractName == null) {
 			console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
 			process.exit(1);
@@ -141,7 +141,7 @@ describe('Deployment: ', function() {
 			console.log('\n-Using existing LAZY Token ID:', lazyTokenId.toString());
 		}
 		else {
-			const gasLimit = 800_000;
+			const gasLimit = 2_800_000;
 
 			console.log(
 				'\n- Deploying contract...',
@@ -207,7 +207,7 @@ describe('Deployment: ', function() {
 		// import ABI
 		minterIface = new ethers.Interface(json.abi);
 
-		const gasLimit = 1600000;
+		const gasLimit = 5_600_000;
 
 		console.log('\n- Deploying contract...', contractName, '\n\tgas@', gasLimit);
 
@@ -245,7 +245,7 @@ describe('Deployment: ', function() {
 		}
 	});
 
-	it('should mint an NFT to use as the WL token', async function() {
+	it('should mint an NFT to use as the WL token', async function () {
 		client.setOperator(operatorId, operatorKey);
 		const result = await mintNFT(client, operatorId, 'MinterContractWL ' + new Date().toISOString(), 'MCWL', 10, 75);
 		wlTokenId = result[1];
@@ -257,7 +257,7 @@ describe('Deployment: ', function() {
 		expect(result2).to.be.equal('SUCCESS');
 	});
 
-	it('Ensure Alice & Contract are a little LAZY (send some to prime the pumps)', async function() {
+	it('Ensure Alice & Contract are a little LAZY (send some to prime the pumps)', async function () {
 		client.setOperator(operatorId, operatorKey);
 		let result = await sendLazy(AccountId.fromString(contractId.toString()), 10);
 		expect(result).to.be.equal('SUCCESS');
@@ -266,8 +266,8 @@ describe('Deployment: ', function() {
 	});
 });
 
-describe('Check SC deployment...', function() {
-	it('Check Lazy token was associated by constructor', async function() {
+describe('Check SC deployment...', function () {
+	it('Check Lazy token was associated by constructor', async function () {
 		// let mirror node catch up
 		await sleep(5000);
 
@@ -276,7 +276,7 @@ describe('Check SC deployment...', function() {
 		expect(contractLazyBal == 10).to.be.true;
 	});
 
-	it('Check linkage to Lazy token / LSCT is correct', async function() {
+	it('Check linkage to Lazy token / LSCT is correct', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		let encodedCommand = minterIface.encodeFunctionData('getLSCT');
@@ -307,7 +307,7 @@ describe('Check SC deployment...', function() {
 		expect(addressLazyToken[0].slice(2).toLowerCase()).to.be.equal(lazyTokenId.toSolidityAddress());
 	});
 
-	it('Check default values are set in Constructor', async function() {
+	it('Check default values are set in Constructor', async function () {
 		client.setOperator(operatorId, operatorKey);
 		// check the default values
 		let encodedCommand = minterIface.encodeFunctionData('getBatchSize');
@@ -437,7 +437,7 @@ describe('Check SC deployment...', function() {
 		expect(Number(wlNumMinted[0])).to.be.equal(0);
 	});
 
-	it('Initialise the minter for a token with no Fees to check it works', async function() {
+	it('Initialise the minter for a token with no Fees to check it works', async function () {
 		const metadataList = ['metadata.json'];
 
 		// set metadata seperately
@@ -473,7 +473,7 @@ describe('Check SC deployment...', function() {
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
 	});
 
-	it('Cannot add more metadata - given no capacity', async function() {
+	it('Cannot add more metadata - given no capacity', async function () {
 		client.setOperator(operatorId, operatorKey);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -503,7 +503,7 @@ describe('Check SC deployment...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Initialise the for a token wth additional headroom', async function() {
+	it('Initialise the for a token wth additional headroom', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		// reset metadata using resetContract
@@ -557,7 +557,7 @@ describe('Check SC deployment...', function() {
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
 	});
 
-	it('Can add more metadata - given spare capacity', async function() {
+	it('Can add more metadata - given spare capacity', async function () {
 		client.setOperator(operatorId, operatorKey);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -607,7 +607,7 @@ describe('Check SC deployment...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Re-initialise the minter **AS SBT EDITION (unlimited)**', async function() {
+	it('Re-initialise the minter **AS SBT EDITION (unlimited)**', async function () {
 		// testing with one fallback and one without fallback for generalised case
 		client.setOperator(operatorId, operatorKey);
 
@@ -657,7 +657,7 @@ describe('Check SC deployment...', function() {
 		console.log('Token ID for Extended Testing (Unlimited mints):', tokenId.toString(), 'Supply:', Number(newMint[1][1]));
 	});
 
-	it('Re-initialise the minter **AS SBT EDITION**', async function() {
+	it('Re-initialise the minter **AS SBT EDITION**', async function () {
 		// testing with one fallback and one without fallback for generalised case
 		client.setOperator(operatorId, operatorKey);
 
@@ -708,7 +708,7 @@ describe('Check SC deployment...', function() {
 		console.log('Token ID for Extended Testing:', tokenId.toString());
 	});
 
-	it('Owner cannot set batch size to bad values', async function() {
+	it('Owner cannot set batch size to bad values', async function () {
 		client.setOperator(operatorId, operatorKey);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -763,7 +763,7 @@ describe('Check SC deployment...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Owner can update batch value if needed', async function() {
+	it('Owner can update batch value if needed', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const result = await contractExecuteFunction(
@@ -784,7 +784,7 @@ describe('Check SC deployment...', function() {
 
 	});
 
-	it('Successfully update CID', async function() {
+	it('Successfully update CID', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const result = await contractExecuteFunction(
@@ -803,8 +803,8 @@ describe('Check SC deployment...', function() {
 	});
 });
 
-describe('Check access control permission...', function() {
-	it('Check Alice cannot modify LAZY token ID', async function() {
+describe('Check access control permission...', function () {
+	it('Check Alice cannot modify LAZY token ID', async function () {
 		client.setOperator(aliceId, alicePK);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -836,7 +836,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify LSCT', async function() {
+	it('Check Alice cannot modify LSCT', async function () {
 		client.setOperator(aliceId, alicePK);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -868,7 +868,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the WL', async function() {
+	it('Check Alice cannot modify the WL', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -924,7 +924,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the CID/metadata', async function() {
+	it('Check Alice cannot modify the CID/metadata', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -957,7 +957,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the cost', async function() {
+	it('Check Alice cannot modify the cost', async function () {
 		client.setOperator(aliceId, alicePK);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -989,7 +989,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot update the wlToken', async function() {
+	it('Check Alice cannot update the wlToken', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -1022,7 +1022,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the batch sizing', async function() {
+	it('Check Alice cannot modify the batch sizing', async function () {
 		client.setOperator(aliceId, alicePK);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -1054,7 +1054,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the Lazy Burn Precentage', async function() {
+	it('Check Alice cannot modify the Lazy Burn Precentage', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -1087,7 +1087,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the max mint', async function() {
+	it('Check Alice cannot modify the max mint', async function () {
 		client.setOperator(aliceId, alicePK);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -1119,7 +1119,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the cooldown timer', async function() {
+	it('Check Alice cannot modify the cooldown timer', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -1152,7 +1152,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the start date', async function() {
+	it('Check Alice cannot modify the start date', async function () {
 		client.setOperator(aliceId, alicePK);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -1184,7 +1184,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify the pause status', async function() {
+	it('Check Alice cannot modify the pause status', async function () {
 		client.setOperator(aliceId, alicePK);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -1216,7 +1216,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot modify flag to spend lazy from contract', async function() {
+	it('Check Alice cannot modify flag to spend lazy from contract', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -1249,7 +1249,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot turn on WL', async function() {
+	it('Check Alice cannot turn on WL', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -1282,7 +1282,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot adjust max mint for WL addresses', async function() {
+	it('Check Alice cannot adjust max mint for WL addresses', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -1315,7 +1315,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot adjust max mints per wallet', async function() {
+	it('Check Alice cannot adjust max mints per wallet', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -1348,7 +1348,7 @@ describe('Check access control permission...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannot enable buying WL with $LAZY', async function() {
+	it('Check Alice cannot enable buying WL with $LAZY', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -1382,8 +1382,8 @@ describe('Check access control permission...', function() {
 	});
 });
 
-describe('Basic interaction with the Minter...', function() {
-	it('Associate the token to Operator/Alice', async function() {
+describe('Basic interaction with the Minter...', function () {
+	it('Associate the token to Operator/Alice', async function () {
 		client.setOperator(operatorId, operatorKey);
 		let result = await associateTokenToAccount(client, operatorId, operatorKey, extendedTestingTokenId);
 		expect(result).to.be.equal('SUCCESS');
@@ -1392,7 +1392,7 @@ describe('Basic interaction with the Minter...', function() {
 		expect(result).to.be.equal('SUCCESS');
 	});
 
-	it('Check unable to mint if contract paused (then unpause)', async function() {
+	it('Check unable to mint if contract paused (then unpause)', async function () {
 		client.setOperator(operatorId, operatorKey);
 		const hbarCost = new Hbar(1);
 
@@ -1477,7 +1477,7 @@ describe('Basic interaction with the Minter...', function() {
 		}
 	});
 
-	it('Check unable to mint if not yet at start time', async function() {
+	it('Check unable to mint if not yet at start time', async function () {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
 		let result = await contractExecuteFunction(
@@ -1553,7 +1553,7 @@ describe('Basic interaction with the Minter...', function() {
 		await sleep(sleepTime + 1125);
 	});
 
-	it('Check **ABLE** to mint once start time has passed', async function() {
+	it('Check **ABLE** to mint once start time has passed', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const encodedCommand = minterIface.encodeFunctionData('getMintTiming');
@@ -1615,8 +1615,8 @@ describe('Basic interaction with the Minter...', function() {
 	});
 });
 
-describe('Test out WL functions...', function() {
-	it('Enable Adress Based WL, check WL empty', async function() {
+describe('Test out WL functions...', function () {
+	it('Enable Adress Based WL, check WL empty', async function () {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(0).toTinybars();
 
@@ -1663,7 +1663,7 @@ describe('Test out WL functions...', function() {
 		expect(wl[0].length == 0).to.be.true;
 	});
 
-	it('Check Alice is unable to mint ', async function() {
+	it('Check Alice is unable to mint ', async function () {
 		client.setOperator(aliceId, alicePK);
 		let expectedErrors = 0;
 		let unexpectedErrors = 0;
@@ -1697,7 +1697,7 @@ describe('Test out WL functions...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Add Alice to WL & can mint', async function() {
+	it('Add Alice to WL & can mint', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		let result = await contractExecuteFunction(
@@ -1733,7 +1733,7 @@ describe('Test out WL functions...', function() {
 		console.log('Token Minted (Alice x 1):', result[2].transactionId.toString());
 	});
 
-	it('Check Owner can get WL / mint history', async function() {
+	it('Check Owner can get WL / mint history', async function () {
 		client.setOperator(operatorId, operatorKey);
 		// call getNumberMintedByAllAddresses from the mirror node
 		const encodedCommand = minterIface.encodeFunctionData('getNumberMintedByAllAddresses');
@@ -1783,7 +1783,7 @@ describe('Test out WL functions...', function() {
 		expect(totalMinted > totalWlMints).to.be.true;
 	});
 
-	it('Enables buying WL based on serial', async function() {
+	it('Enables buying WL based on serial', async function () {
 		client.setOperator(operatorId, operatorKey);
 		let result = await contractExecuteFunction(
 			contractId,
@@ -1896,7 +1896,7 @@ describe('Test out WL functions...', function() {
 		expect(wlData[0].length).to.be.equal(2);
 	});
 
-	it('ensure no double spend on the serial', async function() {
+	it('ensure no double spend on the serial', async function () {
 		// attempt to buy WL for operator again using serial 1 - expect failure
 		client.setOperator(operatorId, operatorKey);
 
@@ -1932,7 +1932,7 @@ describe('Test out WL functions...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('ensure user must own the serial', async function() {
+	it('ensure user must own the serial', async function () {
 		// attempt to buy WL for operator again using serial 1 - expect failure
 		client.setOperator(aliceId, alicePK);
 		// have Alice try and buy WL using serial 4 that she does not own.
@@ -1968,8 +1968,8 @@ describe('Test out WL functions...', function() {
 	});
 });
 
-describe('Test out Discount mint functions...', function() {
-	it('getCost method to check discount / non-discount cost', async function() {
+describe('Test out Discount mint functions...', function () {
+	it('getCost method to check discount / non-discount cost', async function () {
 		client.setOperator(operatorId, operatorKey);
 		const tinybarCost = new Hbar(1).toTinybars();
 
@@ -2089,8 +2089,8 @@ describe('Test out Discount mint functions...', function() {
 	});
 });
 
-describe('Test out burn functions...', function() {
-	it('Check anyone can burn NFTs', async function() {
+describe('Test out burn functions...', function () {
+	it('Check anyone can burn NFTs', async function () {
 		client.setOperator(operatorId, operatorKey);
 		const cost = 1;
 
@@ -2133,8 +2133,8 @@ describe('Test out burn functions...', function() {
 	});
 });
 
-describe('Test revocable SBT functions...', function() {
-	it('Check Owner can revoke SBT', async function() {
+describe('Test revocable SBT functions...', function () {
+	it('Check Owner can revoke SBT', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		// execute the initialiseNFTMint function
@@ -2265,8 +2265,8 @@ describe('Test revocable SBT functions...', function() {
 	});
 });
 
-describe('Withdrawal tests...', function() {
-	it('Check Alice cannnot withdraw hbar', async function() {
+describe('Withdrawal tests...', function () {
+	it('Check Alice cannnot withdraw hbar', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -2300,7 +2300,7 @@ describe('Withdrawal tests...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Alice cannnot withdraw Lazy', async function() {
+	it('Check Alice cannnot withdraw Lazy', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		let expectedErrors = 0;
@@ -2334,7 +2334,7 @@ describe('Withdrawal tests...', function() {
 		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Check Owner cannot pull funds before X time has elapsed from last mint', async function() {
+	it('Check Owner cannot pull funds before X time has elapsed from last mint', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		// get getMintTiming from the mirror node
@@ -2430,7 +2430,7 @@ describe('Withdrawal tests...', function() {
 		}
 	});
 
-	it('Check Owner can pull hbar & Lazy', async function() {
+	it('Check Owner can pull hbar & Lazy', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		await sleep(7000);

@@ -21,8 +21,12 @@ async function main() {
 
 	const iface = new ethers.Interface(contractJSON.abi);
 
-	// const decoded = iface.parseTransaction({ data: encoded });
-	const decoded = iface.decodeFunctionData('cryptoTransfer', encoded);
+	let decoded = iface.parseTransaction({ data: encoded });
+	// const decoded = iface.decodeFunctionData('cryptoTransfer', encoded);
+	// console.log(iface);
+	if (!decoded) {
+		decoded = iface.parseError(encoded);
+	}
 
 	console.dir(decoded, { depth: 5 });
 }

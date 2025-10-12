@@ -1,0 +1,1377 @@
+{
+    "contractName": "SoulboundBadgeMinter",
+    "sourceName": "contracts/SoulboundBadgeMinter.sol",
+    "abi": [
+        {
+            "inputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_revocable",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "constructor"
+        },
+        {
+            "inputs": [],
+            "name": "AdminAlreadyExists",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "AdminNotFound",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BadArguments",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BadQuantity",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BurnFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "CannotRemoveLastAdmin",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "FailedNFTMint",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "FailedToMint",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "FreezingFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MaxSerialsExceeded",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NFTNotOwned",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NFTTransferFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotAdmin",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotEnoughWLSlots",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotRevokable",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotWhitelistedForType",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TokenAlreadyInitialized",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TokenNotInitialized",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TypeInactive",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TypeMintedOut",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TypeNotFound",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "UnFreezingFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "UnlimitedBadgeNotAllowed",
+            "type": "error"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "admin",
+                    "type": "address"
+                }
+            ],
+            "name": "AdminAdded",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "admin",
+                    "type": "address"
+                }
+            ],
+            "name": "AdminRemoved",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "uint256",
+                    "name": "typeId",
+                    "type": "uint256"
+                }
+            ],
+            "name": "BadgeActivated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "uint256",
+                    "name": "typeId",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "string",
+                    "name": "name",
+                    "type": "string"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "string",
+                    "name": "metadata",
+                    "type": "string"
+                }
+            ],
+            "name": "BadgeCreated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "uint256",
+                    "name": "typeId",
+                    "type": "uint256"
+                }
+            ],
+            "name": "BadgeDeactivated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "minter",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "recipient",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "uint256",
+                    "name": "typeId",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "serial",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "string",
+                    "name": "metadata",
+                    "type": "string"
+                }
+            ],
+            "name": "BadgeMintEvent",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "uint256",
+                    "name": "typeId",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "string",
+                    "name": "name",
+                    "type": "string"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "string",
+                    "name": "metadata",
+                    "type": "string"
+                }
+            ],
+            "name": "BadgeUpdated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "burnerAddress",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "int64[]",
+                    "name": "serials",
+                    "type": "int64[]"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint64",
+                    "name": "newSupply",
+                    "type": "uint64"
+                }
+            ],
+            "name": "BurnEvent",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "previousOwner",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "newOwner",
+                    "type": "address"
+                }
+            ],
+            "name": "OwnershipTransferred",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "uint256",
+                    "name": "typeId",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "user",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "quantity",
+                    "type": "uint256"
+                }
+            ],
+            "name": "WhitelistUpdated",
+            "type": "event"
+        },
+        {
+            "stateMutability": "payable",
+            "type": "fallback"
+        },
+        {
+            "inputs": [],
+            "name": "REVOCABLE",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_admin",
+                    "type": "address"
+                }
+            ],
+            "name": "addAdmin",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "address[]",
+                    "name": "_addresses",
+                    "type": "address[]"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "_quantities",
+                    "type": "uint256[]"
+                }
+            ],
+            "name": "addToBadgeWhitelist",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "int64[]",
+                    "name": "_serialNumbers",
+                    "type": "int64[]"
+                }
+            ],
+            "name": "burnNFTs",
+            "outputs": [
+                {
+                    "internalType": "uint64",
+                    "name": "_newTotalSupply",
+                    "type": "uint64"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "string",
+                    "name": "_name",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_metadata",
+                    "type": "string"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_maxSupply",
+                    "type": "uint256"
+                }
+            ],
+            "name": "createBadge",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getActiveBadgeIds",
+            "outputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "",
+                    "type": "uint256[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getAdmins",
+            "outputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "",
+                    "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getBadge",
+            "outputs": [
+                {
+                    "internalType": "string",
+                    "name": "_name",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_metadata",
+                    "type": "string"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_totalMinted",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_maxSupply",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_active",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getBadgeRemainingSupply",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_remaining",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getBadgeWhitelist",
+            "outputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_addresses",
+                    "type": "address[]"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "_quantities",
+                    "type": "uint256[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getCapacityAnalysis",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_tokenMaxSupply",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_tokenMinted",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_tokenRemaining",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_totalBadgeCapacity",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_reservedCapacity",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_hasUnlimitedBadges",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getMaxSupply",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getRemainingSupply",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getReservedCapacity",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getSerialBadgeId",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getToken",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                }
+            ],
+            "name": "getTokenExpiryInfo",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                },
+                {
+                    "components": [
+                        {
+                            "internalType": "uint32",
+                            "name": "second",
+                            "type": "uint32"
+                        },
+                        {
+                            "internalType": "address",
+                            "name": "autoRenewAccount",
+                            "type": "address"
+                        },
+                        {
+                            "internalType": "uint32",
+                            "name": "autoRenewPeriod",
+                            "type": "uint32"
+                        }
+                    ],
+                    "internalType": "struct IHederaTokenService.Expiry",
+                    "name": "expiryInfo",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getTotalBadgeCapacity",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_totalCapacity",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getUnreservedCapacity",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                }
+            ],
+            "name": "getUserBadgeEligibility",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_eligible",
+                    "type": "bool"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_remainingMints",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_alreadyMinted",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "_typeIds",
+                    "type": "uint256[]"
+                }
+            ],
+            "name": "getUserBadgeMintCounts",
+            "outputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "_mintCounts",
+                    "type": "uint256[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "account",
+                    "type": "address"
+                }
+            ],
+            "name": "grantTokenKyc",
+            "outputs": [
+                {
+                    "internalType": "int64",
+                    "name": "responseCode",
+                    "type": "int64"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "string",
+                    "name": "_name",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_symbol",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_memo",
+                    "type": "string"
+                },
+                {
+                    "internalType": "int64",
+                    "name": "_maxSupply",
+                    "type": "int64"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_unlimitedSupply",
+                    "type": "bool"
+                }
+            ],
+            "name": "initialiseNFTMint",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "_createdTokenAddress",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_tokenSupply",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "payable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                }
+            ],
+            "name": "isAdmin",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "account",
+                    "type": "address"
+                }
+            ],
+            "name": "isKyc",
+            "outputs": [
+                {
+                    "internalType": "int64",
+                    "name": "responseCode",
+                    "type": "int64"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "kycGranted",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "maxSupply",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_numberToMint",
+                    "type": "uint256"
+                }
+            ],
+            "name": "mintBadge",
+            "outputs": [
+                {
+                    "internalType": "int64[]",
+                    "name": "_serials",
+                    "type": "int64[]"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_numberToMint",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_onBehalfOf",
+                    "type": "address"
+                }
+            ],
+            "name": "mintBadgeOnBehalf",
+            "outputs": [
+                {
+                    "internalType": "int64[]",
+                    "name": "_serials",
+                    "type": "int64[]"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "owner",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                }
+            ],
+            "name": "pauseToken",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_admin",
+                    "type": "address"
+                }
+            ],
+            "name": "removeAdmin",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "address[]",
+                    "name": "_addresses",
+                    "type": "address[]"
+                }
+            ],
+            "name": "removeFromBadgeWhitelist",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "renounceOwnership",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_serialToWipe",
+                    "type": "uint256"
+                }
+            ],
+            "name": "revokeSBT",
+            "outputs": [
+                {
+                    "internalType": "int32",
+                    "name": "responseCode",
+                    "type": "int32"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "account",
+                    "type": "address"
+                }
+            ],
+            "name": "revokeTokenKyc",
+            "outputs": [
+                {
+                    "internalType": "int64",
+                    "name": "responseCode",
+                    "type": "int64"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_active",
+                    "type": "bool"
+                }
+            ],
+            "name": "setBadgeActive",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "totalMinted",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "totalReservedCapacity",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address payable",
+                    "name": "_receiverAddress",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "transferHbar",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "newOwner",
+                    "type": "address"
+                }
+            ],
+            "name": "transferOwnership",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                }
+            ],
+            "name": "unpauseToken",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_typeId",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_name",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_metadata",
+                    "type": "string"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_maxSupply",
+                    "type": "uint256"
+                }
+            ],
+            "name": "updateBadge",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "components": [
+                        {
+                            "internalType": "uint32",
+                            "name": "second",
+                            "type": "uint32"
+                        },
+                        {
+                            "internalType": "address",
+                            "name": "autoRenewAccount",
+                            "type": "address"
+                        },
+                        {
+                            "internalType": "uint32",
+                            "name": "autoRenewPeriod",
+                            "type": "uint32"
+                        }
+                    ],
+                    "internalType": "struct IHederaTokenService.Expiry",
+                    "name": "expiryInfo",
+                    "type": "tuple"
+                }
+            ],
+            "name": "updateTokenExpiryInfo",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "components": [
+                        {
+                            "internalType": "string",
+                            "name": "name",
+                            "type": "string"
+                        },
+                        {
+                            "internalType": "string",
+                            "name": "symbol",
+                            "type": "string"
+                        },
+                        {
+                            "internalType": "address",
+                            "name": "treasury",
+                            "type": "address"
+                        },
+                        {
+                            "internalType": "string",
+                            "name": "memo",
+                            "type": "string"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "tokenSupplyType",
+                            "type": "bool"
+                        },
+                        {
+                            "internalType": "int64",
+                            "name": "maxSupply",
+                            "type": "int64"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "freezeDefault",
+                            "type": "bool"
+                        },
+                        {
+                            "components": [
+                                {
+                                    "internalType": "uint256",
+                                    "name": "keyType",
+                                    "type": "uint256"
+                                },
+                                {
+                                    "components": [
+                                        {
+                                            "internalType": "bool",
+                                            "name": "inheritAccountKey",
+                                            "type": "bool"
+                                        },
+                                        {
+                                            "internalType": "address",
+                                            "name": "contractId",
+                                            "type": "address"
+                                        },
+                                        {
+                                            "internalType": "bytes",
+                                            "name": "ed25519",
+                                            "type": "bytes"
+                                        },
+                                        {
+                                            "internalType": "bytes",
+                                            "name": "ECDSA_secp256k1",
+                                            "type": "bytes"
+                                        },
+                                        {
+                                            "internalType": "address",
+                                            "name": "delegatableContractId",
+                                            "type": "address"
+                                        }
+                                    ],
+                                    "internalType": "struct IHederaTokenService.KeyValue",
+                                    "name": "key",
+                                    "type": "tuple"
+                                }
+                            ],
+                            "internalType": "struct IHederaTokenService.TokenKey[]",
+                            "name": "tokenKeys",
+                            "type": "tuple[]"
+                        },
+                        {
+                            "components": [
+                                {
+                                    "internalType": "uint32",
+                                    "name": "second",
+                                    "type": "uint32"
+                                },
+                                {
+                                    "internalType": "address",
+                                    "name": "autoRenewAccount",
+                                    "type": "address"
+                                },
+                                {
+                                    "internalType": "uint32",
+                                    "name": "autoRenewPeriod",
+                                    "type": "uint32"
+                                }
+                            ],
+                            "internalType": "struct IHederaTokenService.Expiry",
+                            "name": "expiry",
+                            "type": "tuple"
+                        }
+                    ],
+                    "internalType": "struct IHederaTokenService.HederaToken",
+                    "name": "tokenInfo",
+                    "type": "tuple"
+                }
+            ],
+            "name": "updateTokenInfo",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "stateMutability": "payable",
+            "type": "receive"
+        }
+    ]
+}
