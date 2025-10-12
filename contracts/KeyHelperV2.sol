@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity >=0.8.12 <0.9.0;
 pragma experimental ABIEncoderV2;
-import {IHederaTokenServiceV2} from "./IHederaTokenServiceV2.sol";
+import {IHederaTokenServiceV2} from "./interfaces/IHederaTokenServiceV2.sol";
 
 abstract contract KeyHelperV2 {
     using Bits for uint256;
