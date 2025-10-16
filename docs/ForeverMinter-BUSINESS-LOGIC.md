@@ -1,8 +1,8 @@
-# ForeverMinterContract - Business Logic & User Guide
+# ForeverMinter - Business Logic & User Guide
 
 ## Overview
 
-ForeverMinterContract is a next-generation NFT distribution system that allows projects to manage a pool of existing NFTs and distribute them to users with sophisticated pricing mechanics. Unlike traditional minting, ForeverMinter respects marketplace royalties and offers flexible discount structures.
+ForeverMinter is a next-generation NFT distribution system that allows projects to manage a pool of existing NFTs and distribute them to users with sophisticated pricing mechanics. Unlike traditional minting, ForeverMinter respects marketplace royalties and offers flexible discount structures.
 
 ---
 
@@ -22,7 +22,7 @@ ForeverMinterContract is a next-generation NFT distribution system that allows p
 
 ### The Pool
 
-Think of ForeverMinterContract as a vending machine for NFTs. Instead of creating new NFTs, it holds a pool of existing ones and distributes them randomly.
+Think of ForeverMinter as a vending machine for NFTs. Instead of creating new NFTs, it holds a pool of existing ones and distributes them randomly.
 
 **Pool Sources:**
 1. **Treasury Deposits:** Project sends NFTs to contract
@@ -802,6 +802,33 @@ A: Potentially. Check `getMintEconomics().maxMintPerWallet`. 0 means unlimited.
 
 A: Call `getNumberMintedByAddress()` (requires your wallet connected).
 
+**Q: Can I preview exactly how many discount slots will be consumed before minting? (v1.0.5)**
+
+A: Yes! Call `calculateMintCost()` which returns 5 values:
+1. Total HBAR cost
+2. Total LAZY cost
+3. Total discount percentage
+4. **Holder discount slots that will be consumed**
+5. **WL slots that will be consumed**
+
+This lets frontends show users: "This mint will consume 3 uses from your Gen1 NFT and 2 WL slots."
+
+Example:
+```javascript
+const [hbar, lazy, discount, holderSlots, wlSlots] = 
+    await contract.calculateMintCost(user, quantity, discountSerials, []);
+
+console.log(`You'll consume ${holderSlots} holder slots and ${wlSlots} WL slots`);
+```
+
+**Q: What changed in v1.0.5?**
+
+A: Enhanced cost calculation to prevent slot over-consumption bugs:
+- `calculateMintCost()` now returns 5 values instead of 3
+- Added slot usage tracking to preview consumption
+- Fixed edge cases where slots could be over-consumed
+- Frontend devs: Update your contract calls to handle 5 return values!
+
 ### Troubleshooting
 
 **Q: Transaction failed with "NotEnoughHbar"**
@@ -828,7 +855,7 @@ A: The discount NFT you're trying to use has no uses left. Check with `getSerial
 
 ## Summary
 
-ForeverMinterContract offers a flexible, fair, and feature-rich NFT distribution system:
+ForeverMinter offers a flexible, fair, and feature-rich NFT distribution system:
 
 ✅ **Fair:** Random selection prevents sniping
 ✅ **Flexible:** Multiple discount types
@@ -841,8 +868,8 @@ Whether you're a casual minter or a discount optimizer, ForeverMinter has option
 
 ---
 
-**For Developers:** See `ForeverMinterContract-DESIGN.md` for technical specifications.
+**For Developers:** See `ForeverMinter-DESIGN.md` for technical specifications.
 
-**For Admins:** See `ForeverMinterContract-TODO.md` for deployment checklist.
+**For Admins:** See `ForeverMinter-TODO.md` for deployment checklist.
 
-**For Testers:** See `ForeverMinterContract-TESTING.md` for test scenarios.
+**For Testers:** See `ForeverMinter-TESTING.md` for test scenarios.

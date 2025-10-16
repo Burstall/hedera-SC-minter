@@ -1,4 +1,4 @@
-# ForeverMinterContract - Documentation Summary
+# ForeverMinter - Documentation Summary
 
 ## 📚 Complete Documentation Package
 
@@ -8,7 +8,7 @@ All documentation has been created and is ready for implementation. Below is a g
 
 ## 📄 Documentation Files
 
-### 1. **ForeverMinterContract-DESIGN.md** (Technical Specification)
+### 1. **ForeverMinter-DESIGN.md** (Technical Specification)
 **Audience:** Developers, Auditors, Technical Reviewers
 
 **Contents:**
@@ -38,7 +38,7 @@ All documentation has been created and is ready for implementation. Below is a g
 
 ---
 
-### 2. **ForeverMinterContract-BUSINESS-LOGIC.md** (User Guide)
+### 2. **ForeverMinter-BUSINESS-LOGIC.md** (User Guide)
 **Audience:** End Users, Frontend Developers, Project Managers
 
 **Contents:**
@@ -65,7 +65,7 @@ All documentation has been created and is ready for implementation. Below is a g
 
 ---
 
-### 3. **ForeverMinterContract-TODO.md** (Implementation Checklist)
+### 3. **ForeverMinter-TODO.md** (Implementation Checklist)
 **Audience:** Developers implementing the contract
 
 **Contents:**
@@ -93,7 +93,7 @@ All documentation has been created and is ready for implementation. Below is a g
 
 ---
 
-### 4. **ForeverMinterContract-TESTING.md** (Test Plan)
+### 4. **ForeverMinter-TESTING.md** (Test Plan)
 **Audience:** QA Engineers, Developers writing tests
 
 **Contents:**
@@ -392,4 +392,45 @@ Before starting implementation:
 - 10+ detailed examples
 - Complete architecture documented
 
-**Ready to build ForeverMinterContract!** 🚀
+**Ready to build ForeverMinter!** 🚀
+
+---
+
+## Version History
+
+### Version 1.0.5 (Current)
+**Release Date:** October 2025  
+**Status:** Ready for Testing
+
+**Key Changes:**
+- **DRY Architecture Refactoring:** Implemented single-source-of-truth for slot consumption
+- **Breaking Change:** `calculateMintCost()` now returns 5 values instead of 3
+  - Added: `holderSlotsUsed` and `wlSlotsUsed` to return signature
+  - Previous: `(uint256 hbar, uint256 lazy, uint256 discount)`
+  - Current: `(uint256 hbar, uint256 lazy, uint256 discount, uint256 holderSlots, uint256 wlSlots)`
+- **New Struct:** `MintCostResult` to avoid stack-too-deep errors
+- **Bug Fixes:**
+  - Fixed holder slot over-consumption in edge cases
+  - Fixed WL slot over-consumption in edge cases
+  - Eliminated duplicate waterfall logic in mintNFT Steps 7-8
+
+**Technical Improvements:**
+- Contract size optimized: 18.384 KiB (improved from v1.0.4)
+- Simplified mintNFT logic by consuming pre-calculated slot counts
+- Enhanced code maintainability via DRY principles
+
+**Documentation Updates:**
+- Created ForeverMinter-V1.0.5-MIGRATION.md guide
+- Updated ForeverMinter-TESTING.md with DRY validation tests (Section 11.7.7)
+- Updated all documentation for 5-value return consistency
+
+**Migration Guide:** See `ForeverMinter-V1.0.5-MIGRATION.md` for integration instructions
+
+### Version 1.0.4
+- Initial working implementation
+- Known issues with slot consumption in edge cases (fixed in 1.0.5)
+
+### Version 1.0
+- Original specification and design
+- Full feature set documented
+

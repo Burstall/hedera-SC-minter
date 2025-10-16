@@ -8,7 +8,7 @@ pragma solidity >=0.8.12 <0.9.0;
 /// @version 2.0 -- allows for sizing the amount of hbar
 
 import {HederaResponseCodes} from "./HederaResponseCodes.sol";
-import {HederaTokenService} from "./HederaTokenService.sol";
+import {HederaTokenServiceStakerLite} from "./HederaTokenServiceStakerLite.sol";
 import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 
 import {ILazyGasStation} from "./interfaces/ILazyGasStation.sol";
@@ -16,7 +16,7 @@ import {ILazyDelegateRegistry} from "./interfaces/ILazyDelegateRegistry.sol";
 
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
-contract TokenStakerV2 is HederaTokenService {
+contract TokenStakerV2 is HederaTokenServiceStakerLite {
     using SafeCast for uint256;
     using SafeCast for int256;
 
@@ -53,10 +53,7 @@ contract TokenStakerV2 is HederaTokenService {
         lazyGasStation = ILazyGasStation(_lazyGasStation);
         lazyDelegateRegistry = ILazyDelegateRegistry(_lazyDelegateRegistry);
 
-        int256 response = HederaTokenService.associateToken(
-            address(this),
-            lazyToken
-        );
+        int256 response = associateToken(address(this), lazyToken);
 
         if (response != HederaResponseCodes.SUCCESS) {
             revert FailedToInitialize();
@@ -135,12 +132,9 @@ contract TokenStakerV2 is HederaTokenService {
             _transfers[i].nftTransfers[0] = _nftTransfer;
         }
 
-        int256 response = HederaTokenService.cryptoTransfer(
-            _hbarTransfer,
-            _transfers
-        );
+        int256 response = cryptoTransfer(_hbarTransfer, _transfers);
 
-        if (response != HederaResponseCodes.SUCCESS) {
+        if (response != SUCCESS) {
             // could be $LAZY or serials causing the issue. Check $LAZY balance of contract first
             revert NFTTransferFailed(_direction);
         }
@@ -159,11 +153,8 @@ contract TokenStakerV2 is HederaTokenService {
      * @dev associate token with hedera service
      * @param tokenId address to associate
      */
-    function tokenAssociate(address tokenId) public {
-        int256 response = HederaTokenService.associateToken(
-            address(this),
-            tokenId
-        );
+    function tokenAssociate(address tokenId) internal {
+        int256 response = associateToken(address(this), tokenId);
 
         if (
             !(response == SUCCESS ||
@@ -173,13 +164,10 @@ contract TokenStakerV2 is HederaTokenService {
         }
     }
 
-    function batchTokenAssociate(address[] memory tokenIds) public {
-        int256 response = HederaTokenService.associateTokens(
-            address(this),
-            tokenIds
-        );
+    function batchTokenAssociate(address[] memory tokenIds) internal {
+        int256 response = associateTokens(address(this), tokenIds);
 
-        if (response != HederaResponseCodes.SUCCESS) {
+        if (response != SUCCESS) {
             revert BatchAssociationFailed();
         }
     }
@@ -189,43 +177,10 @@ contract TokenStakerV2 is HederaTokenService {
      * less gas efficient than batchTokenAssociate
      * @param tokenIds array of token addresses to associate
      */
-    function safeBatchTokenAssociate(address[] memory tokenIds) public {
+    function safeBatchTokenAssociate(address[] memory tokenIds) internal {
         uint256 tokenArrayLength = tokenIds.length;
         for (uint256 i = 0; i < tokenArrayLength; ) {
             tokenAssociate(tokenIds[i]);
-            unchecked {
-                ++i;
-            }
-        }
-    }
-
-    /**
-     * @dev associate a group of tokens one at a time comparing to a list of already associated tokens
-     * less gas efficient than batchTokenAssociate but should be more efficient than safeBatchTokenAssociate
-     * lots of loop work here, so gas costs are high
-     * @param tokenIds array of token addresses to associate
-     * @param existingTokenIds array of token addresses already associated
-     */
-    function noClashBatchTokenAssociate(
-        address[] memory tokenIds,
-        address[] memory existingTokenIds
-    ) public {
-        uint256 tokenArrayLength = tokenIds.length;
-        uint256 existingTokenArrayLength = existingTokenIds.length;
-        for (uint256 i = 0; i < tokenArrayLength; ) {
-            bool clash = false;
-            for (uint256 j = 0; j < existingTokenArrayLength; ) {
-                if (tokenIds[i] == existingTokenIds[j]) {
-                    clash = true;
-                    break;
-                }
-                unchecked {
-                    ++j;
-                }
-            }
-            if (!clash) {
-                tokenAssociate(tokenIds[i]);
-            }
             unchecked {
                 ++i;
             }
@@ -278,7 +233,9 @@ contract TokenStakerV2 is HederaTokenService {
                 serials,
                 _transferInitiator,
                 _delegate,
-                amountPerSerial * int64(batchSize.toUint64())
+                _hbarAmount == int64(1)
+                    ? int64(1)
+                    : amountPerSerial * int64(batchSize.toUint64())
             );
         }
     }

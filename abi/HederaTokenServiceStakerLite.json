@@ -1,0 +1,19 @@
+{
+    "contractName": "HederaTokenServiceStakerLite",
+    "sourceName": "contracts/HederaTokenServiceStakerLite.sol",
+    "abi": [
+        {
+            "inputs": [],
+            "name": "PRECOMPILE_ADDRESS",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ]
+}

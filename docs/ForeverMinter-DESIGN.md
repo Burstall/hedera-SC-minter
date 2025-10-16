@@ -1,4 +1,4 @@
-# ForeverMinterContract - Technical Design Specification
+# ForeverMinter - Technical Design Specification
 
 ## Version: 1.0
 ## Date: October 12, 2025
@@ -25,11 +25,11 @@
 ## 1. Overview
 
 ### Purpose
-ForeverMinterContract is a distribution mechanism for pre-existing NFTs that respects Hedera network royalties. Unlike MinterContract which creates and mints NFTs on-the-fly, ForeverMinterContract manages a pool of existing NFT serials and distributes them to users based on various pricing and discount mechanisms.
+ForeverMinter is a distribution mechanism for pre-existing NFTs that respects Hedera network royalties. Unlike MinterContract which creates and mints NFTs on-the-fly, ForeverMinter manages a pool of existing NFT serials and distributes them to users based on various pricing and discount mechanisms.
 
 ### Key Differences from MinterContract
 
-| Aspect | MinterContract | ForeverMinterContract |
+| Aspect | MinterContract | ForeverMinter |
 |--------|----------------|----------------------|
 | Token Creation | Creates token at initialization | Takes existing token address |
 | Treasury Role | Contract is treasury | Contract is NOT treasury |
@@ -54,7 +54,7 @@ ForeverMinterContract is a distribution mechanism for pre-existing NFTs that res
 ### Inheritance Chain
 
 ```solidity
-contract ForeverMinterContract is 
+contract ForeverMinter is 
     TokenStakerV2,      // NFT transfer mechanics with royalty compliance
     Ownable,            // Base ownership (owner becomes first admin)
     ReentrancyGuard     // Protection for mint/refund functions
@@ -222,6 +222,45 @@ ILazyGasStation public lazyGasStation;  // For gas refills and LAZY transfers
 - No longer stores `IBurnableHTS lazySCT`
 - Uses `ILazyGasStation.drawLazyFrom()` instead of manual transfer + burn
 - LazyGasStation handles both transfer from user and burning in one call
+
+### 3.7.1 Cost Calculation Result Struct (v1.0.5)
+
+```solidity
+struct MintCostResult {
+    uint256 totalHbarCost;      // Total HBAR cost after discounts
+    uint256 totalLazyCost;      // Total LAZY cost after discounts
+    uint256 totalDiscount;      // Total discount applied (percentage)
+    uint256 holderSlotsUsed;    // Number of holder discount slots consumed
+    uint256 wlSlotsUsed;        // Number of WL discount slots consumed
+}
+```
+
+**Purpose:** DRY Architecture - single source of truth for both cost and slot consumption
+
+**Why Added in v1.0.5:**
+1. **Avoid Stack-Too-Deep:** Allows returning 5 values without compilation error
+2. **DRY Principle:** Eliminates duplicate waterfall logic in `mintNFT()` Steps 7-8
+3. **Bug Prevention:** Ensures slot consumption matches cost calculation exactly
+4. **Frontend Support:** Allows UIs to preview exact slot usage before minting
+
+**Usage Pattern:**
+```solidity
+// Internal calculation returns struct
+MintCostResult memory result = calculateMintCostWithSlots(...);
+
+// Public function unpacks for backward compatibility
+function calculateMintCost(...) returns (
+    uint256 hbar,
+    uint256 lazy,
+    uint256 discount,
+    uint256 holderSlots,  // NEW in v1.0.5
+    uint256 wlSlots       // NEW in v1.0.5
+) {
+    MintCostResult memory result = calculateMintCostWithSlots(...);
+    return (result.totalHbarCost, result.totalLazyCost, result.totalDiscount,
+            result.holderSlotsUsed, result.wlSlotsUsed);
+}
+```
 
 ### 3.8 Sacrifice Configuration
 
@@ -680,9 +719,11 @@ emit RefundEvent(msg.sender, _serials, _refundedHbar, _refundedLazy);
 
 ---
 
-## 5. Discount System
+## 5. Discount System & Cost Calculation
 
-### 5.1 Cost Calculation Logic
+### 5.1 Cost Calculation Functions (v1.0.5 Updated)
+
+#### 5.1.1 Public Interface: `calculateMintCost()`
 
 ```solidity
 function calculateMintCost(
@@ -691,13 +732,44 @@ function calculateMintCost(
     uint256[] memory _discountSerials,
     uint256[] memory _sacrificeSerials
 ) public view returns (
-    uint256 _totalHbar,
-    uint256 _totalLazy,
-    uint256[] memory _discountUsage
+    uint256 _totalHbar,      // Total HBAR cost after discounts
+    uint256 _totalLazy,      // Total LAZY cost after discounts
+    uint256 _totalDiscount,  // Total discount percentage applied
+    uint256 _holderSlotsUsed,  // NEW v1.0.5: Holder discount slots consumed
+    uint256 _wlSlotsUsed       // NEW v1.0.5: WL discount slots consumed
 )
 ```
 
-#### 5.1.1 Sacrifice Mode (Exclusive)
+**Breaking Change in v1.0.5:**
+- Previously returned 3 values: `(hbar, lazy, discount)`
+- Now returns 5 values: `(hbar, lazy, discount, holderSlots, wlSlots)`
+- Frontend integrations must update to handle additional return values
+
+**DRY Architecture:**
+This function calls `calculateMintCostWithSlots()` internally and unpacks the `MintCostResult` struct. This ensures a single source of truth for both cost calculation AND slot consumption tracking.
+
+#### 5.1.2 Internal Function: `calculateMintCostWithSlots()`
+
+```solidity
+function calculateMintCostWithSlots(
+    address _user,
+    uint256 _quantity,
+    uint256[] memory _discountSerials,
+    uint256[] memory _sacrificeSerials
+) internal view returns (MintCostResult memory)
+```
+
+**Purpose:** Single source of truth - calculates cost AND tracks slot consumption simultaneously
+
+**Returns:** `MintCostResult` struct containing all 5 values
+
+**Why This Matters:**
+- v1.0.4 had Steps 7-8 in `mintNFT()` re-implement waterfall logic → caused slot over-consumption bugs
+- v1.0.5 calculates once in Step 4, Steps 7-8 consume pre-calculated counts → bug fixed
+
+### 5.2 Discount Calculation Modes
+
+#### 5.2.1 Sacrifice Mode (Exclusive)
 
 ```solidity
 if (_sacrificeSerials.length > 0) {
@@ -728,7 +800,7 @@ if (_sacrificeSerials.length > 0) {
 - Sacrifice discount: 50%
 - Total cost: 5 × (1000 × 50%) = 2,500 HBAR
 
-#### 5.1.2 WL + Holder Discount Mode (Stacking)
+#### 5.2.2 WL + Holder Discount Mode (Stacking)
 
 ```solidity
 bool isWl = whitelistedAddressQtyMap.contains(_user);
@@ -820,7 +892,62 @@ Calculation:
 - 1 mint with WL only: `1000 × 90% = 900 HBAR` → 900 HBAR
 - **Total: 4,600 HBAR**
 
-### 5.2 Serial Discount Info
+### 5.3 Slot Consumption Tracking (v1.0.5)
+
+**DRY Implementation Details:**
+
+The waterfall discount logic in `calculateMintCostWithSlots()` tracks slot consumption during calculation:
+
+```solidity
+uint256 holderSlotsUsed = 0;  // Track holder discount slots consumed
+uint256 wlSlotsUsed = 0;      // Track WL-only slots consumed
+
+// STEP 2: Process holder discounts (with optional WL stacking)
+for (uint256 i = 0; i < _discountSerials.length && remainingToMint > 0; i++) {
+    // ... discount calculation logic ...
+    holderSlotsUsed += usesThisMint;  // Increment as we go
+    // ... apply discount costs ...
+}
+
+// STEP 3: Process WL-only NFTs (no holder discount)
+if (isWl && remainingToMint > 0) {
+    wlSlotsUsed = remainingToMint;  // All remaining get WL discount
+    // ... apply WL discount costs ...
+}
+
+// Return all 5 values in struct
+return MintCostResult({
+    totalHbarCost: totalHbarCost,
+    totalLazyCost: totalLazyCost,
+    totalDiscount: totalDiscount,
+    holderSlotsUsed: holderSlotsUsed,
+    wlSlotsUsed: wlSlotsUsed
+});
+```
+
+**Usage in `mintNFT()` Steps 7-8:**
+```solidity
+// STEP 4: Calculate cost WITH slot tracking
+MintCostResult memory costResult = calculateMintCostWithSlots(...);
+
+// STEP 7: Consume holder slots (DRY - no re-calculation)
+for (uint256 i = 0; i < costResult.holderSlotsUsed; i++) {
+    // Consume from holder discount pool
+}
+
+// STEP 8: Consume WL slots (DRY - no re-calculation)
+if (costResult.wlSlotsUsed > 0) {
+    // Consume from WL pool
+}
+```
+
+**Benefits:**
+- ✅ Slot consumption ALWAYS matches cost calculation
+- ✅ No duplicate waterfall logic
+- ✅ Edge case bugs eliminated
+- ✅ Easier to maintain and audit
+
+### 5.4 Serial Discount Info
 
 ```solidity
 function getSerialDiscountInfo(uint256 _serial) public view returns (
@@ -877,9 +1004,130 @@ function getBatchSerialDiscountInfo(uint256[] memory _serials) external view ret
 
 ## 6. Payment Processing
 
-### 6.1 LAZY Payment (via LazyGasStation)
+### 6.1 Dual-Currency Payment System
+
+ForeverMinter supports **simultaneous HBAR + LAZY payments**. Users pay a total cost that includes both currencies:
+
+- **HBAR Component**: Paid via `msg.value` on transaction
+- **LAZY Component**: Paid via LazyGasStation allowance OR sponsored by contract
+
+#### Configuration: `lazyFromContract` Flag
 
 ```solidity
+struct MintEconomics {
+    uint256 mintPriceHbar;      // Base HBAR price (tinybars)
+    uint256 mintPriceLazy;      // Base LAZY price (tokens)
+    // ... other fields ...
+    bool lazyFromContract;      // If true, contract pays LAZY (sponsorship)
+}
+```
+
+**Two Payment Modes:**
+
+1. **User Pays All (`lazyFromContract = false`)**:
+   - User sends HBAR via `msg.value`
+   - User provides LAZY allowance to LazyGasStation
+   - Standard mint model
+
+2. **Contract Sponsors LAZY (`lazyFromContract = true`)**:
+   - User sends HBAR via `msg.value`
+   - Contract pays LAZY from its balance
+   - Promotional/partnership model
+
+### 6.2 Cost Calculation (Dual-Currency)
+
+```solidity
+function calculateMintCost(
+    uint256 _numberToMint,
+    address[] memory _discountTokens,
+    uint256 _sacrificeCount
+) public view returns (
+    uint256 totalHbarCost, 
+    uint256 totalLazyCost, 
+    uint256 totalDiscount
+) {
+    // Calculate base costs in both currencies
+    uint256 baseHbarCost = mintEconomics.mintPriceHbar * _numberToMint;
+    uint256 baseLazyCost = mintEconomics.mintPriceLazy * _numberToMint;
+
+    // Calculate discount percentage (WL + holder + sacrifice)
+    uint256 discountPercentage = _calculateDiscount(...);
+
+    // Apply discount to BOTH currencies
+    totalHbarCost = baseHbarCost - (baseHbarCost * discountPercentage / 100);
+    totalLazyCost = baseLazyCost - (baseLazyCost * discountPercentage / 100);
+    totalDiscount = discountPercentage;
+}
+```
+
+**Key Points:**
+- Returns **3 values** (HBAR cost, LAZY cost, discount %)
+- Discounts apply to **both** currencies
+- If `mintPriceLazy = 0`, only HBAR is charged
+- If `mintPriceHbar = 0`, only LAZY is charged
+
+### 6.3 Payment Processing in mintNFT()
+
+```solidity
+function mintNFT(
+    uint256 _numberToMint,
+    address[] memory _discountTokens,
+    uint256[] memory _discountSerials,
+    uint256[] memory _sacrificeSerials
+) external payable nonReentrant {
+    // Step 1: Calculate costs
+    (uint256 totalHbarCost, uint256 totalLazyCost, uint256 discount) = 
+        calculateMintCost(_numberToMint, _discountTokens, _sacrificeSerials.length);
+
+    // Step 2: Process HBAR payment (always from user)
+    if (msg.value < totalHbarCost) revert NotEnoughHbar();
+    uint256 hbarPaid = totalHbarCost;
+
+    // Refund excess HBAR
+    if (msg.value > totalHbarCost) {
+        (bool success, ) = msg.sender.call{value: msg.value - totalHbarCost}("");
+        if (!success) revert TransferFailed();
+    }
+
+    // Step 3: Process LAZY payment (user OR contract)
+    uint256 lazyPaid = 0;
+    if (totalLazyCost > 0) {
+        address lazyPaymentSource = mintEconomics.lazyFromContract 
+            ? address(this)   // Contract sponsors
+            : msg.sender;     // User pays
+
+        lazyGasStation.drawLazyFrom(
+            lazyPaymentSource,
+            totalLazyCost,
+            lazyDetails.lazyBurnPerc
+        );
+        lazyPaid = totalLazyCost;
+
+        emit LazyPaymentEvent(
+            lazyPaymentSource,
+            totalLazyCost,
+            (totalLazyCost * lazyDetails.lazyBurnPerc) / 100
+        );
+    }
+
+    // Step 4: Track payments for refunds (split across serials)
+    uint256 hbarPerNFT = hbarPaid / _numberToMint;
+    uint256 lazyPerNFT = lazyPaid / _numberToMint;
+    
+    for (uint256 i = 0; i < selectedSerials.length; i++) {
+        serialPaymentTracking[selectedSerials[i]] = MintPayment({
+            hbarPaid: hbarPerNFT,
+            lazyPaid: lazyPerNFT,
+            minter: msg.sender
+        });
+    }
+}
+```
+
+### 6.4 LAZY Payment via LazyGasStation
+
+```solidity
+// LazyGasStation handles approval check, transfer, and burn
 function takeLazyPayment(uint256 _amount, address _payer) internal {
     lazyGasStation.drawLazyFrom(_payer, _amount, lazyDetails.lazyBurnPerc);
     emit LazyPaymentEvent(_payer, _amount, lazyDetails.lazyBurnPerc);
@@ -893,24 +1141,56 @@ function takeLazyPayment(uint256 _amount, address _payer) internal {
 - Consistent behavior across all contracts
 
 **Prerequisites:**
-- User must have approved LazyGasStation (not ForeverMinterContract) to spend LAZY
+- User must have approved LazyGasStation (not ForeverMinter) to spend LAZY
 - LazyGasStation must be authorized to interact with LSCT for burns
+- If `lazyFromContract=true`, contract must have sufficient LAZY balance
 
-### 6.2 HBAR Payment
+### 6.5 Refund System (Dual-Currency)
+
+Refunds respect the dual-currency payment model:
 
 ```solidity
-// In mintNFT function
-if (totalHbar > 0) {
-    require(msg.value >= totalHbar, "NotEnoughHbar");
-}
+function refundNFT(uint256[] memory _serials) external nonReentrant {
+    uint256 totalHbarRefund = 0;
+    uint256 totalLazyRefund = 0;
 
-// Refund excess
-if (msg.value > totalHbar) {
-    Address.sendValue(payable(msg.sender), msg.value - totalHbar);
+    for (uint256 i = 0; i < _serials.length; i++) {
+        uint256 serial = _serials[i];
+        
+        // Check refund window
+        if (block.timestamp > serialMintTime[serial] + mintTiming.refundWindow) {
+            revert RefundWindowExpired(serial);
+        }
+
+        // Get payment tracking
+        MintPayment memory payment = serialPaymentTracking[serial];
+        
+        // Calculate refund amounts (percentage of original payment)
+        uint256 hbarRefund = (payment.hbarPaid * mintTiming.refundPercentage) / 100;
+        uint256 lazyRefund = (payment.lazyPaid * mintTiming.refundPercentage) / 100;
+        
+        totalHbarRefund += hbarRefund;
+        totalLazyRefund += lazyRefund;
+        
+        // Return NFT to pool
+        availableSerials.add(serial);
+    }
+
+    // Process refunds
+    if (totalHbarRefund > 0) {
+        (bool success, ) = msg.sender.call{value: totalHbarRefund}("");
+        if (!success) revert TransferFailed();
+    }
+
+    if (totalLazyRefund > 0) {
+        lazyGasStation.payoutLazy(msg.sender, totalLazyRefund, 0); // 0 burn for refunds
+    }
+
+    emit NFTRefunded(msg.sender, _serials, totalHbarRefund, totalLazyRefund);
 }
 ```
 
-### 6.3 Withdrawal (Admin Only, with Cooldown)
+### 6.6 Withdrawal (Admin Only, with Cooldown)
 
 ```solidity
 function withdrawHbar(
@@ -918,10 +1198,11 @@ function withdrawHbar(
     uint256 _amount
 ) external onlyAdmin {
     require(
-        block.timestamp >= mintTiming.lastMintTime + mintTiming.refundWindow,
+        block.timestamp >= lastWithdrawalTime[msg.sender] + withdrawalCooldown,
         "CooldownActive"
     );
     
+    lastWithdrawalTime[msg.sender] = block.timestamp;
     Address.sendValue(_recipient, _amount);
     emit HbarWithdrawn(_recipient, _amount);
 }
@@ -931,10 +1212,11 @@ function withdrawLazy(
     uint256 _amount
 ) external onlyAdmin {
     require(
-        block.timestamp >= mintTiming.lastMintTime + mintTiming.refundWindow,
+        block.timestamp >= lastWithdrawalTime[msg.sender] + withdrawalCooldown,
         "CooldownActive"
     );
     
+    lastWithdrawalTime[msg.sender] = block.timestamp;
     bool success = IERC20(lazyDetails.lazyToken).transfer(_recipient, _amount);
     require(success, "LazyTransferFailed");
     emit LazyWithdrawn(_recipient, _amount);
@@ -942,8 +1224,9 @@ function withdrawLazy(
 ```
 
 **Design Rationale:**
-- Cooldown ensures contract has enough funds for refunds
-- Cooldown = `refundWindow` (e.g., if refund window is 60 minutes, can't withdraw until 60 minutes after last mint)
+- Per-admin cooldown tracking (updated from global refundWindow)
+- Cooldown = `withdrawalCooldown` (default: 2 hours)
+- Ensures contract maintains reserves for refunds
 
 ---
 
@@ -1396,7 +1679,7 @@ for (uint256 i = 0; i < length; ) {
 
 ## Appendix A: Comparison Matrix
 
-| Feature | MinterContract | ForeverMinterContract |
+| Feature | MinterContract | ForeverMinter |
 |---------|----------------|----------------------|
 | Token Creation | ✅ Creates token | ❌ Uses existing |
 | Royalty Handling | ❌ Ignores (treasury) | ✅ Respects (non-treasury) |
