@@ -83,8 +83,8 @@ node scripts/interactions/BadgeMinter/createBadge.js "Silver Badge" "ipfs://silv
 
 Add users to badge whitelists:
 ```bash
-node scripts/interactions/BadgeMinter/addToWhitelist.js 1 0.0.alice_id 2  # Alice can mint 2 Bronze badges
-node scripts/interactions/BadgeMinter/addToWhitelist.js 2 0.0.alice_id 0  # Alice can mint unlimited Silver badges
+node scripts/interactions/BadgeMinter/addToBadgeWhitelist.js 1 0.0.alice_id 2  # Alice can mint 2 Bronze badges
+node scripts/interactions/BadgeMinter/addToBadgeWhitelist.js 2 0.0.alice_id 0  # Alice can mint unlimited Silver badges
 ```
 
 ### 5. Start Minting
