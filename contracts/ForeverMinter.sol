@@ -198,12 +198,6 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
     /// @notice Set of admin addresses with elevated privileges
     EnumerableSet.AddressSet private adminSet;
 
-    /// @notice Tracks last withdrawal time for withdrawal cooldown
-    mapping(address => uint256) private lastWithdrawalTime;
-
-    /// @notice Withdrawal cooldown period in seconds
-    uint256 public withdrawalCooldown = 2 hours;
-
     // ============ Events ============
 
     /// @notice Emitted when NFTs are successfully minted
@@ -301,7 +295,7 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
     error InvalidRefundSerial(uint256 serial);
     error WhitelistOnly();
     error CannotRemoveLastAdmin();
-    error WithdrawalCooldownActive();
+    error WithdrawalDuringRefundWindow();
     error InvalidParameter();
     error SerialNotInPool(uint256 serial);
     error SerialAlreadyInPool(uint256 serial);
@@ -481,12 +475,13 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
         // ====== Step 1: Validate inputs ======
 
         if (_numberToMint == 0) revert InvalidQuantity();
-        if (availableSerials.length() < _numberToMint) revert MintedOut();
 
         // Check max mint per transaction (0 = unlimited)
         if (mintEconomics.maxMint > 0) {
             if (_numberToMint > mintEconomics.maxMint) revert ExceedsMaxMint();
         }
+
+        if (availableSerials.length() < _numberToMint) revert MintedOut();
 
         // Check whitelist restriction
         if (mintTiming.wlOnly && whitelistSlots[msg.sender] == 0) {
@@ -541,8 +536,11 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
                 int64(1)
             );
 
-            // If sacrifice destination is set, transfer to it
-            if (sacrificeDestination != address(0)) {
+            // If sacrifice destination is set AND not the contract, transfer to it
+            if (
+                sacrificeDestination != address(0) &&
+                sacrificeDestination != address(this)
+            ) {
                 batchMoveNFTs(
                     TransferDirection.WITHDRAWAL,
                     NFT_TOKEN,
@@ -570,12 +568,14 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
                 _serialsByToken
             );
 
-            // Validate ownership for all provided serials
+            // Validate ownership or delegation for all provided serials
             for (uint256 i = 0; i < discountSlots.length; i++) {
                 if (
-                    IERC721(discountSlots[i].token).ownerOf(
+                    !_canUseSerial(
+                        msg.sender,
+                        discountSlots[i].token,
                         discountSlots[i].serial
-                    ) != msg.sender
+                    )
                 ) {
                     revert DiscountSerialNotOwned(discountSlots[i].serial);
                 }
@@ -1017,6 +1017,30 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
 
     // ============ Internal Helper Functions ============
 
+    /// @notice Check if user owns or has delegation rights for an NFT
+    /// @param _user User address to check
+    /// @param _token Token address
+    /// @param _serial Serial number
+    /// @return True if user owns the NFT or has delegation rights
+    function _canUseSerial(
+        address _user,
+        address _token,
+        uint256 _serial
+    ) internal view returns (bool) {
+        // Check direct ownership first
+        if (IERC721(_token).ownerOf(_serial) == _user) {
+            return true;
+        }
+
+        // Check if serial is delegated to user via LazyDelegateRegistry
+        address delegatedTo = lazyDelegateRegistry.getNFTDelegatedTo(
+            _token,
+            _serial
+        );
+
+        return delegatedTo == _user;
+    }
+
     /// @notice Build and sort discount slots from user's tokens (combined for efficiency)
     /// @param _tokens Array of discount token addresses
     /// @param _serialsByToken Array of arrays of serials for each token
@@ -1312,33 +1336,46 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
         }
     }
 
-    /// @notice Remove address from whitelist (sets slots to 0)
-    /// @param _address Address to remove
-    function removeFromWhitelist(address _address) external onlyAdmin {
-        whitelistSlots[_address] = 0;
-        emit WhitelistUpdated(_address, false);
+    /// @notice Remove addresses from whitelist (sets slots to 0)
+    /// @param _addresses Array of addresses to remove
+    function removeFromWhitelist(
+        address[] memory _addresses
+    ) external onlyAdmin {
+        if (_addresses.length == 0) revert EmptyArray();
+
+        for (uint256 i = 0; i < _addresses.length; i++) {
+            if (_addresses[i] != address(0)) {
+                whitelistSlots[_addresses[i]] = 0;
+                emit WhitelistUpdated(_addresses[i], false);
+            }
+        }
     }
 
     /// @notice Buy whitelist slots with LAZY tokens
-    function buyWhitelistWithLazy() external {
+    /// @param _quantity Number of slot groups to purchase (e.g., 2 = buy 2x the configured slot count)
+    function buyWhitelistWithLazy(uint256 _quantity) external {
         if (mintEconomics.buyWlWithLazy == 0) revert InvalidParameter();
         if (mintEconomics.buyWlSlotCount == 0) revert InvalidParameter();
+        if (_quantity == 0) revert InvalidParameter();
+
+        uint256 totalLazyCost = mintEconomics.buyWlWithLazy * _quantity;
+        uint256 totalSlotsGranted = mintEconomics.buyWlSlotCount * _quantity;
 
         // Draw LAZY from user
         lazyGasStation.drawLazyFrom(
             msg.sender,
-            mintEconomics.buyWlWithLazy,
+            totalLazyCost,
             lazyDetails.lazyBurnPerc
         );
 
         // Add slots to user's whitelist allocation
-        whitelistSlots[msg.sender] += mintEconomics.buyWlSlotCount;
+        whitelistSlots[msg.sender] += totalSlotsGranted;
 
         emit WhitelistUpdated(msg.sender, true);
         emit LazyPaymentEvent(
             msg.sender,
-            mintEconomics.buyWlWithLazy,
-            (mintEconomics.buyWlWithLazy * lazyDetails.lazyBurnPerc) / 100
+            totalLazyCost,
+            (totalLazyCost * lazyDetails.lazyBurnPerc) / 100
         );
     }
 
@@ -1391,30 +1428,29 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
 
     /// @notice Update LAZY burn percentage
     /// @param _burnPerc New burn percentage (0-100)
-    function updateLazyBurnPerc(uint256 _burnPerc) external onlyAdmin {
+    function updateLazyBurnPercentage(uint256 _burnPerc) external onlyAdmin {
         if (_burnPerc > 100) revert InvalidParameter();
         lazyDetails.lazyBurnPerc = _burnPerc;
     }
 
-    /// @notice Update withdrawal cooldown period
-    /// @param _cooldown New cooldown period in seconds
-    function updateWithdrawalCooldown(uint256 _cooldown) external onlyAdmin {
-        withdrawalCooldown = _cooldown;
-    }
-
     // ============ Admin Functions - Withdrawals ============
 
-    /// @notice Internal helper to check and update withdrawal cooldown
+    /// @notice Internal helper to check withdrawal is allowed (after refund window + buffer)
     /// @param _recipient Recipient address to validate
-    function _checkAndUpdateWithdrawalCooldown(address _recipient) internal {
+    /// @dev Ensures withdrawals only happen when all minted NFTs are past their refund window
+    function _checkWithdrawalAllowed(address _recipient) internal view {
         if (_recipient == address(0)) revert InvalidParameter();
+
+        // Calculate minimum time that must pass: refundWindow + 1 hour buffer
+        uint256 requiredCooldown = mintTiming.refundWindow + 1 hours;
+
+        // Check if enough time has passed since last mint
         if (
-            block.timestamp <
-            lastWithdrawalTime[msg.sender] + withdrawalCooldown
+            mintTiming.lastMintTime > 0 &&
+            block.timestamp < mintTiming.lastMintTime + requiredCooldown
         ) {
-            revert WithdrawalCooldownActive();
+            revert WithdrawalDuringRefundWindow();
         }
-        lastWithdrawalTime[msg.sender] = block.timestamp;
     }
 
     /// @notice Withdraw HBAR from contract
@@ -1424,7 +1460,7 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
         address _recipient,
         uint256 _amount
     ) external onlyAdmin {
-        _checkAndUpdateWithdrawalCooldown(_recipient);
+        _checkWithdrawalAllowed(_recipient);
 
         payable(_recipient).sendValue(_amount);
 
@@ -1438,7 +1474,7 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
         address _recipient,
         uint256 _amount
     ) external onlyAdmin {
-        _checkAndUpdateWithdrawalCooldown(_recipient);
+        _checkWithdrawalAllowed(_recipient);
 
         bool success = IERC20(lazyDetails.lazyToken).transfer(
             _recipient,
@@ -1488,13 +1524,13 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
 
     /// @notice Get all economics settings
     /// @return Economics struct with all settings
-    function getEconomics() external view returns (MintEconomics memory) {
+    function getMintEconomics() external view returns (MintEconomics memory) {
         return mintEconomics;
     }
 
     /// @notice Get all timing settings
     /// @return Timing struct with all settings
-    function getTiming() external view returns (MintTiming memory) {
+    function getMintTiming() external view returns (MintTiming memory) {
         return mintTiming;
     }
 
@@ -1577,24 +1613,61 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
         return tokenToTierIndex[_token];
     }
 
-    /// @notice Check if token provides discount
-    /// @param _token Token address to check
-    /// @return True if token provides discount
-    function isTokenDiscountEligible(
-        address _token
-    ) external view returns (bool) {
-        return isDiscountToken[_token];
-    }
-
-    /// @notice Get discount usage for a serial
+    /// @notice Get comprehensive discount info for a specific serial
     /// @param _token Token address
     /// @param _serial Serial number
-    /// @return Usage count
-    function getSerialDiscountUsage(
+    /// @return isEligible True if token provides discount
+    /// @return remainingUses Number of uses remaining for this serial (0 if exhausted or not eligible)
+    /// @return currentUsage Current number of times this serial has been used for discounts
+    function getSerialDiscountInfo(
         address _token,
         uint256 _serial
-    ) external view returns (uint256) {
-        return serialDiscountUsage[_token][_serial];
+    )
+        external
+        view
+        returns (bool isEligible, uint256 remainingUses, uint256 currentUsage)
+    {
+        isEligible = isDiscountToken[_token];
+        currentUsage = serialDiscountUsage[_token][_serial];
+
+        if (isEligible) {
+            uint256 tierIndex = tokenToTierIndex[_token];
+            uint256 maxUses = discountTiers[tierIndex].maxUsesPerSerial;
+
+            if (currentUsage < maxUses) {
+                remainingUses = maxUses - currentUsage;
+            } else {
+                remainingUses = 0;
+            }
+        } else {
+            remainingUses = 0;
+        }
+    }
+
+    /// @notice Check if refund is owed for serials and get refund expiry times
+    /// @param _serials Array of serial numbers to check
+    /// @return isOwed Array of booleans indicating if refund is owed for each serial
+    /// @return expiryTimes Array of timestamps when refund expires for each serial (0 if not eligible)
+    function isRefundOwed(
+        uint256[] memory _serials
+    )
+        external
+        view
+        returns (bool[] memory isOwed, uint256[] memory expiryTimes)
+    {
+        isOwed = new bool[](_serials.length);
+        expiryTimes = new uint256[](_serials.length);
+
+        for (uint256 i = 0; i < _serials.length; i++) {
+            uint256 serial = _serials[i];
+            uint256 mintTime = serialMintTime[serial];
+
+            if (mintTime > 0) {
+                uint256 expiryTime = mintTime + mintTiming.refundWindow;
+                expiryTimes[i] = expiryTime;
+                isOwed[i] = block.timestamp <= expiryTime;
+            }
+        }
     }
 
     // ============ Receive Function ============

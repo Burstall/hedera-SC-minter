@@ -89,7 +89,7 @@ function parseError(iface, errorData) {
 
 	try {
 		const errDescription = iface.parseError(errorData);
-		return errDescription;
+		return !errDescription ? `UNKNOWN ERROR: ${errorData}` : errDescription;
 	}
 	catch (e) {
 		console.error(errorData, e);
@@ -111,9 +111,12 @@ async function parseErrorTransactionId(envOrClient, transactionId, iface) {
 			.setTransactionId(transactionId)
 			.setValidateReceiptStatus(false)
 			.execute(envOrClient);
-
+		console.log(' -Got record from network for transaction:', transactionId.toString());
+		console.log(' -Status:', record.receipt.status.toString());
+		console.log(' -Error message:', record.contractFunctionResult.errorMessage, 'calling:', record.contractFunctionResult.contractId.toString(), 'with gas used:', record.contractFunctionResult.gasUsed.toString());
 		try {
 			if (!record?.contractFunctionResult?.errorMessage || record?.contractFunctionResult?.errorMessage == '0x') {
+				console.log('NO CONTRACT ERROR MESSAGE:', transactionId.toString(), record);
 				return `POORLY FORMED ERROR: ${transactionId}`;
 			}
 			return parseError(iface, record.contractFunctionResult.errorMessage);
@@ -139,7 +142,7 @@ async function parseErrorTransactionId(envOrClient, transactionId, iface) {
 		console.log(' -ERROR', response.status, ' from mirror node');
 	}
 	else {
-		// console.log(' -Got', response.data.error_message, 'from mirror node');
+		console.log(' -Got', response.data.error_message, 'from mirror node');
 		return parseError(iface, response.data.error_message);
 	}
 }
