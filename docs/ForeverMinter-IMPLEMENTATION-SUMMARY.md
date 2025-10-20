@@ -11,8 +11,8 @@
 | Metric | Value |
 |--------|-------|
 | **Lines of Code** | ~1,605 |
-| **Contract Size** | 18.384 KiB (compiled) |
-| **Size vs Limit** | 5.616 KiB under 24 KiB limit |
+| **Contract Size** | 18.829 KiB (compiled) |
+| **Size vs Limit** | 5.171 KiB under 24 KiB limit |
 | **Functions** | 50+ public/external functions |
 | **Events** | 10 |
 | **Custom Errors** | 25+ |
@@ -320,9 +320,9 @@ constructor(
 7. ⚠️ Unpause minting: `unpauseMinting()`
 
 ### Contract Size Status (v1.0.5)
-- **Deployed Size**: 18.384 KiB
+- **Deployed Size**: 18.829 KiB
 - **Limit (Ethereum/Hedera)**: 24.0 KiB
-- **Available Headroom**: 5.616 KiB
+- **Available Headroom**: 5.171 KiB
 - **Status**: ✅ Well within limits for both Ethereum and Hedera
 - **Optimization**: DRY architecture in v1.0.5 reduced size significantly
 

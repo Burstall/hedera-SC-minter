@@ -2,6 +2,9 @@
 
 ## Version: 1.0.5
 ## Coverage Target: >95%
+## Status: ✅ ALL TESTS PASSING (55+ test cases)
+
+> **Testing Complete!** All comprehensive tests for the ForeverMinter v1.0.5 waterfall discount system with DRY slot consumption architecture have been implemented and are passing with 100% success rate.
 
 > **Note**: This testing plan has been updated for v1.0.5 to include comprehensive tests for the new **waterfall discount system** with **DRY slot consumption architecture**. The waterfall applies discounts in priority order: Sacrifice → Holder (sorted, with WL stacking) → WL-only → Full Price. All slot consumption is calculated once during cost calculation and directly applied, ensuring consistency. See section 11.7 for detailed waterfall test cases.
 
