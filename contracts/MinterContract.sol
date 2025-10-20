@@ -1,11 +1,55 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
+/*
+ * ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
+ * ⚡                                                             ⚡
+ * ⚡                        LAZY SUPERHEROES                     ⚡
+ * ⚡                      The OG Hedera Project                  ⚡
+ * ⚡                                                             ⚡
+ * ⚡                        %%%%#####%%@@@@                      ⚡
+ * ⚡                   @%%%@%###%%%%###%%%%%@@                   ⚡
+ * ⚡                %%%%%%@@@@@@@@@@@@@@@@%##%%@@                ⚡
+ * ⚡              @%%@#@@@@@@@@@@@@@@@@@@@@@@@@*%%@@             ⚡
+ * ⚡            @%%%%@@@@@@@@@@@@@@@@@@@@@@@@@@@@%*%@@           ⚡
+ * ⚡           %%%#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%#%@@         ⚡
+ * ⚡          %%%@@@@@@@@@@@@@@#-:--==+#@@@@@@@@@@@@@*%@@        ⚡
+ * ⚡         %@#@@@@@@@@@@@@@@*-------::%@@@@@@@@%%%%%*%@@       ⚡
+ * ⚡        %%#@@@@@@@@@@@@@@@=-------:#@@@@@@@@@%%%%%%*%@@      ⚡
+ * ⚡       %%#@@@@@@@@@@@@@@@#-------:+@@@@@@@@@@%%%%%%%#%@@     ⚡
+ * ⚡       %%#@@@@@@@@@@@@@@@=------:=@@@@@@@@@@@%%%%%%%%#@@     ⚡
+ * ⚡      #%#@@@%%%%%%%@@@@@%------:-@@@@@@@@@@@@@%%%%%%%#%@@    ⚡
+ * ⚡      %%#@@@%%%%%%%%@@@@=------------:::@@@@@@@@%%%%%#%@@    ⚡
+ * ⚡      %%#@@%%%%%%%%%@@@%:------------::%@@@@@@@@@%%%%#%@@    ⚡
+ * ⚡      %%#@@%%%%%%%%%@@@=:::---------:-@@@@@@@@@@@@@@@#@@@    ⚡
+ * ⚡      #%#@@@%%%%%%%@@@@*:::::::----:-@@@@@@@@@@@@@@@@#@@@    ⚡
+ * ⚡      %%%%@@@@%%%%%@@@@@@@@@@-:---:=@@@@@@@@@@@@@@@@@%@@@    ⚡
+ * ⚡       %%#@@@@%%%%@@@@@@@@@@@::--:*@@@@@@@@@@@@@@@@@%@@@     ⚡
+ * ⚡       %#%#@@@%@%%%@@@@@@@@@#::::#@@@@@@@@@@@@@@@@@@%@@@     ⚡
+ * ⚡        %%%%@@@%%%%%%@@@@@@@*:::%@@@@@@@@@@@@@@@@@@%@@@      ⚡
+ * ⚡         %%#%@@%%%%%%%@@@@@@=.-%@@@@@@@@@@@@@@@@@@%@@@       ⚡
+ * ⚡          %##*@%%%%%%%%%@@@@=+@@@@@@@@@@@@@@@@@@%%@@@        ⚡
+ * ⚡           %##*%%%%%%%%%%@@@@@@@@@@@@@@@@@@@@@@%@@@@         ⚡
+ * ⚡             %##+#%%%%%%%%@@@@@@@@@@@@@@@@@@@%@@@@           ⚡
+ * ⚡               %##*=%%%%%%%@@@@@@@@@@@@@@@#@@@@@             ⚡
+ * ⚡                 %##%#**#@@@@@@@@@@@@%%%@@@@@@               ⚡
+ * ⚡                    %%%%@@%@@@%%@@@@@@@@@@@                  ⚡
+ * ⚡                         %%%%%%%%%%%@@                       ⚡
+ * ⚡                                                             ⚡
+ * ⚡                 Development Team Focused on                 ⚡
+ * ⚡                   Decentralized Solutions                   ⚡
+ * ⚡                                                             ⚡
+ * ⚡         Visit: http://lazysuperheroes.com/                  ⚡
+ * ⚡            or: https://dapp.lazysuperheroes.com/            ⚡
+ * ⚡                   to get your LAZY on!                      ⚡
+ * ⚡                                                             ⚡
+ * ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
+ */
+
 import {HederaResponseCodes} from "./HederaResponseCodes.sol";
 import {HederaTokenService} from "./HederaTokenService.sol";
 import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 import {ExpiryHelper} from "./ExpiryHelper.sol";
-import {IHRC719} from "./interfaces/IHRC719.sol";
 
 // functionality moved to library for space saving
 import {MinterLibrary} from "./MinterLibrary.sol";
@@ -183,8 +227,11 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     constructor(address lsct, address lazy, uint256 lazyBurnPerc) {
         lazyDetails = LazyDetails(lazy, lazyBurnPerc, IBurnableHTS(lsct));
 
-        uint256 responseCode = IHRC719(lazyDetails.lazyToken).associate();
-        if (responseCode.toInt256().toInt32() != HederaResponseCodes.SUCCESS) {
+        int256 responseCode = associateToken(
+            address(this),
+            lazyDetails.lazyToken
+        );
+        if (responseCode.toInt32() != HederaResponseCodes.SUCCESS) {
             revert AssociationFailed();
         }
 
@@ -251,7 +298,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         // create the expiry schedule for the token using ExpiryHelper
         _token.expiry = createAutoRenewExpiry(
             address(this),
-            HederaTokenService.defaultAutoRenewPeriod
+            DEFAULT_AUTO_RENEW_PERIOD
         );
 
         // translate fee objects to avoid oddities from serialisation of default/empty values
@@ -279,8 +326,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             }
         }
 
-        (int32 responseCode, address tokenAddress) = HederaTokenService
-            .createNonFungibleTokenWithCustomFees(
+        (
+            int32 responseCode,
+            address tokenAddress
+        ) = createNonFungibleTokenWithCustomFees(
                 _token,
                 new IHederaTokenService.FixedFee[](0),
                 _fees
