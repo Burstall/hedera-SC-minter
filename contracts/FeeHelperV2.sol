@@ -3,7 +3,7 @@ pragma solidity >=0.8.12 <0.9.0;
 pragma experimental ABIEncoderV2;
 
 import {KeyHelperV2} from "./KeyHelperV2.sol";
-import {IHederaTokenServiceV2} from "./IHederaTokenServiceV2.sol";
+import {IHederaTokenServiceV2} from "./interfaces/IHederaTokenServiceV2.sol";
 
 abstract contract FeeHelperV2 is KeyHelperV2 {
     function createFixedHbarFee(

@@ -152,54 +152,33 @@ async function checkHbarAllowances(env, _userId) {
 		});
 }
 
-/**
- * Check mirror for hbar allowance
- * @param {string} env
- * @param {*} _userId
- * @param {*} _spenderId
- * @returns {Number | null} the amount of hbar allowed (or null if none found)
- */
-async function checkMirrorHbarAllowance(env, _userId, _spenderId) {
-	const baseUrl = getBaseURL(env);
-	const url = `${baseUrl}/api/v1/accounts/${_userId.toString()}/allowances/crypto`;
-
-	let rtnVal = 0;
-	await axios.get(url)
-		.then((response) => {
-			const jsonResponse = response.data;
-
-			jsonResponse.allowances.forEach(allowance => {
-				if (allowance.spender == _spenderId.toString()) {
-					// console.log(' -Mirror Node: Found hbar allowance for', allowance.owner, 'with allowance', allowance.amount);
-					rtnVal = Number(allowance.amount);
-				}
-			});
-		})
-		.catch(function (err) {
-			console.error(err);
-			return 0;
-		});
-
-	return rtnVal;
-}
-
 async function getSerialsOwned(env, _userId, _tokenId) {
 	const baseUrl = getBaseURL(env);
-	const url = `${baseUrl}/api/v1/tokens/${_tokenId.toString()}/nfts?account.id=${_userId.toString()}`;
+	let url = `${baseUrl}/api/v1/tokens/${_tokenId.toString()}/nfts?account.id=${_userId.toString()}&limit=100`;
 
 	const rtnVal = [];
-	return axios.get(url)
-		.then((response) => {
+
+	try {
+		do {
+			const response = await axios.get(url);
 			const jsonResponse = response.data;
+
 			jsonResponse.nfts.forEach(token => {
 				rtnVal.push(Number(token.serial_number));
 			});
-			return rtnVal;
-		})
-		.catch(function (err) {
-			console.error(err);
-			return null;
-		});
+
+			// Check for pagination - follow the cursor to get all NFTs
+			if (!jsonResponse.links || !jsonResponse.links.next) break;
+			url = `${baseUrl}${jsonResponse.links.next}`;
+		}
+		while (url);
+
+		return rtnVal;
+	}
+	catch (err) {
+		console.error(err);
+		return null;
+	}
 }
 
 /**
@@ -558,7 +537,6 @@ module.exports = {
 	translateTransactionForWebCall,
 	getContractEVMAddress,
 	checkMirrorHbarBalance,
-	checkMirrorHbarAllowance,
 	checkHbarAllowances,
 	checkNFTOwnership,
 	getNFTApprovedForAllAllowances,

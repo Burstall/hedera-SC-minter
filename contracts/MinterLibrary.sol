@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import { EnumerableMap } from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-import { EnumerableSet } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import { IERC721 } from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import { IHederaTokenService } from "./IHederaTokenService.sol";
-import { IPrngGenerator } from "./IPrngGenerator.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
+import {IPrngGenerator} from "./interfaces/IPrngGenerator.sol";
 
 library MinterLibrary {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
@@ -68,48 +68,48 @@ library MinterLibrary {
     error WLTokenUsed();
     error NotTokenOwner();
 
-	function selectMetdataToMint(
-		string[] storage metadata, 
-		uint256 numberToMint, 
-		string storage cid,
-		address prngGenerator
-		) 
-		public returns (bytes[] memory metadataForMint) {
-		// size the return array
-		metadataForMint = new bytes[](numberToMint);
+    function selectMetdataToMint(
+        string[] storage metadata,
+        uint256 numberToMint,
+        string storage cid,
+        address prngGenerator
+    ) public returns (bytes[] memory metadataForMint) {
+        // size the return array
+        metadataForMint = new bytes[](numberToMint);
 
-		if (prngGenerator == address(0)) {
-			for (uint256 m = 0; m < numberToMint; m++) {
-				metadataForMint[m] = bytes(string.concat(cid, metadata[metadata.length - 1]));
-				// pop discarding the element used up
-				metadata.pop();
-			}
-		}
-		else {
-			for (uint256 m = 0; m < numberToMint; ) {
-				// if only 1 item left, no need to generate random number
-				if (metadata.length == 1) {
-					metadataForMint[m] = bytes(string.concat(cid, metadata[0]));
-					metadata.pop();
-					// should only be here on the last iteration anyway
-					break;
-				}
-				else {
-					uint256 index = IPrngGenerator(prngGenerator).getPseudorandomNumber(0, metadata.length - 1, m);
-					string memory chosen = metadata[index];
-					// swap the chosen element with the last element
-					metadata[index] = metadata[metadata.length - 1];
-					metadataForMint[m] = bytes(string.concat(cid, chosen));
-					// pop discarding the element used up
-					metadata.pop();
-				}
+        if (prngGenerator == address(0)) {
+            for (uint256 m = 0; m < numberToMint; m++) {
+                metadataForMint[m] = bytes(
+                    string.concat(cid, metadata[metadata.length - 1])
+                );
+                // pop discarding the element used up
+                metadata.pop();
+            }
+        } else {
+            for (uint256 m = 0; m < numberToMint; ) {
+                // if only 1 item left, no need to generate random number
+                if (metadata.length == 1) {
+                    metadataForMint[m] = bytes(string.concat(cid, metadata[0]));
+                    metadata.pop();
+                    // should only be here on the last iteration anyway
+                    break;
+                } else {
+                    uint256 index = IPrngGenerator(prngGenerator)
+                        .getPseudorandomNumber(0, metadata.length - 1, m);
+                    string memory chosen = metadata[index];
+                    // swap the chosen element with the last element
+                    metadata[index] = metadata[metadata.length - 1];
+                    metadataForMint[m] = bytes(string.concat(cid, chosen));
+                    // pop discarding the element used up
+                    metadata.pop();
+                }
 
-				unchecked {
-					++m;
-				}
-			}
-		}
-	}
+                unchecked {
+                    ++m;
+                }
+            }
+        }
+    }
 
     function removeFromWhitelist(
         EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap,
@@ -163,18 +163,14 @@ library MinterLibrary {
         keyType = setBit(keyType, uint8(KeyType.SUPPLY));
         keyType = setBit(keyType, uint8(KeyType.FREEZE));
 
-         if (_revocable) {
+        if (_revocable) {
             keyType = setBit(keyType, uint8(KeyType.WIPE));
         }
 
         IHederaTokenService.KeyValue memory keyValue;
         keyValue.contractId = _contract;
 
-        mintKey = IHederaTokenService.TokenKey(
-            keyType,
-            keyValue
-        );
-
+        mintKey = IHederaTokenService.TokenKey(keyType, keyValue);
     }
 
     function setBit(uint256 self, uint8 index) internal pure returns (uint256) {
@@ -194,10 +190,8 @@ library MinterLibrary {
             // check no double dipping
             if (wlSerialsUsed.contains(_serials[i])) revert WLTokenUsed();
             // check user owns the token
-            if (
-                IERC721(_wlToken).ownerOf(_serials[i]) !=
-                msg.sender
-            ) revert NotTokenOwner();
+            if (IERC721(_wlToken).ownerOf(_serials[i]) != msg.sender)
+                revert NotTokenOwner();
             wlSerialsUsed.add(_serials[i]);
             emit MinterLibraryContractMessage(
                 msg.sender,
@@ -280,10 +274,10 @@ library MinterLibrary {
         uint256 batch
     ) public returns (uint256 remainingItems) {
         uint256 size = addressToNumMintedMap.length();
-		if (size > batch) {
-			remainingItems = size - batch;
-			size = batch;
-		}
+        if (size > batch) {
+            remainingItems = size - batch;
+            size = batch;
+        }
 
         for (uint256 a = size; a > 0; ) {
             (address key, ) = addressToNumMintedMap.at(a - 1);
@@ -294,11 +288,11 @@ library MinterLibrary {
         }
         size = metadata.length;
         size = size > batch ? batch : size;
-		if (size > batch) {
-			remainingItems = Math.max(remainingItems, size - batch);
-			size = batch;
-		}
-		
+        if (size > batch) {
+            remainingItems = Math.max(remainingItems, size - batch);
+            size = batch;
+        }
+
         for (uint256 a = size; a > 0; ) {
             metadata.pop();
             unchecked {
@@ -307,9 +301,9 @@ library MinterLibrary {
         }
         size = walletMintTimeMap.length();
         if (size > batch) {
-			remainingItems = Math.max(remainingItems, size - batch);
-			size = batch;
-		}
+            remainingItems = Math.max(remainingItems, size - batch);
+            size = batch;
+        }
         for (uint256 a = size; a > 0; ) {
             (address key, ) = walletMintTimeMap.at(a - 1);
             walletMintTimeMap.remove(key);
@@ -319,9 +313,9 @@ library MinterLibrary {
         }
         size = wlAddressToNumMintedMap.length();
         if (size > batch) {
-			remainingItems = Math.max(remainingItems, size - batch);
-			size = batch;
-		}
+            remainingItems = Math.max(remainingItems, size - batch);
+            size = batch;
+        }
         for (uint256 a = size; a > 0; ) {
             (address key, ) = wlAddressToNumMintedMap.at(a - 1);
             wlAddressToNumMintedMap.remove(key);
@@ -331,9 +325,9 @@ library MinterLibrary {
         }
         size = serialMintTimeMap.length();
         if (size > batch) {
-			remainingItems = Math.max(remainingItems, size - batch);
-			size = batch;
-		}
+            remainingItems = Math.max(remainingItems, size - batch);
+            size = batch;
+        }
         for (uint256 a = size; a > 0; ) {
             (uint256 key, ) = serialMintTimeMap.at(a - 1);
             serialMintTimeMap.remove(key);
@@ -343,9 +337,9 @@ library MinterLibrary {
         }
         size = wlSerialsUsed.length();
         if (size > batch) {
-			remainingItems = Math.max(remainingItems, size - batch);
-			size = batch;
-		}
+            remainingItems = Math.max(remainingItems, size - batch);
+            size = batch;
+        }
         for (uint256 a = size; a > 0; ) {
             uint256 key = wlSerialsUsed.at(a - 1);
             wlSerialsUsed.remove(key);

@@ -1,0 +1,1621 @@
+{
+    "contractName": "ForeverMinter",
+    "sourceName": "contracts/ForeverMinter.sol",
+    "abi": [
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_nftToken",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_prngGenerator",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_lazyToken",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_lazyGasStation",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_lazyDelegateRegistry",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "constructor"
+        },
+        {
+            "inputs": [],
+            "name": "ArrayLengthMismatch",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "AssociationFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BadArguments",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BatchAssociationFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "CannotRemoveLastAdmin",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "DiscountSerialMaxUsesReached",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "DiscountSerialNotOwned",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "EmptyArray",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "ExceedsMaxMint",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "ExceedsMaxMintPerWallet",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "ExceedsMaxSacrifice",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "ExceedsMaxWlMint",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "FailedToInitialize",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "InvalidDiscount",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "InvalidParameter",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "InvalidQuantity",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "InvalidRefundSerial",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MintNotStarted",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MintPaused",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MintedOut",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "enum TokenStakerV2.TransferDirection",
+                    "name": "_direction",
+                    "type": "uint8"
+                }
+            ],
+            "name": "NFTTransferFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotAdmin",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotEnoughHbar",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotEnoughLazy",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "NotOwnerOfSerial",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "RefundWindowExpired",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "SacrificeSerialNotOwned",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "SerialAlreadyInPool",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "SerialNotInPool",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TransferFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "WhitelistOnly",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "WithdrawalCooldownActive",
+            "type": "error"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "account",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "bool",
+                    "name": "added",
+                    "type": "bool"
+                }
+            ],
+            "name": "AdminUpdated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "tierIndex",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "discountPercentage",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "maxUsesPerSerial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "DiscountTierUpdated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "mintPriceHbar",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "mintPriceLazy",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "wlDiscount",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "sacrificeDiscount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "EconomicsUpdated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "recipient",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "hbarAmount",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "lazyAmount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "FundsWithdrawn",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "payer",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "amount",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "burnAmount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "LazyPaymentEvent",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "minter",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "uint256",
+                    "name": "quantity",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256[]",
+                    "name": "serials",
+                    "type": "uint256[]"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "hbarPaid",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "lazyPaid",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "totalDiscount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "NFTMinted",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "refunder",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256[]",
+                    "name": "serials",
+                    "type": "uint256[]"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "hbarRefunded",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "lazyRefunded",
+                    "type": "uint256"
+                }
+            ],
+            "name": "NFTRefunded",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "source",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256[]",
+                    "name": "serials",
+                    "type": "uint256[]"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "newPoolSize",
+                    "type": "uint256"
+                }
+            ],
+            "name": "NFTsAddedToPool",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": false,
+                    "internalType": "uint256[]",
+                    "name": "serials",
+                    "type": "uint256[]"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "newPoolSize",
+                    "type": "uint256"
+                }
+            ],
+            "name": "NFTsRemovedFromPool",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "previousOwner",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "newOwner",
+                    "type": "address"
+                }
+            ],
+            "name": "OwnershipTransferred",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "mintStartTime",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "bool",
+                    "name": "mintPaused",
+                    "type": "bool"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "refundWindow",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "refundPercentage",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "bool",
+                    "name": "wlOnly",
+                    "type": "bool"
+                }
+            ],
+            "name": "TimingUpdated",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "account",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "bool",
+                    "name": "added",
+                    "type": "bool"
+                }
+            ],
+            "name": "WhitelistUpdated",
+            "type": "event"
+        },
+        {
+            "inputs": [],
+            "name": "NFT_TOKEN",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "PRECOMPILE_ADDRESS",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "PRNG_GENERATOR",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_admin",
+                    "type": "address"
+                }
+            ],
+            "name": "addAdmin",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_discountPercentage",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_maxUsesPerSerial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "addDiscountTier",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "_serials",
+                    "type": "uint256[]"
+                }
+            ],
+            "name": "addNFTsToPool",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_slots",
+                    "type": "uint256"
+                }
+            ],
+            "name": "addToWhitelist",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_addresses",
+                    "type": "address[]"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "_slots",
+                    "type": "uint256[]"
+                }
+            ],
+            "name": "batchAddToWhitelist",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "buyWhitelistWithLazy",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_numberToMint",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "address[]",
+                    "name": "_tokens",
+                    "type": "address[]"
+                },
+                {
+                    "internalType": "uint256[][]",
+                    "name": "_serialsByToken",
+                    "type": "uint256[][]"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_sacrificeCount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "calculateMintCost",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "totalHbarCost",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "totalLazyCost",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "totalDiscount",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "holderSlotsUsed",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "wlSlotsUsed",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "_serials",
+                    "type": "uint256[]"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_recipient",
+                    "type": "address"
+                }
+            ],
+            "name": "emergencyWithdrawNFTs",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getAdmins",
+            "outputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "",
+                    "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_offset",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_limit",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getAvailableSerialsPaginated",
+            "outputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "",
+                    "type": "uint256[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_tokens",
+                    "type": "address[]"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "_serials",
+                    "type": "uint256[]"
+                }
+            ],
+            "name": "getBatchSerialDiscountInfo",
+            "outputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "discountPercentages",
+                    "type": "uint256[]"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "usesRemaining",
+                    "type": "uint256[]"
+                },
+                {
+                    "internalType": "bool[]",
+                    "name": "isEligible",
+                    "type": "bool[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_users",
+                    "type": "address[]"
+                }
+            ],
+            "name": "getBatchWhitelistSlots",
+            "outputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "",
+                    "type": "uint256[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_tierIndex",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getDiscountTier",
+            "outputs": [
+                {
+                    "components": [
+                        {
+                            "internalType": "uint256",
+                            "name": "discountPercentage",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "maxUsesPerSerial",
+                            "type": "uint256"
+                        }
+                    ],
+                    "internalType": "struct ForeverMinter.DiscountTier",
+                    "name": "",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getDiscountTierCount",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getEconomics",
+            "outputs": [
+                {
+                    "components": [
+                        {
+                            "internalType": "uint256",
+                            "name": "mintPriceHbar",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "mintPriceLazy",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "wlDiscount",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "sacrificeDiscount",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "maxMint",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "maxMintPerWallet",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "buyWlWithLazy",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "buyWlSlotCount",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "maxSacrifice",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "lazyFromContract",
+                            "type": "bool"
+                        }
+                    ],
+                    "internalType": "struct ForeverMinter.MintEconomics",
+                    "name": "",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getLazyDetails",
+            "outputs": [
+                {
+                    "components": [
+                        {
+                            "internalType": "address",
+                            "name": "lazyToken",
+                            "type": "address"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "lazyBurnPerc",
+                            "type": "uint256"
+                        }
+                    ],
+                    "internalType": "struct ForeverMinter.LazyDetails",
+                    "name": "",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getRemainingSupply",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getSerialDiscountUsage",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getSerialMintTime",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "getSerialPayment",
+            "outputs": [
+                {
+                    "components": [
+                        {
+                            "internalType": "uint256",
+                            "name": "hbarPaid",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "lazyPaid",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "address",
+                            "name": "minter",
+                            "type": "address"
+                        }
+                    ],
+                    "internalType": "struct ForeverMinter.MintPayment",
+                    "name": "",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getTiming",
+            "outputs": [
+                {
+                    "components": [
+                        {
+                            "internalType": "uint256",
+                            "name": "lastMintTime",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "mintStartTime",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "mintPaused",
+                            "type": "bool"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "refundWindow",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "refundPercentage",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "wlOnly",
+                            "type": "bool"
+                        }
+                    ],
+                    "internalType": "struct ForeverMinter.MintTiming",
+                    "name": "",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_token",
+                    "type": "address"
+                }
+            ],
+            "name": "getTokenTierIndex",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_wallet",
+                    "type": "address"
+                }
+            ],
+            "name": "getWalletMintCount",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                }
+            ],
+            "name": "isAdmin",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "isSerialAvailable",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_token",
+                    "type": "address"
+                }
+            ],
+            "name": "isTokenDiscountEligible",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                }
+            ],
+            "name": "isWhitelisted",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "lazyDelegateRegistry",
+            "outputs": [
+                {
+                    "internalType": "contract ILazyDelegateRegistry",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "lazyGasStation",
+            "outputs": [
+                {
+                    "internalType": "contract ILazyGasStation",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "lazyToken",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_numberToMint",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "address[]",
+                    "name": "_discountTokens",
+                    "type": "address[]"
+                },
+                {
+                    "internalType": "uint256[][]",
+                    "name": "_serialsByToken",
+                    "type": "uint256[][]"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "_sacrificeSerials",
+                    "type": "uint256[]"
+                }
+            ],
+            "name": "mintNFT",
+            "outputs": [],
+            "stateMutability": "payable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "owner",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "_serials",
+                    "type": "uint256[]"
+                }
+            ],
+            "name": "refundNFT",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256[]",
+                    "name": "_serials",
+                    "type": "uint256[]"
+                }
+            ],
+            "name": "registerNFTs",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_admin",
+                    "type": "address"
+                }
+            ],
+            "name": "removeAdmin",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_token",
+                    "type": "address"
+                }
+            ],
+            "name": "removeDiscountTier",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                }
+            ],
+            "name": "removeFromWhitelist",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "renounceOwnership",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "sacrificeDestination",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_destination",
+                    "type": "address"
+                }
+            ],
+            "name": "setSacrificeDestination",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "newOwner",
+                    "type": "address"
+                }
+            ],
+            "name": "transferOwnership",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_mintPriceHbar",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_mintPriceLazy",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_wlDiscount",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_sacrificeDiscount",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_maxMint",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_maxMintPerWallet",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_buyWlWithLazy",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_buyWlSlotCount",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_maxSacrifice",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_lazyFromContract",
+                    "type": "bool"
+                }
+            ],
+            "name": "updateEconomics",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_burnPerc",
+                    "type": "uint256"
+                }
+            ],
+            "name": "updateLazyBurnPerc",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_paused",
+                    "type": "bool"
+                }
+            ],
+            "name": "updatePauseStatus",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_mintStartTime",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_mintPaused",
+                    "type": "bool"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_refundWindow",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_refundPercentage",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "_wlOnly",
+                    "type": "bool"
+                }
+            ],
+            "name": "updateTiming",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_cooldown",
+                    "type": "uint256"
+                }
+            ],
+            "name": "updateWithdrawalCooldown",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_recipient",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "withdrawHbar",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_recipient",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "withdrawLazy",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "withdrawalCooldown",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "stateMutability": "payable",
+            "type": "receive"
+        }
+    ]
+}

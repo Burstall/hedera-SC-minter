@@ -48,7 +48,7 @@ pragma solidity >=0.8.12 <0.9.0;
 
 import {HederaResponseCodes} from "./HederaResponseCodes.sol";
 import {HederaTokenService} from "./HederaTokenService.sol";
-import {IHederaTokenService} from "./IHederaTokenService.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 import {ExpiryHelper} from "./ExpiryHelper.sol";
 
 // Import OpenZeppelin Contracts libraries where needed
