@@ -92,7 +92,6 @@ node scripts/interactions/BadgeMinter/addToBadgeWhitelist.js 2 0.0.alice_id 0  #
 Users can now mint their badges:
 ```bash
 node scripts/interactions/BadgeMinter/mintBadge.js 1 1     # Mint 1 Bronze badge for yourself
-node scripts/interactions/BadgeMinter/associateToken.js   # Associate token if needed
 ```
 
 ## Gas Limits
