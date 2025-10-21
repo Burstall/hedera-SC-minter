@@ -1,19 +1,64 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
+/*
+ * ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
+ * ⚡                                                             ⚡
+ * ⚡                        LAZY SUPERHEROES                     ⚡
+ * ⚡                      The OG Hedera Project                  ⚡
+ * ⚡                                                             ⚡
+ * ⚡                        %%%%#####%%@@@@                      ⚡
+ * ⚡                   @%%%@%###%%%%###%%%%%@@                   ⚡
+ * ⚡                %%%%%%@@@@@@@@@@@@@@@@%##%%@@                ⚡
+ * ⚡              @%%@#@@@@@@@@@@@@@@@@@@@@@@@@*%%@@             ⚡
+ * ⚡            @%%%%@@@@@@@@@@@@@@@@@@@@@@@@@@@@%*%@@           ⚡
+ * ⚡           %%%#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%#%@@         ⚡
+ * ⚡          %%%@@@@@@@@@@@@@@#-:--==+#@@@@@@@@@@@@@*%@@        ⚡
+ * ⚡         %@#@@@@@@@@@@@@@@*-------::%@@@@@@@@%%%%%*%@@       ⚡
+ * ⚡        %%#@@@@@@@@@@@@@@@=-------:#@@@@@@@@@%%%%%%*%@@      ⚡
+ * ⚡       %%#@@@@@@@@@@@@@@@#-------:+@@@@@@@@@@%%%%%%%#%@@     ⚡
+ * ⚡       %%#@@@@@@@@@@@@@@@=------:=@@@@@@@@@@@%%%%%%%%#@@     ⚡
+ * ⚡      #%#@@@%%%%%%%@@@@@%------:-@@@@@@@@@@@@@%%%%%%%#%@@    ⚡
+ * ⚡      %%#@@@%%%%%%%%@@@@=------------:::@@@@@@@@%%%%%#%@@    ⚡
+ * ⚡      %%#@@%%%%%%%%%@@@%:------------::%@@@@@@@@@%%%%#%@@    ⚡
+ * ⚡      %%#@@%%%%%%%%%@@@=:::---------:-@@@@@@@@@@@@@@@#@@@    ⚡
+ * ⚡      #%#@@@%%%%%%%@@@@*:::::::----:-@@@@@@@@@@@@@@@@#@@@    ⚡
+ * ⚡      %%%%@@@@%%%%%@@@@@@@@@@-:---:=@@@@@@@@@@@@@@@@@%@@@    ⚡
+ * ⚡       %%#@@@@%%%%@@@@@@@@@@@::--:*@@@@@@@@@@@@@@@@@%@@@     ⚡
+ * ⚡       %#%#@@@%@%%%@@@@@@@@@#::::#@@@@@@@@@@@@@@@@@@%@@@     ⚡
+ * ⚡        %%%%@@@%%%%%%@@@@@@@*:::%@@@@@@@@@@@@@@@@@@%@@@      ⚡
+ * ⚡         %%#%@@%%%%%%%@@@@@@=.-%@@@@@@@@@@@@@@@@@@%@@@       ⚡
+ * ⚡          %##*@%%%%%%%%%@@@@=+@@@@@@@@@@@@@@@@@@%%@@@        ⚡
+ * ⚡           %##*%%%%%%%%%%@@@@@@@@@@@@@@@@@@@@@@%@@@@         ⚡
+ * ⚡             %##+#%%%%%%%%@@@@@@@@@@@@@@@@@@@%@@@@           ⚡
+ * ⚡               %##*=%%%%%%%@@@@@@@@@@@@@@@#@@@@@             ⚡
+ * ⚡                 %##%#**#@@@@@@@@@@@@%%%@@@@@@               ⚡
+ * ⚡                    %%%%@@%@@@%%@@@@@@@@@@@                  ⚡
+ * ⚡                         %%%%%%%%%%%@@                       ⚡
+ * ⚡                                                             ⚡
+ * ⚡                 Development Team Focused on                 ⚡
+ * ⚡                   Decentralized Solutions                   ⚡
+ * ⚡                                                             ⚡
+ * ⚡         Visit: http://lazysuperheroes.com/                  ⚡
+ * ⚡            or: https://dapp.lazysuperheroes.com/            ⚡
+ * ⚡                   to get your LAZY on!                      ⚡
+ * ⚡                                                             ⚡
+ * ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
+ */
+
 import {HederaResponseCodes} from "./HederaResponseCodes.sol";
-import {HederaTokenService} from "./HederaTokenService.sol";
 import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 import {ExpiryHelper} from "./ExpiryHelper.sol";
 import {IHRC719} from "./interfaces/IHRC719.sol";
+import {IPrngGenerator} from "./interfaces/IPrngGenerator.sol";
+import {Bits} from "./KeyHelper.sol";
 
-// functionality moved to library for space saving
-import {MinterLibrary} from "./MinterLibrary.sol";
 import {IBurnableHTS} from "./interfaces/IBurnableHTS.sol";
 
 // Import OpenZeppelin Contracts libraries where needed
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -32,6 +77,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     using SafeCast for int256;
     using Address for address;
     using Strings for string;
+    using Bits for uint256;
 
     // list of WL addresses
     EnumerableMap.AddressToUintMap private whitelistedAddressQtyMap;
@@ -81,12 +127,44 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     error HbarCooldown();
     error WLPurchaseFailed();
     error NotTokenOwner();
+    error WLTokenUsed();
+    error NoWLToken();
     error MaxSerials();
     error BadArguments();
     error FreezingFailed();
     error UnFreezingFailed();
     error NotRevokable();
     error NFTNotOwned();
+
+    enum ContractEventType {
+        INITIALISE,
+        REFUND,
+        PAUSE,
+        UNPAUSE,
+        LAZY_PMT,
+        WL_PURCHASE_TOKEN,
+        WL_PURCHASE_LAZY,
+        WL_ADD,
+        WL_REMOVE,
+        RESET_CONTRACT,
+        RESET_INC_TOKEN,
+        UPDATE_WL_TOKEN,
+        UPDATE_WL_LAZY_BUY,
+        UPDATE_WL_ONLY,
+        UPDATE_WL_MAX,
+        UPDATE_WL_DISCOUNT,
+        UPDATE_MAX_MINT,
+        UPDATE_MAX_WALLET_MINT,
+        UPDATE_COOLDOWN,
+        UPDATE_MINT_PRICE,
+        UPDATE_MINT_PRICE_LAZY,
+        UPDATE_LAZY_BURN_PERCENTAGE,
+        UPDATE_LAZY_FROM_CONTRACT,
+        UPDATE_CID,
+        UPDATE_MINT_START_TIME,
+        UPDATE_REFUND_WINDOW,
+        REVOKE_SBT
+    }
 
     struct MintTiming {
         uint256 lastMintTime;
@@ -134,7 +212,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     bool public fixedEdition;
 
     event MinterContractMessage(
-        MinterLibrary.ContractEventType _eventType,
+        ContractEventType _eventType,
         address indexed _msgAddress,
         uint256 _msgNumeric
     );
@@ -176,6 +254,10 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         REVOCABLE = _revocable;
     }
 
+    // ============================================
+    // Main Contract Functions
+    // ============================================
+
     // Supply the contract with token details and _metadata
     // Once basic integrity checks are done the token will mint and the address will be returned
     /// @param _name token name
@@ -213,11 +295,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         IHederaTokenService.TokenKey[]
             memory _keys = new IHederaTokenService.TokenKey[](1);
 
-        // create the key for the token - moved to library for space saving
-        _keys[0] = MinterLibrary.getSBTContractMintKey(
-            REVOCABLE,
-            address(this)
-        );
+        // create the key for the token
+        _keys[0] = getSBTContractMintKey(REVOCABLE, address(this));
 
         IHederaTokenService.HederaToken memory _token;
         _token.name = _name;
@@ -249,11 +328,12 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         // create the expiry schedule for the token using ExpiryHelper
         _token.expiry = createAutoRenewExpiry(
             address(this),
-            HederaTokenService.defaultAutoRenewPeriod
+            DEFAULT_AUTO_RENEW_PERIOD
         );
 
-        (int32 responseCode, address tokenAddress) = HederaTokenService
-            .createNonFungibleToken(_token);
+        (int32 responseCode, address tokenAddress) = createNonFungibleToken(
+            _token
+        );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
             revert FailedToMint();
@@ -264,11 +344,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         _createdTokenAddress = token;
         _tokenSupply = maxSupply;
 
-        emitMessage(
-            MinterLibrary.ContractEventType.INITIALISE,
-            token,
-            maxSupply
-        );
+        emitMessage(ContractEventType.INITIALISE, token, maxSupply);
     }
 
     /// @param _numberToMint the number of NFTs to mint
@@ -331,24 +407,16 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         // Design decision: WL max mint per wallet takes priority
         // over max mint per wallet
         if (mintTiming.wlOnly) {
-            if (
-                !MinterLibrary.checkWhitelistConditions(
-                    whitelistedAddressQtyMap,
-                    _onBehalfOf,
-                    mintEconomics.maxWlAddressMint
-                )
-            ) revert NotWL();
-            // only check the qty if there is a limit at contract level
+            // Inline checkWhitelistConditions
+            (bool found, uint256 qty) = whitelistedAddressQtyMap.tryGet(
+                _onBehalfOf
+            );
+            if (!found) revert NotWL();
             if (mintEconomics.maxWlAddressMint > 0) {
-                // we know the address is in the list to get here.
-                uint256 wlMintsRemaining = whitelistedAddressQtyMap.get(
-                    _onBehalfOf
-                );
-                if (wlMintsRemaining < _numberToMint) revert NotEnoughWLSlots();
-                whitelistedAddressQtyMap.set(
-                    _onBehalfOf,
-                    wlMintsRemaining -= _numberToMint
-                );
+                if (qty == 0) revert NotWL();
+                // only check the qty if there is a limit at contract level
+                if (qty < _numberToMint) revert NotEnoughWLSlots();
+                whitelistedAddressQtyMap.set(_onBehalfOf, qty - _numberToMint);
             }
             isWlMint = true;
         } else if (mintEconomics.maxMintPerWallet > 0) {
@@ -364,10 +432,24 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             ) revert MaxMintPerWalletExceeded();
         }
 
-        //calculate cost
-        (uint256 hbarCost, uint256 lazyCost) = getCostInternal(isWlMint);
-        uint256 totalHbarCost = _numberToMint * hbarCost;
-        uint256 totalLazyCost = _numberToMint * lazyCost;
+        //calculate cost (inline getCostInternal)
+        uint256 totalHbarCost;
+        uint256 totalLazyCost;
+        if (isWlMint) {
+            totalHbarCost =
+                (_numberToMint *
+                    (mintEconomics.mintPriceHbar *
+                        (100 - mintEconomics.wlDiscount))) /
+                100;
+            totalLazyCost =
+                (_numberToMint *
+                    (mintEconomics.mintPriceLazy *
+                        (100 - mintEconomics.wlDiscount))) /
+                100;
+        } else {
+            totalHbarCost = _numberToMint * mintEconomics.mintPriceHbar;
+            totalLazyCost = _numberToMint * mintEconomics.mintPriceLazy;
+        }
 
         // take the payment
         if (totalLazyCost > 0) {
@@ -390,7 +472,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
                 }
             }
         } else {
-            _metadataForMint = MinterLibrary.selectMetdataToMint(
+            _metadataForMint = selectMetdataToMint(
                 metadata,
                 _numberToMint,
                 cid,
@@ -561,32 +643,11 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             }
         }
 
-        emitMessage(MinterLibrary.ContractEventType.LAZY_PMT, _payer, _amount);
-    }
-
-    /// @param _isWlMint boolean to indicate if the mint is a WL mint
-    /// @return _hbarCost the cost in Hbar
-    /// @return _lazyCost the cost in Lazy
-    function getCostInternal(
-        bool _isWlMint
-    ) internal view returns (uint256 _hbarCost, uint256 _lazyCost) {
-        if (_isWlMint) {
-            _hbarCost =
-                (mintEconomics.mintPriceHbar *
-                    (100 - mintEconomics.wlDiscount)) /
-                100;
-            _lazyCost =
-                (mintEconomics.mintPriceLazy *
-                    (100 - mintEconomics.wlDiscount)) /
-                100;
-        } else {
-            _hbarCost = mintEconomics.mintPriceHbar;
-            _lazyCost = mintEconomics.mintPriceLazy;
-        }
+        emitMessage(ContractEventType.LAZY_PMT, _payer, _amount);
     }
 
     function emitMessage(
-        MinterLibrary.ContractEventType _eventType,
+        ContractEventType _eventType,
         address _msgAddress,
         uint256 _msgNumeric
     ) internal {
@@ -602,13 +663,30 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         view
         returns (uint256 _hbarCost, uint256 _lazyCost)
     {
-        (_hbarCost, _lazyCost) = getCostInternal(
-            MinterLibrary.checkWhitelistConditions(
-                whitelistedAddressQtyMap,
-                msg.sender,
-                mintEconomics.maxWlAddressMint
-            )
-        );
+        // Inline both checkWhitelistConditions and getCostInternal
+        (bool found, uint256 qty) = whitelistedAddressQtyMap.tryGet(msg.sender);
+        bool isWlMint = false;
+        if (found) {
+            if (mintEconomics.maxWlAddressMint > 0) {
+                isWlMint = qty > 0 ? true : false;
+            } else {
+                isWlMint = true;
+            }
+        }
+
+        if (isWlMint) {
+            _hbarCost =
+                (mintEconomics.mintPriceHbar *
+                    (100 - mintEconomics.wlDiscount)) /
+                100;
+            _lazyCost =
+                (mintEconomics.mintPriceLazy *
+                    (100 - mintEconomics.wlDiscount)) /
+                100;
+        } else {
+            _hbarCost = mintEconomics.mintPriceHbar;
+            _lazyCost = mintEconomics.mintPriceLazy;
+        }
     }
 
     /// @param _receiver The receiver of the transaction
@@ -643,7 +721,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         whitelistedAddressQtyMap.set(msg.sender, _wlSpotsPurchased);
         takeLazyPayment(mintEconomics.buyWlWithLazy, msg.sender);
         emitMessage(
-            MinterLibrary.ContractEventType.WL_PURCHASE_LAZY,
+            ContractEventType.WL_PURCHASE_LAZY,
             msg.sender,
             _wlSpotsPurchased
         );
@@ -654,7 +732,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     function buyWlWithTokens(
         uint256[] memory _serials
     ) external returns (uint256 _wlSpotsPurchased) {
-        _wlSpotsPurchased = MinterLibrary.buyWlWithTokens(
+        _wlSpotsPurchased = buyWlWithTokensInternal(
             _serials,
             mintEconomics.wlToken,
             mintEconomics.maxWlAddressMint,
@@ -683,11 +761,22 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     // Add an address to the allowance WL
     /// @param _newAddresses array of addresses to add
     function addToWhitelist(address[] memory _newAddresses) external onlyOwner {
-        MinterLibrary.addToWhitelist(
-            whitelistedAddressQtyMap,
-            _newAddresses,
-            mintEconomics.maxWlAddressMint
-        );
+        uint256 _length = _newAddresses.length;
+        for (uint256 a = 0; a < _length; ) {
+            bool result = whitelistedAddressQtyMap.set(
+                _newAddresses[a],
+                mintEconomics.maxWlAddressMint
+            );
+            emit MinterContractMessage(
+                ContractEventType.WL_ADD,
+                _newAddresses[a],
+                result ? 1 : 0
+            );
+
+            unchecked {
+                ++a;
+            }
+        }
     }
 
     // Remove an address to the allowance WL
@@ -695,10 +784,19 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     function removeFromWhitelist(
         address[] memory _oldAddresses
     ) public onlyOwner {
-        MinterLibrary.removeFromWhitelist(
-            whitelistedAddressQtyMap,
-            _oldAddresses
-        );
+        uint256 _length = _oldAddresses.length;
+        for (uint256 a = 0; a < _length; ) {
+            bool result = whitelistedAddressQtyMap.remove(_oldAddresses[a]);
+            emit MinterContractMessage(
+                ContractEventType.WL_REMOVE,
+                _oldAddresses[a],
+                result ? 1 : 0
+            );
+
+            unchecked {
+                ++a;
+            }
+        }
     }
 
     // clear the whole WL
@@ -708,9 +806,14 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         onlyOwner
         returns (uint256 _numAddressesRemoved)
     {
-        _numAddressesRemoved = MinterLibrary.clearWhitelist(
-            whitelistedAddressQtyMap
-        );
+        _numAddressesRemoved = whitelistedAddressQtyMap.length();
+        for (uint256 a = _numAddressesRemoved; a > 0; ) {
+            (address key, ) = whitelistedAddressQtyMap.at(a - 1);
+            whitelistedAddressQtyMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
     }
 
     function revokeSBT(
@@ -739,11 +842,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
         responseCode = wipeTokenAccountNFT(token, _user, serials);
 
-        emitMessage(
-            MinterLibrary.ContractEventType.REVOKE_SBT,
-            _user,
-            serialToBurn
-        );
+        emitMessage(ContractEventType.REVOKE_SBT, _user, serialToBurn);
 
         // if the user has more of the token refeeze it
         if (IERC721(token).balanceOf(_user) > 0) {
@@ -821,7 +920,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         if (mintEconomics.mintPriceHbar != _hbarCost) {
             mintEconomics.mintPriceHbar = _hbarCost;
             emitMessage(
-                MinterLibrary.ContractEventType.UPDATE_MINT_PRICE,
+                ContractEventType.UPDATE_MINT_PRICE,
                 msg.sender,
                 mintEconomics.mintPriceHbar
             );
@@ -830,7 +929,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         if (mintEconomics.mintPriceLazy != _lazyCost) {
             mintEconomics.mintPriceLazy = _lazyCost;
             emitMessage(
-                MinterLibrary.ContractEventType.UPDATE_MINT_PRICE_LAZY,
+                ContractEventType.UPDATE_MINT_PRICE_LAZY,
                 msg.sender,
                 mintEconomics.mintPriceLazy
             );
@@ -846,8 +945,8 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         if (_changed)
             emitMessage(
                 _mintPaused
-                    ? MinterLibrary.ContractEventType.PAUSE
-                    : MinterLibrary.ContractEventType.UNPAUSE,
+                    ? ContractEventType.PAUSE
+                    : ContractEventType.UNPAUSE,
                 msg.sender,
                 _mintPaused ? 1 : 0
             );
@@ -862,7 +961,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         _changed = mintTiming.wlOnly == _wlOnly ? false : true;
         if (_changed)
             emitMessage(
-                MinterLibrary.ContractEventType.UPDATE_WL_ONLY,
+                ContractEventType.UPDATE_WL_ONLY,
                 msg.sender,
                 _wlOnly ? 1 : 0
             );
@@ -881,7 +980,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
         _changed = mintEconomics.buyWlWithLazy == _lazyAmt ? false : true;
         if (_changed)
             emitMessage(
-                MinterLibrary.ContractEventType.UPDATE_WL_LAZY_BUY,
+                ContractEventType.UPDATE_WL_LAZY_BUY,
                 msg.sender,
                 _lazyAmt
             );
@@ -894,11 +993,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     ) external onlyOwner returns (bool _changed) {
         _changed = mintEconomics.maxWlAddressMint == _maxMint ? false : true;
         if (_changed)
-            emitMessage(
-                MinterLibrary.ContractEventType.UPDATE_WL_MAX,
-                msg.sender,
-                _maxMint
-            );
+            emitMessage(ContractEventType.UPDATE_WL_MAX, msg.sender, _maxMint);
         mintEconomics.maxWlAddressMint = _maxMint;
     }
 
@@ -912,7 +1007,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             : true;
         if (_changed)
             emitMessage(
-                MinterLibrary.ContractEventType.UPDATE_LAZY_FROM_CONTRACT,
+                ContractEventType.UPDATE_LAZY_FROM_CONTRACT,
                 msg.sender,
                 _lazyFromContract ? 1 : 0
             );
@@ -923,7 +1018,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     function updateMintStartTime(uint256 _startTime) external onlyOwner {
         mintTiming.mintStartTime = _startTime;
         emitMessage(
-            MinterLibrary.ContractEventType.UPDATE_MINT_START_TIME,
+            ContractEventType.UPDATE_MINT_START_TIME,
             msg.sender,
             _startTime
         );
@@ -942,7 +1037,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     function updateLazyBurnPercentage(uint256 _lbp) external onlyOwner {
         lazyDetails.lazyBurnPerc = _lbp;
         emitMessage(
-            MinterLibrary.ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE,
+            ContractEventType.UPDATE_LAZY_BURN_PERCENTAGE,
             msg.sender,
             _lbp
         );
@@ -951,18 +1046,14 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _maxMint new max mint (0 = uncapped)
     function updateMaxMint(uint256 _maxMint) external onlyOwner {
         mintEconomics.maxMint = _maxMint;
-        emitMessage(
-            MinterLibrary.ContractEventType.UPDATE_MAX_MINT,
-            msg.sender,
-            _maxMint
-        );
+        emitMessage(ContractEventType.UPDATE_MAX_MINT, msg.sender, _maxMint);
     }
 
     /// @param _wlDiscount as percentage
     function updateWlDiscount(uint256 _wlDiscount) external onlyOwner {
         mintEconomics.wlDiscount = _wlDiscount;
         emitMessage(
-            MinterLibrary.ContractEventType.UPDATE_WL_DISCOUNT,
+            ContractEventType.UPDATE_WL_DISCOUNT,
             msg.sender,
             _wlDiscount
         );
@@ -972,7 +1063,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     function updateCooldown(uint256 _cooldownPeriod) external onlyOwner {
         mintTiming.cooldownPeriod = _cooldownPeriod;
         emitMessage(
-            MinterLibrary.ContractEventType.UPDATE_COOLDOWN,
+            ContractEventType.UPDATE_COOLDOWN,
             msg.sender,
             _cooldownPeriod
         );
@@ -982,7 +1073,7 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
     function updateRefundWindow(uint256 _refundWindow) external onlyOwner {
         mintTiming.refundWindow = _refundWindow;
         emitMessage(
-            MinterLibrary.ContractEventType.UPDATE_REFUND_WINDOW,
+            ContractEventType.UPDATE_REFUND_WINDOW,
             msg.sender,
             _refundWindow
         );
@@ -1005,26 +1096,18 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
     function updateWlToken(address _wlToken) external onlyOwner {
         mintEconomics.wlToken = _wlToken;
-        emitMessage(
-            MinterLibrary.ContractEventType.UPDATE_WL_TOKEN,
-            msg.sender,
-            0
-        );
+        emitMessage(ContractEventType.UPDATE_WL_TOKEN, msg.sender, 0);
     }
 
     function updateMaxMintPerWallet(uint256 _max) external onlyOwner {
         mintEconomics.maxMintPerWallet = _max;
-        emitMessage(
-            MinterLibrary.ContractEventType.UPDATE_MAX_WALLET_MINT,
-            msg.sender,
-            _max
-        );
+        emitMessage(ContractEventType.UPDATE_MAX_WALLET_MINT, msg.sender, _max);
     }
 
     /// @param _cid new _cid
     function updateCID(string memory _cid) external onlyOwner {
         cid = _cid;
-        emitMessage(MinterLibrary.ContractEventType.UPDATE_CID, msg.sender, 0);
+        emitMessage(ContractEventType.UPDATE_CID, msg.sender, 0);
     }
 
     /// @param _metadata new _metadata array
@@ -1075,20 +1158,87 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             token = address(0);
             totalMinted = 0;
         }
-        _remaingItems = MinterLibrary.resetContract(
-            addressToNumMintedMap,
-            metadata,
-            walletMintTimeMap,
-            wlAddressToNumMintedMap,
-            serialMintTimeMap,
-            wlSerialsUsed,
-            _batch
-        );
+
+        // Inline resetContractInternal
+        uint256 size = addressToNumMintedMap.length();
+        if (size > _batch) {
+            _remaingItems = size - _batch;
+            size = _batch;
+        }
+
+        for (uint256 a = size; a > 0; ) {
+            (address key, ) = addressToNumMintedMap.at(a - 1);
+            addressToNumMintedMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
+        size = metadata.length;
+        size = size > _batch ? _batch : size;
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+
+        for (uint256 a = size; a > 0; ) {
+            metadata.pop();
+            unchecked {
+                --a;
+            }
+        }
+        size = walletMintTimeMap.length();
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+        for (uint256 a = size; a > 0; ) {
+            (address key, ) = walletMintTimeMap.at(a - 1);
+            walletMintTimeMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
+        size = wlAddressToNumMintedMap.length();
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+        for (uint256 a = size; a > 0; ) {
+            (address key, ) = wlAddressToNumMintedMap.at(a - 1);
+            wlAddressToNumMintedMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
+        size = serialMintTimeMap.length();
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+        for (uint256 a = size; a > 0; ) {
+            (uint256 key, ) = serialMintTimeMap.at(a - 1);
+            serialMintTimeMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
+        size = wlSerialsUsed.length();
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+        for (uint256 a = size; a > 0; ) {
+            uint256 key = wlSerialsUsed.at(a - 1);
+            wlSerialsUsed.remove(key);
+            unchecked {
+                --a;
+            }
+        }
 
         emitMessage(
             _removeToken
-                ? MinterLibrary.ContractEventType.RESET_INC_TOKEN
-                : MinterLibrary.ContractEventType.RESET_CONTRACT,
+                ? ContractEventType.RESET_INC_TOKEN
+                : ContractEventType.RESET_CONTRACT,
             msg.sender,
             _batch
         );
@@ -1194,12 +1344,16 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             uint256[] memory _wlNumMintedList
         )
     {
-        (_wlWalletList, _wlNumMintedList) = MinterLibrary
-            .getNumberMintedByAllWlAddressesBatch(
-                wlAddressToNumMintedMap,
-                0,
-                wlAddressToNumMintedMap.length()
-            );
+        uint256 length = wlAddressToNumMintedMap.length();
+        _wlWalletList = new address[](length);
+        _wlNumMintedList = new uint256[](length);
+        for (uint256 a = 0; a < length; ) {
+            (_wlWalletList[a], _wlNumMintedList[a]) = wlAddressToNumMintedMap
+                .at(a);
+            unchecked {
+                ++a;
+            }
+        }
     }
 
     function getNumberMintedByAllWlAddressesBatch(
@@ -1213,12 +1367,17 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             uint256[] memory _wlNumMintedList
         )
     {
-        (_wlWalletList, _wlNumMintedList) = MinterLibrary
-            .getNumberMintedByAllWlAddressesBatch(
-                wlAddressToNumMintedMap,
-                _offset,
-                _batchSize
-            );
+        if ((_offset + _batchSize) > wlAddressToNumMintedMap.length())
+            revert BadArguments();
+        _wlWalletList = new address[](_batchSize);
+        _wlNumMintedList = new uint256[](_batchSize);
+        for (uint256 a = 0; a < _batchSize; ) {
+            (_wlWalletList[a], _wlNumMintedList[a]) = wlAddressToNumMintedMap
+                .at(a + _offset);
+            unchecked {
+                ++a;
+            }
+        }
     }
 
     /// @return _remainingMint number of NFTs left to mint
@@ -1311,6 +1470,103 @@ contract SoulboundMinter is ExpiryHelper, Ownable, ReentrancyGuard {
             _serial.toUint256(),
             string(_metadata)
         );
+    }
+
+    // ============================================
+    // Internal Helper Functions (formerly library)
+    // ============================================
+
+    function selectMetdataToMint(
+        string[] storage metadata_,
+        uint256 numberToMint,
+        string storage cid_,
+        address prngGenerator_
+    ) internal returns (bytes[] memory metadataForMint) {
+        // size the return array
+        metadataForMint = new bytes[](numberToMint);
+
+        if (prngGenerator_ == address(0)) {
+            for (uint256 m = 0; m < numberToMint; m++) {
+                metadataForMint[m] = bytes(
+                    string.concat(cid_, metadata_[metadata_.length - 1])
+                );
+                // pop discarding the element used up
+                metadata_.pop();
+            }
+        } else {
+            for (uint256 m = 0; m < numberToMint; ) {
+                // if only 1 item left, no need to generate random number
+                if (metadata_.length == 1) {
+                    metadataForMint[m] = bytes(
+                        string.concat(cid_, metadata_[0])
+                    );
+                    metadata_.pop();
+                    // should only be here on the last iteration anyway
+                    break;
+                } else {
+                    uint256 index = IPrngGenerator(prngGenerator_)
+                        .getPseudorandomNumber(0, metadata_.length - 1, m);
+                    string memory chosen = metadata_[index];
+                    // swap the chosen element with the last element
+                    metadata_[index] = metadata_[metadata_.length - 1];
+                    metadataForMint[m] = bytes(string.concat(cid_, chosen));
+                    // pop discarding the element used up
+                    metadata_.pop();
+                }
+
+                unchecked {
+                    ++m;
+                }
+            }
+        }
+    }
+
+    function getSBTContractMintKey(
+        bool _revocable,
+        address _contract
+    ) internal pure returns (IHederaTokenService.TokenKey memory mintKey) {
+        uint256 keyType;
+        keyType = keyType.setBit(uint8(KeyType.SUPPLY));
+        keyType = keyType.setBit(uint8(KeyType.FREEZE));
+
+        if (_revocable) {
+            keyType = keyType.setBit(uint8(KeyType.WIPE));
+        }
+
+        IHederaTokenService.KeyValue memory keyValue;
+        keyValue.contractId = _contract;
+
+        mintKey = IHederaTokenService.TokenKey(keyType, keyValue);
+    }
+
+    function buyWlWithTokensInternal(
+        uint256[] memory _serials,
+        address _wlToken,
+        uint256 _maxWlAddressMint,
+        EnumerableMap.AddressToUintMap storage whitelistedAddressQtyMap_,
+        EnumerableSet.UintSet storage wlSerialsUsed_
+    ) internal returns (uint256 _wlSpotsPurchased) {
+        if (_wlToken == address(0)) revert NoWLToken();
+
+        for (uint8 i = 0; i < _serials.length; i++) {
+            // check no double dipping
+            if (wlSerialsUsed_.contains(_serials[i])) revert WLTokenUsed();
+            // check user owns the token
+            if (IERC721(_wlToken).ownerOf(_serials[i]) != msg.sender)
+                revert NotTokenOwner();
+            wlSerialsUsed_.add(_serials[i]);
+            emit MinterContractMessage(
+                ContractEventType.WL_PURCHASE_TOKEN,
+                msg.sender,
+                _serials[i]
+            );
+        }
+
+        _wlSpotsPurchased = whitelistedAddressQtyMap_.contains(msg.sender)
+            ? whitelistedAddressQtyMap_.get(msg.sender) +
+                (_maxWlAddressMint * _serials.length)
+            : (_maxWlAddressMint * _serials.length);
+        whitelistedAddressQtyMap_.set(msg.sender, _wlSpotsPurchased);
     }
 
     receive() external payable {}

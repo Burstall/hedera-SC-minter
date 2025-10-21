@@ -2,11 +2,10 @@
 pragma solidity >=0.8.12 <0.9.0;
 pragma experimental ABIEncoderV2;
 
-import "./HederaTokenService.sol";
-import "./FeeHelper.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
+import {FeeHelper} from "./FeeHelper.sol";
 
 contract ExpiryHelper is FeeHelper {
-
     function createAutoRenewExpiry(
         address autoRenewAccount,
         uint32 autoRenewPeriod
@@ -15,7 +14,9 @@ contract ExpiryHelper is FeeHelper {
         expiry.autoRenewPeriod = autoRenewPeriod;
     }
 
-    function createSecondExpiry(uint32 second) internal pure returns (IHederaTokenService.Expiry memory expiry) {
+    function createSecondExpiry(
+        uint32 second
+    ) internal pure returns (IHederaTokenService.Expiry memory expiry) {
         expiry.second = second;
     }
 }

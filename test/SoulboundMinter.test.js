@@ -15,7 +15,7 @@ const {
 	contractDeployFunction,
 	readOnlyEVMFromMirrorNode,
 	contractExecuteFunction,
-	linkBytecode,
+	// linkBytecode,
 } = require('../utils/solidityHelpers');
 const { sleep } = require('../utils/nodeHelpers');
 const {
@@ -37,7 +37,7 @@ require('dotenv').config();
 let operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 let operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'SoulboundMinter';
-const libraryName = 'MinterLibrary';
+// const libraryName = 'MinterLibrary';
 const lazyContractCreator = 'FungibleTokenCreator';
 const env = process.env.ENVIRONMENT ?? null;
 const lazyBurnPerc = 25;
@@ -189,25 +189,26 @@ describe('Deployment: ', function () {
 		}
 
 		// deploy library contract
-		console.log('\n-Deploying library:', libraryName);
+		// REMOVED AS WE HAVE REFACTORED TO INTERNAL FUNCTIONS
+		// console.log('\n-Deploying library:', libraryName);
 
-		const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
+		// const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
 
-		const [libContractId] = await contractDeployFunction(client, libraryBytecode, 500_000);
-		console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
+		// const [libContractId] = await contractDeployFunction(client, libraryBytecode, 500_000);
+		// console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
 
 		const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`));
 
-		const contractBytecode = json.bytecode;
+		// const contractBytecode = json.bytecode;
 
-		// replace library address in bytecode
-		console.log('\n-Linking library address in bytecode...');
-		const readyToDeployBytecode = linkBytecode(contractBytecode, [libraryName], [libContractId]);
+		// // replace library address in bytecode
+		// console.log('\n-Linking library address in bytecode...');
+		// const readyToDeployBytecode = linkBytecode(contractBytecode, [libraryName], [libContractId]);
 
 		// import ABI
 		minterIface = new ethers.Interface(json.abi);
 
-		const gasLimit = 5_600_000;
+		const gasLimit = 6_600_000;
 
 		console.log('\n- Deploying contract...', contractName, '\n\tgas@', gasLimit);
 
@@ -217,7 +218,7 @@ describe('Deployment: ', function () {
 			.addUint256(lazyBurnPerc)
 			.addBool(false);
 
-		[contractId, contractAddress] = await contractDeployFunction(client, readyToDeployBytecode, gasLimit, constructorParams);
+		[contractId, contractAddress] = await contractDeployFunction(client, json.bytecode, gasLimit, constructorParams);
 
 		console.log(`Contract created with ID: ${contractId} / ${contractAddress}`);
 
@@ -232,7 +233,7 @@ describe('Deployment: ', function () {
 			.addUint256(lazyBurnPerc)
 			.addBool(true);
 
-		[revocableContractId] = await contractDeployFunction(client, readyToDeployBytecode, gasLimit, revocableConstructorParams);
+		[revocableContractId] = await contractDeployFunction(client, json.bytecode, gasLimit, revocableConstructorParams);
 
 		console.log(`Revocable Contract created with ID: ${revocableContractId} / ${revocableContractId.toSolidityAddress()}`);
 		expect(revocableContractId.toString().match(addressRegex).length == 2).to.be.true;
@@ -1915,7 +1916,7 @@ describe('Test out WL functions...', function () {
 
 			// custom erro now in the MinterLibrary so name no longer available based on our
 			// single interface error chacing.
-			if (result[0]?.status != null) {
+			if (result[0]?.status != null && result[0]?.status?.name != 'WLTokenUsed') {
 				console.log('ERROR expecting null (WLTokenUsed):', result);
 				unexpectedErrors++;
 			}

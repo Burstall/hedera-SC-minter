@@ -55,8 +55,8 @@ const amountForBob = 5;
 
 const client = Client.forTestnet().setOperator(operatorId, operatorKey);
 
-describe('Deployment: ', function() {
-	it('Should deploy the contract and setup conditions', async function() {
+describe('Deployment: ', function () {
+	it('Should deploy the contract and setup conditions', async function () {
 		if (contractName === undefined || contractName == null) {
 			console.log('Environment required, please specify CONTRACT_NAME for ABI in the .env file');
 			process.exit(1);
@@ -88,7 +88,7 @@ describe('Deployment: ', function() {
 		abi = json.abi;
 
 		const contractBytecode = json.bytecode;
-		const gasLimit = 1200000;
+		const gasLimit = 5_250_000;
 
 		console.log('\n- Deploying contract...', contractName, '\n\tgas@', gasLimit);
 
@@ -100,22 +100,31 @@ describe('Deployment: ', function() {
 	});
 });
 
-describe('Mint the fungible token', function() {
-	it('Check only owner can call to mint', async function() {
+describe('Mint the fungible token', function () {
+	it('Check only owner can call to mint', async function () {
 		client.setOperator(aliceId, alicePK);
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
 			await mintFungible('Alice', 'AT', 'Memo', 10, 0, 0, 30);
 		}
 		catch (err) {
-			errorCount++;
-			expect(err instanceof StatusError).to.be.true;
+			// Should throw due to onlyOwner modifier
+			if (err instanceof StatusError) {
+				expectedErrors++;
+			}
+			else {
+				console.log('Unexpected Error:', err);
+				unexpectedErrors++;
+			}
 		}
-		expect(errorCount).to.be.equal(1);
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
 
-	it('Owner mints a FT', async function() {
+	it('Owner mints a FT', async function () {
 		contractFTSupply = 100000;
 		client.setOperator(operatorId, operatorKey);
 		tokenDecimal = 2;
@@ -123,7 +132,7 @@ describe('Mint the fungible token', function() {
 		expect(tokenId.toString().match(addressRegex).length == 2).to.be.true;
 	});
 
-	it.skip('Owner mints a FT with fixed fees - security model shift breaks this', async function() {
+	it.skip('Owner mints a FT with fixed fees - security model shift breaks this', async function () {
 		contractFTSupply = 100000;
 		client.setOperator(operatorId, operatorKey);
 		tokenDecimal = 2;
@@ -134,7 +143,7 @@ describe('Mint the fungible token', function() {
 		expect(TokenId.fromSolidityAddress(tokenIdAsSolidityAddress).toString().match(addressRegex).length == 2).to.be.true;
 	});
 
-	it.skip('Owner mints a FT with Fractional fees - security model shift breaks this', async function() {
+	it.skip('Owner mints a FT with Fractional fees - security model shift breaks this', async function () {
 		contractFTSupply = 100000;
 		client.setOperator(operatorId, operatorKey);
 		tokenDecimal = 2;
@@ -145,14 +154,14 @@ describe('Mint the fungible token', function() {
 		expect(TokenId.fromSolidityAddress(tokenIdAsSolidityAddress).toString().match(addressRegex).length == 2).to.be.true;
 	});
 
-	it('Ensure the balance of FT is correct', async function() {
+	it('Ensure the balance of FT is correct', async function () {
 		const [contractTokenBal] = await getContractBalance(contractId, tokenId);
 		expect(Number(contractTokenBal)).to.be.equal(contractFTSupply);
 	});
 });
 
-describe('Interaction: ', function() {
-	it('Associate token to Operator, Alice & Bob', async function() {
+describe('Interaction: ', function () {
+	it('Associate token to Operator, Alice & Bob', async function () {
 		client.setOperator(operatorId, operatorKey);
 		let result = await associateTokenToAccount(operatorId, operatorKey);
 		expect(result).to.be.equal('SUCCESS');
@@ -166,7 +175,7 @@ describe('Interaction: ', function() {
 		expect(result).to.be.equal('SUCCESS');
 	});
 
-	it('Transfer Fungible as ERC20', async function() {
+	it('Transfer Fungible as ERC20', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 5;
@@ -180,7 +189,7 @@ describe('Interaction: ', function() {
 		expect(acctTokenBal).to.be.equal(operatorAcctFTSupply);
 	});
 
-	it('Transfer Fungible using HTS', async function() {
+	it('Transfer Fungible using HTS', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 10;
@@ -194,7 +203,7 @@ describe('Interaction: ', function() {
 		expect(acctTokenBal).to.be.equal(operatorAcctFTSupply);
 	});
 
-	it('Execute Burn (via wipe)', async function() {
+	it('Execute Burn (via wipe)', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 6;
@@ -207,7 +216,7 @@ describe('Interaction: ', function() {
 		expect(acctTokenBal).to.be.equal(operatorAcctFTSupply);
 	});
 
-	it('Mint additional supply', async function() {
+	it('Mint additional supply', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 10;
@@ -220,7 +229,7 @@ describe('Interaction: ', function() {
 		expect(contractTokenBal.toInt()).to.be.equal(contractFTSupply);
 	});
 
-	it('Execute Burn at Treasury with supply', async function() {
+	it('Execute Burn at Treasury with supply', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 5;
@@ -237,7 +246,7 @@ describe('Interaction: ', function() {
 		expect(acctTokenBal).to.be.equal(operatorAcctFTSupply);
 	});
 
-	it('Check Allowance WL is empty', async function() {
+	it('Check Allowance WL is empty', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const wl = await getAllowanceWL();
@@ -245,13 +254,13 @@ describe('Interaction: ', function() {
 		expect(wl.length).to.be.equal(0);
 	});
 
-	it('Add Alice to Allowance WL', async function() {
+	it('Add Alice to Allowance WL', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		await addAddressToWL(aliceId);
 	});
 
-	it('Verify the Allowance WL', async function() {
+	it('Verify the Allowance WL', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const wl = await getAllowanceWL();
@@ -266,21 +275,30 @@ describe('Interaction: ', function() {
 		expect(status[0]).to.be.false;
 	});
 
-	it('Test unable to set allowance for operator as not on WL', async function() {
+	it('Test unable to set allowance for operator as not on WL', async function () {
 		client.setOperator(operatorId, operatorKey);
 
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
 			await approveAllowance(operatorId, amountForBob);
 		}
 		catch (err) {
-			errorCount++;
-			expect(err instanceof ReceiptStatusError).to.be.true;
+			// Should throw due to SpenderNotOnWL custom error
+			if (err instanceof ReceiptStatusError) {
+				expectedErrors++;
+			}
+			else {
+				console.log('Unexpected Error:', err);
+				unexpectedErrors++;
+			}
 		}
-		expect(errorCount).to.be.equal(1);
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Test unable to send using allowance if unset', async function() {
+	it('Test unable to send using allowance if unset', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		// check allowance is zero
@@ -288,25 +306,32 @@ describe('Interaction: ', function() {
 		expect(allowance).to.be.equal(0);
 
 		// expect it to fail when used given 0
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
 			await testUsingApproval(AccountId.fromString(contractId.toString()), bobId, 5, operatorId, operatorKey);
 		}
 		catch (err) {
 			if (err instanceof ReceiptStatusError && (err.status._code == 7 || err.status._code == 292)) {
-				errorCount++;
+				expectedErrors++;
+			}
+			else {
+				console.log('Unexpected Error:', err);
+				unexpectedErrors++;
 			}
 		}
-		expect(errorCount).to.be.equal(1);
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Approve allowance for Alice', async function() {
+	it('Approve allowance for Alice', async function () {
 		client.setOperator(operatorId, operatorKey);
 		const result = await approveAllowance(aliceId, amountForBob);
 		expect(result).to.be.equal('SUCCESS');
 	});
 
-	it('Test allowance for Alice to send FT to Bob', async function() {
+	it('Test allowance for Alice to send FT to Bob', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		contractFTSupply -= amountForBob * (10 ** tokenDecimal);
@@ -318,7 +343,7 @@ describe('Interaction: ', function() {
 		expect(acctTokenBal).to.be.equal(amountForBob);
 	});
 
-	it('Test send with allowance **used up** for Alice', async function() {
+	it('Test send with allowance **used up** for Alice', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		// check allowance is zero
@@ -326,26 +351,33 @@ describe('Interaction: ', function() {
 		expect(allowance).to.be.equal(0);
 
 		// expect it to fail when used given 0
-		let errorCount = 0;
+		let expectedErrors = 0;
+		let unexpectedErrors = 0;
+
 		try {
 			await testUsingApproval(AccountId.fromString(contractId.toString()), bobId, 5, aliceId, alicePK);
 		}
 		catch (err) {
 			if (err instanceof ReceiptStatusError && (err.status._code == 7 || err.status._code == 292)) {
-				errorCount++;
+				expectedErrors++;
+			}
+			else {
+				console.log('Unexpected Error:', err);
+				unexpectedErrors++;
 			}
 		}
-		expect(errorCount).to.be.equal(1);
+		expect(expectedErrors).to.be.equal(1);
+		expect(unexpectedErrors).to.be.equal(0);
 	});
 
-	it('Remove Alice from Allowance WL', async function() {
+	it('Remove Alice from Allowance WL', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const result = await removeAddressFromWL(aliceId);
 		expect(result).to.be.equal('SUCCESS');
 	});
 
-	it('Send Hbar to the contract', async function() {
+	it('Send Hbar to the contract', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 10;
@@ -355,7 +387,7 @@ describe('Interaction: ', function() {
 
 	});
 
-	it('Retrieve hbar with low level call', async function() {
+	it('Retrieve hbar with low level call', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 5;
@@ -364,7 +396,7 @@ describe('Interaction: ', function() {
 		expect(result).to.be.equal('SUCCESS');
 	});
 
-	it('Retrieve Hbar with transfer', async function() {
+	it('Retrieve Hbar with transfer', async function () {
 		client.setOperator(operatorId, operatorKey);
 
 		const amount = 4;
@@ -373,58 +405,59 @@ describe('Interaction: ', function() {
 		expect(result).to.be.equal('SUCCESS');
 	});
 
-	it('Check Alice can not execute sensitive calls', async function() {
+	it('Check Alice can not execute sensitive calls', async function () {
 		client.setOperator(aliceId, alicePK);
 
-		let errorCount = 0;
+		let expectedErrors = 0;
+
 		try {
 			await transferFungibleWithHTS(aliceId, 1);
 		}
 		catch {
-			errorCount++;
+			expectedErrors++;
 		}
 		try {
 			await transferFungible(aliceId, 1);
 		}
 		catch {
-			errorCount++;
+			expectedErrors++;
 		}
 		try {
 			await mintAdditionalSupply(1);
 		}
 		catch {
-			errorCount++;
+			expectedErrors++;
 		}
 		try {
 			await executeBurnWithSupply(1);
 		}
 		catch {
-			errorCount++;
+			expectedErrors++;
 		}
 		try {
 			await addAddressToWL(aliceId);
 		}
 		catch {
-			errorCount++;
+			expectedErrors++;
 		}
 		try {
 			await callHbar(0.1);
 		}
 		catch {
-			errorCount++;
+			expectedErrors++;
 		}
 		try {
 			await transferHbarFromContract(0.1);
 		}
 		catch {
-			errorCount++;
+			expectedErrors++;
 		}
 
-		expect(errorCount).to.be.equal(7);
+		expect(expectedErrors).to.be.equal(7);
 
 	});
 
-	it('Check Alice *CAN* execute non-sensitive calls', async function() {
+	it('Check Alice *CAN* execute non-sensitive calls', async function () {
 		client.setOperator(aliceId, alicePK);
 
 		const wl = await getAllowanceWL();
@@ -438,7 +471,7 @@ describe('Interaction: ', function() {
 		expect(allowance).to.be.equal(0);
 	});
 
-	it('Check Bob *CAN* burn his tokens', async function() {
+	it('Check Bob *CAN* burn his tokens', async function () {
 		client.setOperator(bobId, bobPk);
 
 		const result = await executeBurnWithWipe(amountForBob);
@@ -448,7 +481,7 @@ describe('Interaction: ', function() {
 		expect(acctTokenBal).to.be.equal(0);
 	});
 
-	after('Retrieve any hbar spent', async function() {
+	after('Retrieve any hbar spent', async function () {
 		// get Alice balance
 		const [, aliceHbarBal] = await getAccountBalance(aliceId);
 		// SDK transfer back to operator
@@ -668,7 +701,7 @@ async function mintFungible(tokenName, tokenSymbol, tokenMemo, tokenInitalSupply
 		.addUint32(decimal)
 		.addInt64(tokenMaxSupply);
 
-	const [ , , createTokenRecord] = await contractExecuteFcn(contractId, gasLim, 'createFungibleWithSupplyAndBurn', params, payment);
+	const [, , createTokenRecord] = await contractExecuteFcn(contractId, gasLim, 'createFungibleWithSupplyAndBurn', params, payment);
 
 	tokenIdSolidityAddr = createTokenRecord.contractFunctionResult.getAddress(0);
 	tokenId = TokenId.fromSolidityAddress(tokenIdSolidityAddr);
@@ -730,7 +763,7 @@ async function transferFungible(receiver, amount) {
 		.addAddress(tokenIdSolidityAddr)
 		.addAddress(receiver.toSolidityAddress())
 		.addUint256(amount * (10 ** tokenDecimal));
-	const [tokenTransferRx, , ] = await contractExecuteFcn(contractId, gasLim, 'transfer', params);
+	const [tokenTransferRx, ,] = await contractExecuteFcn(contractId, gasLim, 'transfer', params);
 	const tokenTransferStatus = tokenTransferRx.status;
 
 	return tokenTransferStatus.toString();
@@ -750,7 +783,7 @@ async function transferFungibleWithHTS(receiver, amount) {
 		.addAddress(tokenIdSolidityAddr)
 		.addAddress(receiver.toSolidityAddress())
 		.addInt64(amount * (10 ** tokenDecimal));
-	const [tokenTransferRx, , ] = await contractExecuteFcn(contractId, gasLim, 'transferHTS', params);
+	const [tokenTransferRx, ,] = await contractExecuteFcn(contractId, gasLim, 'transferHTS', params);
 	const tokenTransferStatus = tokenTransferRx.status;
 
 	return tokenTransferStatus.toString();
@@ -761,7 +794,7 @@ async function executeBurnWithWipe(amount) {
 	const params = new ContractFunctionParameters()
 		.addAddress(tokenIdSolidityAddr)
 		.addUint32(amount * (10 ** tokenDecimal));
-	const [burnTxRx, , ] = await contractExecuteFcn(contractId, gasLim, 'burn', params);
+	const [burnTxRx, ,] = await contractExecuteFcn(contractId, gasLim, 'burn', params);
 	return burnTxRx.status.toString();
 }
 
@@ -770,7 +803,7 @@ async function mintAdditionalSupply(amount) {
 	const params = new ContractFunctionParameters()
 		.addAddress(tokenIdSolidityAddr)
 		.addUint64(amount * (10 ** tokenDecimal));
-	const [mintSupplyTxRx, , ] = await contractExecuteFcn(contractId, gasLim, 'mintAdditionalSupply', params);
+	const [mintSupplyTxRx, ,] = await contractExecuteFcn(contractId, gasLim, 'mintAdditionalSupply', params);
 	return mintSupplyTxRx.status.toString();
 }
 
@@ -780,7 +813,7 @@ async function executeBurnWithSupply(amount) {
 		.addAddress(tokenIdSolidityAddr)
 		.addUint64(amount * (10 ** tokenDecimal))
 		.addInt64Array([1]);
-	const [burnTxRx, , ] = await contractExecuteFcn(contractId, gasLim, 'burnFromTreasury', params);
+	const [burnTxRx, ,] = await contractExecuteFcn(contractId, gasLim, 'burnFromTreasury', params);
 	return burnTxRx.status.toString();
 }
 
@@ -809,7 +842,7 @@ async function transferHbarFromContract(amount, units = HbarUnit.Hbar) {
 	const params = new ContractFunctionParameters()
 		.addAddress(operatorId.toSolidityAddress())
 		.addUint256(new Hbar(amount, units).toTinybars());
-	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'transferHbar', params);
+	const [callHbarRx, ,] = await contractExecuteFcn(contractId, gasLim, 'transferHbar', params);
 	return callHbarRx.status.toString();
 }
 
@@ -818,7 +851,7 @@ async function callHbar(amount) {
 	const params = new ContractFunctionParameters()
 		.addAddress(operatorId.toSolidityAddress())
 		.addUint256(new Hbar(amount, HbarUnit.Hbar).toBigNumber());
-	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'callHbar', params);
+	const [callHbarRx, ,] = await contractExecuteFcn(contractId, gasLim, 'callHbar', params);
 	return callHbarRx.status.toString();
 }
 
@@ -826,7 +859,7 @@ async function addAddressToWL(address) {
 	const gasLim = 400000;
 	const params = new ContractFunctionParameters()
 		.addAddress(address.toSolidityAddress());
-	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'addAllowanceWhitelist', params);
+	const [callHbarRx, ,] = await contractExecuteFcn(contractId, gasLim, 'addAllowanceWhitelist', params);
 	return callHbarRx.status.toString();
 }
 
@@ -885,7 +918,7 @@ async function approveAllowance(spender, amount) {
 		.addAddress(tokenIdSolidityAddr)
 		.addAddress(spender.toSolidityAddress())
 		.addUint256(amount * (10 ** tokenDecimal));
-	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'approveAllowance', params);
+	const [callHbarRx, ,] = await contractExecuteFcn(contractId, gasLim, 'approveAllowance', params);
 	return callHbarRx.status.toString();
 
 }
@@ -894,7 +927,7 @@ async function removeAddressFromWL(address) {
 	const gasLim = 400000;
 	const params = new ContractFunctionParameters()
 		.addAddress(address.toSolidityAddress());
-	const [callHbarRx, , ] = await contractExecuteFcn(contractId, gasLim, 'removeAllowanceWhitelist', params);
+	const [callHbarRx, ,] = await contractExecuteFcn(contractId, gasLim, 'removeAllowanceWhitelist', params);
 	return callHbarRx.status.toString();
 }
 

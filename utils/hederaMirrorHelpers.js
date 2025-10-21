@@ -303,6 +303,35 @@ async function checkMirrorBalance(env, _userId, _tokenId) {
 			return null;
 		});
 
+	// if null then check hasUserGotAutoAssociations
+	if (rtnVal === null) {
+		if (await hasUserGotAutoAssociations(env, _userId)) {
+			rtnVal = 0;
+		}
+	}
+
+	return rtnVal;
+}
+
+async function hasUserGotAutoAssociations(env, _userId, requiredAssociations = 1) {
+	const baseUrl = getBaseURL(env);
+	const url = `${baseUrl}/api/v1/accounts/${_userId.toString()}`;
+
+	// look for max_automatic_token_associations field
+	// if requiredAssociations == -1 or > requiredAssociations, return true
+	let rtnVal = false;
+	await axios.get(url)
+		.then((response) => {
+			const jsonResponse = response.data;
+			if (jsonResponse.max_automatic_token_associations != null) {
+				if (requiredAssociations == -1) {
+					rtnVal = true;
+				}
+				else if (jsonResponse.max_automatic_token_associations > requiredAssociations) {
+					rtnVal = true;
+				}
+			}
+		});
 	return rtnVal;
 }
 
@@ -542,4 +571,5 @@ module.exports = {
 	getNFTApprovedForAllAllowances,
 	homebrewPopulateAccountEvmAddress,
 	homebrewPopulateAccountNum,
+	hasUserGotAutoAssociations,
 };

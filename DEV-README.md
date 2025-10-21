@@ -1,16 +1,19 @@
-**EMPTY**
-interacting in *TESTNET*
-Using contract: 0.0.48928030
-Storage: 1024
-Balance: 0 tℏ
-AutoRenew Account: null
+Bytecode linking example:
 
+	console.log('\n-Deploying library:', libraryName);
 
-**with 8,888 mint loaded and initialised**
+	const libraryBytecode = JSON.parse(fs.readFileSync(`./artifacts/contracts/${libraryName}.sol/${libraryName}.json`)).bytecode;
 
-Using contract: 0.0.48928030
-Storage: 570176
-Balance: 9.86512295 ℏ
-AutoRenew Account: null
+	const [libContractId] = await contractDeployFunction(client, libraryBytecode, 2_500_000);
+	console.log(`Library created with ID: ${libContractId} / ${libContractId.toSolidityAddress()}`);
 
-TODO: Add in IPRNG for mints (unless edition mint)
+	const json = JSON.parse(fs.readFileSync(`./artifacts/contracts/${contractName}.sol/${contractName}.json`));
+
+	const contractBytecode = json.bytecode;
+
+	// replace library address in bytecode
+	console.log('\n-Linking library address in bytecode...');
+	const readyToDeployBytecode = linkBytecode(contractBytecode, [libraryName], [libContractId]);
+
+	[contractId, contractAddress] = await contractDeployFunction(client, readyToDeployBytecode, 6_500_000, constructorParams);
+

@@ -1,15 +1,60 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import "./HederaResponseCodes.sol";
-import "./HederaTokenService.sol";
-import "./ExpiryHelper.sol";
+/*
+ * ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
+ * ⚡                                                             ⚡
+ * ⚡                        LAZY SUPERHEROES                     ⚡
+ * ⚡                      The OG Hedera Project                  ⚡
+ * ⚡                                                             ⚡
+ * ⚡                        %%%%#####%%@@@@                      ⚡
+ * ⚡                   @%%%@%###%%%%###%%%%%@@                   ⚡
+ * ⚡                %%%%%%@@@@@@@@@@@@@@@@%##%%@@                ⚡
+ * ⚡              @%%@#@@@@@@@@@@@@@@@@@@@@@@@@*%%@@             ⚡
+ * ⚡            @%%%%@@@@@@@@@@@@@@@@@@@@@@@@@@@@%*%@@           ⚡
+ * ⚡           %%%#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%#%@@         ⚡
+ * ⚡          %%%@@@@@@@@@@@@@@#-:--==+#@@@@@@@@@@@@@*%@@        ⚡
+ * ⚡         %@#@@@@@@@@@@@@@@*-------::%@@@@@@@@%%%%%*%@@       ⚡
+ * ⚡        %%#@@@@@@@@@@@@@@@=-------:#@@@@@@@@@%%%%%%*%@@      ⚡
+ * ⚡       %%#@@@@@@@@@@@@@@@#-------:+@@@@@@@@@@%%%%%%%#%@@     ⚡
+ * ⚡       %%#@@@@@@@@@@@@@@@=------:=@@@@@@@@@@@%%%%%%%%#@@     ⚡
+ * ⚡      #%#@@@%%%%%%%@@@@@%------:-@@@@@@@@@@@@@%%%%%%%#%@@    ⚡
+ * ⚡      %%#@@@%%%%%%%%@@@@=------------:::@@@@@@@@%%%%%#%@@    ⚡
+ * ⚡      %%#@@%%%%%%%%%@@@%:------------::%@@@@@@@@@%%%%#%@@    ⚡
+ * ⚡      %%#@@%%%%%%%%%@@@=:::---------:-@@@@@@@@@@@@@@@#@@@    ⚡
+ * ⚡      #%#@@@%%%%%%%@@@@*:::::::----:-@@@@@@@@@@@@@@@@#@@@    ⚡
+ * ⚡      %%%%@@@@%%%%%@@@@@@@@@@-:---:=@@@@@@@@@@@@@@@@@%@@@    ⚡
+ * ⚡       %%#@@@@%%%%@@@@@@@@@@@::--:*@@@@@@@@@@@@@@@@@%@@@     ⚡
+ * ⚡       %#%#@@@%@%%%@@@@@@@@@#::::#@@@@@@@@@@@@@@@@@@%@@@     ⚡
+ * ⚡        %%%%@@@%%%%%%@@@@@@@*:::%@@@@@@@@@@@@@@@@@@%@@@      ⚡
+ * ⚡         %%#%@@%%%%%%%@@@@@@=.-%@@@@@@@@@@@@@@@@@@%@@@       ⚡
+ * ⚡          %##*@%%%%%%%%%@@@@=+@@@@@@@@@@@@@@@@@@%%@@@        ⚡
+ * ⚡           %##*%%%%%%%%%%@@@@@@@@@@@@@@@@@@@@@@%@@@@         ⚡
+ * ⚡             %##+#%%%%%%%%@@@@@@@@@@@@@@@@@@@%@@@@           ⚡
+ * ⚡               %##*=%%%%%%%@@@@@@@@@@@@@@@#@@@@@             ⚡
+ * ⚡                 %##%#**#@@@@@@@@@@@@%%%@@@@@@               ⚡
+ * ⚡                    %%%%@@%@@@%%@@@@@@@@@@@                  ⚡
+ * ⚡                         %%%%%%%%%%%@@                       ⚡
+ * ⚡                                                             ⚡
+ * ⚡                 Development Team Focused on                 ⚡
+ * ⚡                   Decentralized Solutions                   ⚡
+ * ⚡                                                             ⚡
+ * ⚡         Visit: http://lazysuperheroes.com/                  ⚡
+ * ⚡            or: https://dapp.lazysuperheroes.com/            ⚡
+ * ⚡                   to get your LAZY on!                      ⚡
+ * ⚡                                                             ⚡
+ * ⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡⚡
+ */
+
+import {HederaResponseCodes} from "./HederaResponseCodes.sol";
+import {ExpiryHelper} from "./ExpiryHelper.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 
 // Import Ownable from the OpenZeppelin Contracts library
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 // Expiry Helper extends FeeHelper which extends KeyHelper inherits HederaStokeService
 // Ownable from OZ to limit access control
@@ -20,32 +65,49 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
     // List of trusted addresses which can mint tokens
     EnumerableSet.AddressSet private _allowanceWL;
 
+    // Custom errors
+    error MintWipeKeyFailed();
+    error MintWipeSupplyFailed();
+    error MintNoKeysFailed();
+    error TooManyFees();
+    error MintWithFeesFailed();
+    error MintSupplyFailed();
+    error BurnAtTreasuryFailed();
+    error BurnFailed();
+    error TransferBatchFailed();
+    error SpenderNotOnWL();
+    error AllowanceApprovalFailed();
+    error GetAllowanceFailed();
+    error PositiveTransfersOnly();
+    error TransferHTSFailed();
+    error TransferTokensFailed();
+    error SendHbarFailed();
 
     event TokenControllerMessage(
         string msgType,
         address indexed fromAddress,
-        uint amount,
+        uint256 amount,
         string message
     );
 
-	// to avoid serialisation related default causing odd behaviour
-	// implementing custom object as a wrapper
-	struct FTFixedFeeObject {
-		uint32 amount;
+    // to avoid serialisation related default causing odd behaviour
+    // implementing custom object as a wrapper
+    struct FTFixedFeeObject {
+        uint32 amount;
         address tokenAddress;
         bool useHbarsForPayment;
         bool useCurrentTokenForPayment;
         address feeCollector;
-	}
+    }
 
-	struct FTFractionalFeeObject {
-		uint32 numerator;
-		uint32 denominator;
-		address feeCollector;
-		uint32 minimumAmount;
+    struct FTFractionalFeeObject {
+        uint32 numerator;
+        uint32 denominator;
+        address feeCollector;
+        uint32 minimumAmount;
         uint32 maximumAmount;
         bool netOfTransfers;
-	}
+    }
 
     // create a fungible Token with no custom fees,
     // with calling contract as admin key
@@ -66,16 +128,16 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         uint64 initialSupply,
         uint32 decimals,
         int64 maxSupply
-    ) 
-		external 
-		payable  
-		onlyOwner 
-	returns (address createdTokenAddress) {
+    ) external payable onlyOwner returns (address createdTokenAddress) {
         // instantiate the list of keys we'll use for token create
         IHederaTokenService.TokenKey[]
             memory keys = new IHederaTokenService.TokenKey[](1);
 
-        keys[0] = getSingleKey(KeyType.WIPE, KeyValueType.CONTRACT_ID, address(this));
+        keys[0] = getSingleKey(
+            KeyType.WIPE,
+            KeyValueType.CONTRACT_ID,
+            address(this)
+        );
 
         // define the token
         IHederaTokenService.HederaToken memory token;
@@ -93,15 +155,18 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         // create the expiry schedule for the token using ExpiryHelper
         token.expiry = createAutoRenewExpiry(
             address(this),
-            HederaTokenService.defaultAutoRenewPeriod
+            DEFAULT_AUTO_RENEW_PERIOD
         );
 
         // call HTS precompiled contract, passing initial supply and decimals
-        (int responseCode, address tokenAddress) = HederaTokenService
-            .createFungibleToken(token, initialSupply, decimals);
+        (int32 responseCode, address tokenAddress) = createFungibleToken(
+            token,
+            initialSupply,
+            decimals
+        );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("mint wipe key failed");
+            revert MintWipeKeyFailed();
         }
 
         emit TokenControllerMessage(
@@ -134,16 +199,17 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         uint64 initialSupply,
         uint32 decimals,
         int64 maxSupply
-    ) 
-		external
-		payable
-		onlyOwner 
-	returns (address createdTokenAddress) {
+    ) external payable onlyOwner returns (address createdTokenAddress) {
         // instantiate the list of keys we will use for token create
         IHederaTokenService.TokenKey[]
             memory keys = new IHederaTokenService.TokenKey[](1);
 
-        keys[0] = getSingleKey(KeyType.WIPE, KeyType.SUPPLY, KeyValueType.CONTRACT_ID, address(this));
+        keys[0] = getSingleKey(
+            KeyType.WIPE,
+            KeyType.SUPPLY,
+            KeyValueType.CONTRACT_ID,
+            address(this)
+        );
 
         // define the token
         IHederaTokenService.HederaToken memory token;
@@ -160,15 +226,18 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         // create the expiry schedule for the token using ExpiryHelper
         token.expiry = createAutoRenewExpiry(
             address(this),
-            HederaTokenService.defaultAutoRenewPeriod
+            DEFAULT_AUTO_RENEW_PERIOD
         );
 
         // call HTS precompiled contract, passing initial supply and decimals
-        (int responseCode, address tokenAddress) = HederaTokenService
-            .createFungibleToken(token, initialSupply, decimals);
+        (int32 responseCode, address tokenAddress) = createFungibleToken(
+            token,
+            initialSupply,
+            decimals
+        );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("mint wipe/supply failed");
+            revert MintWipeSupplyFailed();
         }
 
         emit TokenControllerMessage(
@@ -196,11 +265,7 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         uint64 initialSupply,
         uint32 decimals,
         int64 maxSupply
-    )
-		external
-		payable
-		onlyOwner
-	returns (address createdTokenAddress) {
+    ) external payable onlyOwner returns (address createdTokenAddress) {
         //define the token
         IHederaTokenService.HederaToken memory token;
         token.name = name;
@@ -216,14 +281,17 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         // create the expiry schedule for the token using ExpiryHelper
         token.expiry = createAutoRenewExpiry(
             address(this),
-            HederaTokenService.defaultAutoRenewPeriod
+            DEFAULT_AUTO_RENEW_PERIOD
         );
 
-        (int responseCode, address tokenAddress) = HederaTokenService
-            .createFungibleToken(token, initialSupply, decimals);
+        (int32 responseCode, address tokenAddress) = createFungibleToken(
+            token,
+            initialSupply,
+            decimals
+        );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("mint no keys failed");
+            revert MintNoKeysFailed();
         }
 
         emit TokenControllerMessage(
@@ -236,7 +304,7 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         createdTokenAddress = tokenAddress;
     }
 
-	// mint an FT with no keys - not adjustable, 1 time mint as clean and transparent as possible
+    // mint an FT with no keys - not adjustable, 1 time mint as clean and transparent as possible
     /// @param name token name
     /// @param symbol token symbol
     /// @param memo token longer form description as a string
@@ -251,14 +319,12 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         uint64 initialSupply,
         uint32 decimals,
         int64 maxSupply,
-		FTFixedFeeObject[] memory fixedFees,
-		FTFractionalFeeObject[] memory fractionalFees
-    )
-		external
-		payable
-		onlyOwner
-	returns (address createdTokenAddress) {
-		require((fixedFees.length + fractionalFees.length) <= 10, "Too many fees");
+        FTFixedFeeObject[] memory fixedFees,
+        FTFractionalFeeObject[] memory fractionalFees
+    ) external payable onlyOwner returns (address createdTokenAddress) {
+        if ((fixedFees.length + fractionalFees.length) > 10) {
+            revert TooManyFees();
+        }
         //define the token
         IHederaTokenService.HederaToken memory token;
         token.name = name;
@@ -274,46 +340,58 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         // create the expiry schedule for the token using ExpiryHelper
         token.expiry = createAutoRenewExpiry(
             address(this),
-            HederaTokenService.defaultAutoRenewPeriod
+            DEFAULT_AUTO_RENEW_PERIOD
         );
 
-		IHederaTokenService.FixedFee[] memory nativeFixedFees = new IHederaTokenService.FixedFee[](fixedFees.length);
-		for (uint8 i = 0; i < fixedFees.length; i++) {
-			IHederaTokenService.FixedFee memory fxdFee;
-			fxdFee.amount = fixedFees[i].amount;
-			fxdFee.feeCollector = fixedFees[i].feeCollector;
+        IHederaTokenService.FixedFee[]
+            memory nativeFixedFees = new IHederaTokenService.FixedFee[](
+                fixedFees.length
+            );
+        for (uint8 i = 0; i < fixedFees.length; i++) {
+            IHederaTokenService.FixedFee memory fxdFee;
+            fxdFee.amount = fixedFees[i].amount;
+            fxdFee.feeCollector = fixedFees[i].feeCollector;
 
-			if (fixedFees[i].useHbarsForPayment) {
-				fxdFee.useHbarsForPayment = true;
-			}
-			else if (fixedFees[i].useCurrentTokenForPayment) {
-				fxdFee.useCurrentTokenForPayment = true;
-			}
-			else {
-				fxdFee.tokenId = fixedFees[i].tokenAddress;
-			}
+            if (fixedFees[i].useHbarsForPayment) {
+                fxdFee.useHbarsForPayment = true;
+            } else if (fixedFees[i].useCurrentTokenForPayment) {
+                fxdFee.useCurrentTokenForPayment = true;
+            } else {
+                fxdFee.tokenId = fixedFees[i].tokenAddress;
+            }
 
-			nativeFixedFees[i] = fxdFee;
-		}
+            nativeFixedFees[i] = fxdFee;
+        }
 
-		IHederaTokenService.FractionalFee[] memory nativeFractionalFees = new IHederaTokenService.FractionalFee[](fractionalFees.length);
-		for (uint8 i = 0; i < fractionalFees.length; i++) {
-			IHederaTokenService.FractionalFee memory fractionalFee;
-			fractionalFee.feeCollector = fractionalFees[i].feeCollector;
-			fractionalFee.numerator = fractionalFees[i].numerator;
-			fractionalFee.denominator = fractionalFees[i].denominator;
-			fractionalFee.netOfTransfers = fractionalFees[i].netOfTransfers;
-			fractionalFee.minimumAmount = fractionalFees[i].minimumAmount;
-			fractionalFee.maximumAmount = fractionalFees[i].maximumAmount;
+        IHederaTokenService.FractionalFee[]
+            memory nativeFractionalFees = new IHederaTokenService.FractionalFee[](
+                fractionalFees.length
+            );
+        for (uint8 i = 0; i < fractionalFees.length; i++) {
+            IHederaTokenService.FractionalFee memory fractionalFee;
+            fractionalFee.feeCollector = fractionalFees[i].feeCollector;
+            fractionalFee.numerator = fractionalFees[i].numerator;
+            fractionalFee.denominator = fractionalFees[i].denominator;
+            fractionalFee.netOfTransfers = fractionalFees[i].netOfTransfers;
+            fractionalFee.minimumAmount = fractionalFees[i].minimumAmount;
+            fractionalFee.maximumAmount = fractionalFees[i].maximumAmount;
 
-			nativeFractionalFees[i] = fractionalFee;
-		}
+            nativeFractionalFees[i] = fractionalFee;
+        }
 
-        (int responseCode, address tokenAddress) = 
-            createFungibleTokenWithCustomFees(token, initialSupply, decimals, nativeFixedFees, nativeFractionalFees);
+        (
+            int32 responseCode,
+            address tokenAddress
+        ) = createFungibleTokenWithCustomFees(
+                token,
+                initialSupply,
+                decimals,
+                nativeFixedFees,
+                nativeFractionalFees
+            );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("mint FT with Fees failed");
+            revert MintWithFeesFailed();
         }
 
         emit TokenControllerMessage(
@@ -331,21 +409,16 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
     /// (inclusive of decimal eg 10 more of a decimal 1 token => amount = 100)
     /// @return responseCode result of the operation
     /// @return newTotalSupply new supply post mint
-    function mintAdditionalSupply(address token, uint64 amount)
-        external
-        onlyOwner
-        returns (int responseCode, uint64 newTotalSupply)
-    {
+    function mintAdditionalSupply(
+        address token,
+        uint64 amount
+    ) external onlyOwner returns (int32 responseCode, uint64 newTotalSupply) {
         bytes[] memory _metadata;
 
-        (responseCode, newTotalSupply, ) = HederaTokenService.mintToken(
-            token,
-            amount,
-            _metadata
-        );
+        (responseCode, newTotalSupply, ) = mintToken(token, amount, _metadata);
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("mint supply failed");
+            revert MintSupplyFailed();
         }
     }
 
@@ -358,16 +431,8 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         address token,
         uint64 amount,
         int64[] memory _serials
-    )
-        external
-        onlyOwner
-        returns (int responseCode, uint64 newTotalSupply)
-    {
-        (responseCode, newTotalSupply) = HederaTokenService.burnToken(
-            token,
-            amount,
-            _serials
-        );
+    ) external onlyOwner returns (int32 responseCode, uint64 newTotalSupply) {
+        (responseCode, newTotalSupply) = burnToken(token, amount, _serials);
 
         emit TokenControllerMessage(
             "BURN",
@@ -377,28 +442,24 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("burn @ tsry failed");
+            revert BurnAtTreasuryFailed();
         }
     }
 
     /// Operation to wipe fungible tokens from caller's account
-	/// This method os open to all as the address foor burning is the msg.sender the call
-	/// can only burn tokens they own
+    /// This method os open to all as the address foor burning is the msg.sender the call
+    /// can only burn tokens they own
     /// @param token The token address
     /// @param amount The number of tokens to wipe
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
-    function burn(address token, uint32 amount)
-        external
-        returns (int responseCode)
-    {
-        (responseCode) = HederaTokenService.wipeTokenAccount(
-            token,
-            msg.sender,
-            amount
-        );
+    function burn(
+        address token,
+        uint32 amount
+    ) external returns (int32 responseCode) {
+        (responseCode) = wipeTokenAccount(token, msg.sender, amount);
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("burn failed");
+            revert BurnFailed();
         }
         emit TokenControllerMessage(
             "BURN",
@@ -416,18 +477,11 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         address token,
         address[] memory accountIds,
         int64[] memory amounts
-    )
-		external
-		onlyOwner
-	returns (int responseCode) {
-        (responseCode) = HederaTokenService.transferTokens(
-            token,
-            accountIds,
-            amounts
-        );
+    ) external onlyOwner returns (int32 responseCode) {
+        (responseCode) = transferTokens(token, accountIds, amounts);
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("transfer batch - failed");
+            revert TransferBatchFailed();
         }
     }
 
@@ -442,10 +496,12 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         address token,
         address spender,
         uint256 amount
-    ) external onlyOwner returns (int responseCode) {
-        require(_allowanceWL.contains(spender), "Spender not on WL");
+    ) external onlyOwner returns (int256 responseCode) {
+        if (!_allowanceWL.contains(spender)) {
+            revert SpenderNotOnWL();
+        }
 
-        (responseCode) = HederaTokenService.approve(token, spender, amount);
+        (responseCode) = approve(token, spender, amount);
 
         emit TokenControllerMessage(
             "Approval",
@@ -455,7 +511,7 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("allowance approval - failed");
+            revert AllowanceApprovalFailed();
         }
     }
 
@@ -464,15 +520,11 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
     /// @param spender the spender of the tokens
     /// @return responseCode The response code for the status of the request. SUCCESS is 22.
     /// @return amount thw number of tokens authorised to spend
-    function checkAllowance(address token, address spender)
-        external
-        returns (int responseCode, uint256 amount)
-    {
-        (responseCode, amount) = HederaTokenService.allowance(
-            token,
-            address(this),
-            spender
-        );
+    function checkAllowance(
+        address token,
+        address spender
+    ) external returns (int256 responseCode, uint256 amount) {
+        (responseCode, amount) = allowance(token, address(this), spender);
 
         emit TokenControllerMessage(
             "Allowance checked",
@@ -482,7 +534,7 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("getAllowance - failed");
+            revert GetAllowanceFailed();
         }
     }
 
@@ -494,18 +546,12 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         address token,
         address receiver,
         int64 amount
-    )
-		external
-		onlyOwner 
-	returns (int responseCode) {
-        responseCode = HederaTokenService.transferToken(
-            token,
-            address(this),
-            receiver,
-            amount
-        );
+    ) external onlyOwner returns (int32 responseCode) {
+        if (amount <= 0) {
+            revert PositiveTransfersOnly();
+        }
 
-		require(amount > 0, "Positive transfers only");
+        responseCode = transferToken(token, address(this), receiver, amount);
 
         emit TokenControllerMessage(
             "Transfer with HTS",
@@ -515,7 +561,7 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
-            revert("transferHTS - failed");
+            revert TransferHTSFailed();
         }
     }
 
@@ -528,12 +574,11 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         address token,
         address recipient,
         uint256 amount
-    ) 
-		external
-		onlyOwner 
-	returns (bool sent) {
+    ) external onlyOwner returns (bool sent) {
         sent = IERC20(token).transfer(recipient, amount);
-        require(sent, "Failed to transfer Tokens");
+        if (!sent) {
+            revert TransferTokensFailed();
+        }
 
         emit TokenControllerMessage("Transfer", recipient, amount, "complete");
     }
@@ -543,13 +588,14 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
     /// @param receiverAddress address in EVM fomat of the reciever of the token
     /// @param amount number of tokens to send (in long form adjusted for decimal)
     /// @return sent a boolean signalling success
-    function callHbar(address payable receiverAddress, uint amount)
-        external
-        onlyOwner
-        returns (bool sent)
-    {
+    function callHbar(
+        address payable receiverAddress,
+        uint256 amount
+    ) external onlyOwner returns (bool sent) {
         (sent, ) = receiverAddress.call{value: amount}("");
-        require(sent, "Failed to send Hbar");
+        if (!sent) {
+            revert SendHbarFailed();
+        }
         receiverAddress.transfer(amount);
 
         emit TokenControllerMessage(
@@ -565,10 +611,10 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
     // also throws error on failure causing contract to auutomatically revert
     /// @param receiverAddress address in EVM fomat of the reciever of the token
     /// @param amount number of tokens to send (in long form adjusted for decimal)
-    function transferHbar(address payable receiverAddress, uint amount)
-        external
-        onlyOwner
-    {
+    function transferHbar(
+        address payable receiverAddress,
+        uint256 amount
+    ) external onlyOwner {
         // throws error on failure
         Address.sendValue(receiverAddress, amount);
 

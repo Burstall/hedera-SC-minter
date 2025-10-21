@@ -233,11 +233,12 @@ contract SoulboundBadgeMinter is ExpiryHelper, Ownable, ReentrancyGuard {
 
         _token.expiry = createAutoRenewExpiry(
             address(this),
-            HederaTokenService.defaultAutoRenewPeriod
+            DEFAULT_AUTO_RENEW_PERIOD
         );
 
-        (int32 responseCode, address tokenAddress) = HederaTokenService
-            .createNonFungibleToken(_token);
+        (int32 responseCode, address tokenAddress) = createNonFungibleToken(
+            _token
+        );
         if (responseCode != HederaResponseCodes.SUCCESS) {
             revert FailedToMint();
         }

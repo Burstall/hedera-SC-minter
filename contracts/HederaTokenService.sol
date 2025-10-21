@@ -2,8 +2,8 @@
 pragma solidity >=0.8.12 <0.9.0;
 pragma experimental ABIEncoderV2;
 
-import "./HederaResponseCodes.sol";
-import "./interfaces/IHederaTokenService.sol";
+import {HederaResponseCodes} from "./HederaResponseCodes.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 
 abstract contract HederaTokenService is HederaResponseCodes {
     address constant precompileAddress = address(0x167);
