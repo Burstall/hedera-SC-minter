@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.12 <0.9.0;
 
-import "./HederaResponseCodes.sol";
-import "./HederaTokenService.sol";
-import "./ExpiryHelper.sol";
+import {HederaResponseCodes} from "./HederaResponseCodes.sol";
+import {ExpiryHelper} from "./ExpiryHelper.sol";
+import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 
 // Import Ownable from the OpenZeppelin Contracts library
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 // Expiry Helper extends FeeHelper which extends KeyHelper inherits HederaStokeService
 // Ownable from OZ to limit access control
@@ -96,7 +96,7 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         );
 
         // call HTS precompiled contract, passing initial supply and decimals
-        (int responseCode, address tokenAddress) = createFungibleToken(
+        (int32 responseCode, address tokenAddress) = createFungibleToken(
             token,
             initialSupply,
             decimals
@@ -350,7 +350,7 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
     function mintAdditionalSupply(
         address token,
         uint64 amount
-    ) external onlyOwner returns (int responseCode, uint64 newTotalSupply) {
+    ) external onlyOwner returns (int32 responseCode, uint64 newTotalSupply) {
         bytes[] memory _metadata;
 
         (responseCode, newTotalSupply, ) = mintToken(token, amount, _metadata);
@@ -369,7 +369,7 @@ contract FungibleTokenCreator is ExpiryHelper, Ownable {
         address token,
         uint64 amount,
         int64[] memory _serials
-    ) external onlyOwner returns (int responseCode, uint64 newTotalSupply) {
+    ) external onlyOwner returns (int32 responseCode, uint64 newTotalSupply) {
         (responseCode, newTotalSupply) = burnToken(token, amount, _serials);
 
         emit TokenControllerMessage(

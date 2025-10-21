@@ -47,17 +47,17 @@ pragma solidity >=0.8.12 <0.9.0;
  */
 
 import {HederaResponseCodes} from "./HederaResponseCodes.sol";
-import {HederaTokenService} from "./HederaTokenService.sol";
 import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
+import {IPrngGenerator} from "./interfaces/IPrngGenerator.sol";
 import {ExpiryHelper} from "./ExpiryHelper.sol";
+import {Bits} from "./KeyHelper.sol";
 
-// functionality moved to library for space saving
-import {MinterLibrary} from "./MinterLibrary.sol";
 import {IBurnableHTS} from "./interfaces/IBurnableHTS.sol";
 
 // Import OpenZeppelin Contracts libraries where needed
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -75,6 +75,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     using SafeCast for int256;
     using Address for address;
     using Strings for string;
+    using Bits for uint256;
 
     // list of WL addresses
     EnumerableMap.AddressToUintMap private whitelistedAddressQtyMap;
@@ -240,6 +241,10 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         batchSize = 10;
     }
 
+    // ============================================
+    // Main Contract Functions
+    // ============================================
+
     // Supply the contract with token details and _metadata
     // Once basic integrity checks are done the token will mint and the address will be returned
     /// @param _name token name
@@ -375,24 +380,16 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         // Design decision: WL max mint per wallet takes priority
         // over max mint per wallet
         if (mintTiming.wlOnly) {
-            if (
-                !MinterLibrary.checkWhitelistConditions(
-                    whitelistedAddressQtyMap,
-                    msg.sender,
-                    mintEconomics.maxWlAddressMint
-                )
-            ) revert NotWL();
-            // only check the qty if there is a limit at contract level
+            // Inline checkWhitelistConditions
+            (bool found, uint256 qty) = whitelistedAddressQtyMap.tryGet(
+                msg.sender
+            );
+            if (!found) revert NotWL();
             if (mintEconomics.maxWlAddressMint > 0) {
-                // we know the address is in the list to get here.
-                uint256 wlMintsRemaining = whitelistedAddressQtyMap.get(
-                    msg.sender
-                );
-                if (wlMintsRemaining < _numberToMint) revert NotEnoughWLSlots();
-                whitelistedAddressQtyMap.set(
-                    msg.sender,
-                    wlMintsRemaining -= _numberToMint
-                );
+                if (qty == 0) revert NotWL();
+                // only check the qty if there is a limit at contract level
+                if (qty < _numberToMint) revert NotEnoughWLSlots();
+                whitelistedAddressQtyMap.set(msg.sender, qty - _numberToMint);
             }
             isWlMint = true;
         } else if (mintEconomics.maxMintPerWallet > 0) {
@@ -408,10 +405,24 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             ) revert MaxMintPerWalletExceeded();
         }
 
-        //calculate cost
-        (uint256 hbarCost, uint256 lazyCost) = getCostInternal(isWlMint);
-        uint256 totalHbarCost = _numberToMint * hbarCost;
-        uint256 totalLazyCost = _numberToMint * lazyCost;
+        //calculate cost (inline getCostInternal)
+        uint256 totalHbarCost;
+        uint256 totalLazyCost;
+        if (isWlMint) {
+            totalHbarCost =
+                (_numberToMint *
+                    (mintEconomics.mintPriceHbar *
+                        (100 - mintEconomics.wlDiscount))) /
+                100;
+            totalLazyCost =
+                (_numberToMint *
+                    (mintEconomics.mintPriceLazy *
+                        (100 - mintEconomics.wlDiscount))) /
+                100;
+        } else {
+            totalHbarCost = _numberToMint * mintEconomics.mintPriceHbar;
+            totalLazyCost = _numberToMint * mintEconomics.mintPriceLazy;
+        }
 
         // take the payment
         if (totalLazyCost > 0) {
@@ -426,7 +437,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         }
 
         // pop the _metadata
-        _metadataForMint = MinterLibrary.selectMetdataToMint(
+        _metadataForMint = selectMetdataToMint(
             metadata,
             _numberToMint,
             cid,
@@ -568,13 +579,27 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         emit MinterContractMessage(ContractEventType.LAZY_PMT, _payer, _amount);
     }
 
-    /// @param _isWlMint boolean to indicate if the mint is a WL mint
-    /// @return _hbarCost the cost in Hbar
-    /// @return _lazyCost the cost in Lazy
-    function getCostInternal(
-        bool _isWlMint
-    ) internal view returns (uint256 _hbarCost, uint256 _lazyCost) {
-        if (_isWlMint) {
+    // function to asses the cost to mint for a user
+    // currently flat cost, eventually dynamic on holdings
+    /// @return _hbarCost
+    /// @return _lazyCost
+    function getCost()
+        external
+        view
+        returns (uint256 _hbarCost, uint256 _lazyCost)
+    {
+        // Inline both checkWhitelistConditions and getCostInternal
+        (bool found, uint256 qty) = whitelistedAddressQtyMap.tryGet(msg.sender);
+        bool isWlMint = false;
+        if (found) {
+            if (mintEconomics.maxWlAddressMint > 0) {
+                isWlMint = qty > 0 ? true : false;
+            } else {
+                isWlMint = true;
+            }
+        }
+
+        if (isWlMint) {
             _hbarCost =
                 (mintEconomics.mintPriceHbar *
                     (100 - mintEconomics.wlDiscount)) /
@@ -587,24 +612,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             _hbarCost = mintEconomics.mintPriceHbar;
             _lazyCost = mintEconomics.mintPriceLazy;
         }
-    }
-
-    // function to asses the cost to mint for a user
-    // currently flat cost, eventually dynamic on holdings
-    /// @return _hbarCost
-    /// @return _lazyCost
-    function getCost()
-        external
-        view
-        returns (uint256 _hbarCost, uint256 _lazyCost)
-    {
-        (_hbarCost, _lazyCost) = getCostInternal(
-            MinterLibrary.checkWhitelistConditions(
-                whitelistedAddressQtyMap,
-                msg.sender,
-                mintEconomics.maxWlAddressMint
-            )
-        );
     }
 
     /// @param _receiver The receiver of the transaction
@@ -740,9 +747,14 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         onlyOwner
         returns (uint256 _numAddressesRemoved)
     {
-        _numAddressesRemoved = MinterLibrary.clearWhitelist(
-            whitelistedAddressQtyMap
-        );
+        _numAddressesRemoved = whitelistedAddressQtyMap.length();
+        for (uint256 a = _numAddressesRemoved; a > 0; ) {
+            (address key, ) = whitelistedAddressQtyMap.at(a - 1);
+            whitelistedAddressQtyMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
     }
 
     // function to allow the burning of NFTs (as long as no fallback fee)
@@ -1052,15 +1064,82 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             token = address(0);
             totalMinted = 0;
         }
-        _remaingItems = MinterLibrary.resetContract(
-            addressToNumMintedMap,
-            metadata,
-            walletMintTimeMap,
-            wlAddressToNumMintedMap,
-            serialMintTimeMap,
-            wlSerialsUsed,
-            _batch
-        );
+
+        // Inline resetContractInternal
+        uint256 size = addressToNumMintedMap.length();
+        if (size > _batch) {
+            _remaingItems = size - _batch;
+            size = _batch;
+        }
+
+        for (uint256 a = size; a > 0; ) {
+            (address key, ) = addressToNumMintedMap.at(a - 1);
+            addressToNumMintedMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
+        size = metadata.length;
+        size = size > _batch ? _batch : size;
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+
+        for (uint256 a = size; a > 0; ) {
+            metadata.pop();
+            unchecked {
+                --a;
+            }
+        }
+        size = walletMintTimeMap.length();
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+        for (uint256 a = size; a > 0; ) {
+            (address key, ) = walletMintTimeMap.at(a - 1);
+            walletMintTimeMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
+        size = wlAddressToNumMintedMap.length();
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+        for (uint256 a = size; a > 0; ) {
+            (address key, ) = wlAddressToNumMintedMap.at(a - 1);
+            wlAddressToNumMintedMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
+        size = serialMintTimeMap.length();
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+        for (uint256 a = size; a > 0; ) {
+            (uint256 key, ) = serialMintTimeMap.at(a - 1);
+            serialMintTimeMap.remove(key);
+            unchecked {
+                --a;
+            }
+        }
+        size = wlSerialsUsed.length();
+        if (size > _batch) {
+            _remaingItems = Math.max(_remaingItems, size - _batch);
+            size = _batch;
+        }
+        for (uint256 a = size; a > 0; ) {
+            uint256 key = wlSerialsUsed.at(a - 1);
+            wlSerialsUsed.remove(key);
+            unchecked {
+                --a;
+            }
+        }
 
         emit MinterContractMessage(
             _removeToken
@@ -1157,7 +1236,6 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
     // Likely only viable with smaller mints
     // else gather via events emitted.
-    // TODO: Create a batched retrieval
     /// @return _wlWalletList list of wallets who minted
     /// @return _wlNumMintedList lst of number minted
     function getNumberMintedByAllWlAddresses()
@@ -1168,12 +1246,16 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             uint256[] memory _wlNumMintedList
         )
     {
-        (_wlWalletList, _wlNumMintedList) = MinterLibrary
-            .getNumberMintedByAllWlAddressesBatch(
-                wlAddressToNumMintedMap,
-                0,
-                wlAddressToNumMintedMap.length()
-            );
+        uint256 length = wlAddressToNumMintedMap.length();
+        _wlWalletList = new address[](length);
+        _wlNumMintedList = new uint256[](length);
+        for (uint256 a = 0; a < length; ) {
+            (_wlWalletList[a], _wlNumMintedList[a]) = wlAddressToNumMintedMap
+                .at(a);
+            unchecked {
+                ++a;
+            }
+        }
     }
 
     function getNumberMintedByAllWlAddressesBatch(
@@ -1187,12 +1269,17 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             uint256[] memory _wlNumMintedList
         )
     {
-        (_wlWalletList, _wlNumMintedList) = MinterLibrary
-            .getNumberMintedByAllWlAddressesBatch(
-                wlAddressToNumMintedMap,
-                _offset,
-                _batchSize
-            );
+        if ((_offset + _batchSize) > wlAddressToNumMintedMap.length())
+            revert BadArguments();
+        _wlWalletList = new address[](_batchSize);
+        _wlNumMintedList = new uint256[](_batchSize);
+        for (uint256 a = 0; a < _batchSize; ) {
+            (_wlWalletList[a], _wlNumMintedList[a]) = wlAddressToNumMintedMap
+                .at(a + _offset);
+            unchecked {
+                ++a;
+            }
+        }
     }
 
     /// @return _remainingMint number of NFTs left to mint
@@ -1270,6 +1357,55 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
             _serial.toUint256(),
             string(_metadata)
         );
+    }
+
+    // ============================================
+    // Internal Helper Functions (formerly library)
+    // ============================================
+
+    function selectMetdataToMint(
+        string[] storage metadata_,
+        uint256 numberToMint,
+        string storage cid_,
+        address prngGenerator_
+    ) internal returns (bytes[] memory metadataForMint) {
+        // size the return array
+        metadataForMint = new bytes[](numberToMint);
+
+        if (prngGenerator_ == address(0)) {
+            for (uint256 m = 0; m < numberToMint; m++) {
+                metadataForMint[m] = bytes(
+                    string.concat(cid_, metadata_[metadata_.length - 1])
+                );
+                // pop discarding the element used up
+                metadata_.pop();
+            }
+        } else {
+            for (uint256 m = 0; m < numberToMint; ) {
+                // if only 1 item left, no need to generate random number
+                if (metadata_.length == 1) {
+                    metadataForMint[m] = bytes(
+                        string.concat(cid_, metadata_[0])
+                    );
+                    metadata_.pop();
+                    // should only be here on the last iteration anyway
+                    break;
+                } else {
+                    uint256 index = IPrngGenerator(prngGenerator_)
+                        .getPseudorandomNumber(0, metadata_.length - 1, m);
+                    string memory chosen = metadata_[index];
+                    // swap the chosen element with the last element
+                    metadata_[index] = metadata_[metadata_.length - 1];
+                    metadataForMint[m] = bytes(string.concat(cid_, chosen));
+                    // pop discarding the element used up
+                    metadata_.pop();
+                }
+
+                unchecked {
+                    ++m;
+                }
+            }
+        }
     }
 
     receive() external payable {}

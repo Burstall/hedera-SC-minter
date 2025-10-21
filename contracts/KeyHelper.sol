@@ -7,9 +7,9 @@ import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 
 abstract contract KeyHelper is HederaTokenServiceStakerLite {
     using Bits for uint256;
-    address supplyContract;
+    address internal supplyContract;
 
-    mapping(KeyType => uint256) keyTypes;
+    mapping(KeyType => uint256) private keyTypes;
 
     enum KeyType {
         ADMIN,
