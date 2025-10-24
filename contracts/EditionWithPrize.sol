@@ -70,9 +70,8 @@ import {IPrngGenerator} from "./interfaces/IPrngGenerator.sol";
 import {IBurnableHTS} from "./interfaces/IBurnableHTS.sol";
 import {ExpiryHelper} from "./ExpiryHelper.sol";
 import {ILazyDelegateRegistry} from "./interfaces/ILazyDelegateRegistry.sol";
-import {KeyHelper} from "./KeyHelper.sol";
 
-contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
+contract EditionWithPrize is ExpiryHelper, Ownable, ReentrancyGuard {
     // ============ Using Directives ============
 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
@@ -305,8 +304,8 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         tokens[0] = _lazyToken;
         tokens[1] = _usdcNative;
         tokens[2] = _usdcBridged;
-        int256 responseCode = associateTokens(address(this), tokens);
-        if (responseCode.toInt32() != HederaResponseCodes.SUCCESS) {
+        int64 responseCode = associateTokens(address(this), tokens);
+        if (int32(responseCode) != HederaResponseCodes.SUCCESS) {
             revert AssociationFailed();
         }
 
@@ -366,15 +365,19 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         string memory _symbol,
         string memory _memo,
         string memory _metadata,
-        uint256 _maxSupply,
+        int64 _maxSupply,
         NFTFeeObject[] memory _fees
-    ) external onlyOwner onlyPhase(Phase.NOT_INITIALIZED) {
+    )
+        external
+        payable
+        onlyOwner
+        onlyPhase(Phase.NOT_INITIALIZED)
+        returns (address)
+    {
         if (bytes(_metadata).length == 0) revert EmptyMetadata();
-        if (_maxSupply == 0) revert BadArguments();
-        if (_fees.length > 10) revert TooManyFees();
 
         editionMetadata = _metadata;
-        editionMaxSupply = _maxSupply;
+        editionMaxSupply = _maxSupply.toUint256();
 
         // Create the edition token with SUPPLY + WIPE keys
         editionToken = _createToken(
@@ -389,8 +392,10 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         emit EditionWithPrizeEvent(
             ContractEventType.EDITION_INITIALIZED,
             msg.sender,
-            _maxSupply
+            editionMaxSupply
         );
+
+        return editionToken;
     }
 
     /// @notice Initialize the prize token with metadata and royalties
@@ -405,17 +410,21 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         string memory _symbol,
         string memory _memo,
         string memory _metadata,
-        uint256 _maxSupply,
+        int64 _maxSupply,
         NFTFeeObject[] memory _fees
-    ) external onlyOwner {
+    )
+        external
+        payable
+        onlyOwner
+        onlyPhase(Phase.NOT_INITIALIZED)
+        returns (address)
+    {
         if (editionToken == address(0)) revert NotInitialized();
         if (prizeToken != address(0)) revert AlreadyInitialized();
         if (bytes(_metadata).length == 0) revert EmptyMetadata();
-        if (_maxSupply == 0) revert BadArguments();
-        if (_fees.length > 10) revert TooManyFees();
 
         prizeMetadata = _metadata;
-        prizeMaxSupply = _maxSupply;
+        prizeMaxSupply = _maxSupply.toUint256();
 
         // Create the prize token with SUPPLY key only (no wipe needed)
         prizeToken = _createToken(
@@ -433,7 +442,7 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         emit EditionWithPrizeEvent(
             ContractEventType.PRIZE_INITIALIZED,
             msg.sender,
-            0
+            prizeMaxSupply
         );
 
         emit EditionWithPrizeEvent(
@@ -441,6 +450,8 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
             msg.sender,
             uint256(Phase.EDITION_MINTING)
         );
+
+        return prizeToken;
     }
 
     /// @dev Internal function to create HTS tokens
@@ -448,96 +459,89 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param _symbol Token symbol
     /// @param _memo Token memo
     /// @param _maxSupply Maximum supply for the token
-    /// @param _fees Royalty fees
+    /// @param _royalties Royalty fees
     /// @param _withWipeKey If true, include wipe key
     /// @return tokenAddress Address of created token
     function _createToken(
         string memory _name,
         string memory _symbol,
         string memory _memo,
-        uint256 _maxSupply,
-        NFTFeeObject[] memory _fees,
+        int64 _maxSupply,
+        NFTFeeObject[] memory _royalties,
         bool _withWipeKey
     ) private returns (address tokenAddress) {
-        IHederaTokenService.HederaToken memory token;
-        token.name = _name;
-        token.symbol = _symbol;
-        token.treasury = address(this);
-        token.memo = _memo;
-        token.tokenSupplyType = true; // FINITE
-        token.maxSupply = int64(uint64(_maxSupply));
-        token.freezeDefault = false;
-        token.expiry = createAutoRenewExpiry(address(this), 7776000);
-        token.tokenKeys = new IHederaTokenService.TokenKey[](1);
+        if (bytes(_memo).length > 100) revert BadArguments();
+        if (_royalties.length > 10) revert TooManyFees();
+        if (_maxSupply == 0) revert BadArguments();
+
+        IHederaTokenService.TokenKey[]
+            memory _keys = new IHederaTokenService.TokenKey[](1);
 
         // Set up token keys using KeyHelper
         if (_withWipeKey) {
-            token.tokenKeys[0] = getSingleKey(
+            _keys[0] = getSingleKey(
                 KeyType.SUPPLY,
                 KeyType.WIPE,
                 KeyValueType.CONTRACT_ID,
                 address(this)
             );
         } else {
-            token.tokenKeys[0] = getSingleKey(
+            _keys[0] = getSingleKey(
                 KeyType.SUPPLY,
                 KeyValueType.CONTRACT_ID,
                 address(this)
             );
         }
 
-        // Convert NFTFeeObject[] to CustomFee[]
-        IHederaTokenService.FixedFee[]
-            memory royaltyFees = new IHederaTokenService.FixedFee[](
-                _fees.length
+        IHederaTokenService.HederaToken memory _token;
+        _token.name = _name;
+        _token.symbol = _symbol;
+        _token.treasury = address(this);
+        _token.memo = _memo;
+        _token.tokenSupplyType = true; // FINITE
+        _token.maxSupply = _maxSupply;
+        _token.tokenKeys = _keys;
+        _token.expiry = createAutoRenewExpiry(
+            address(this),
+            DEFAULT_AUTO_RENEW_PERIOD
+        );
+
+        // translate fee objects to avoid oddities from serialisation of default/empty values
+        IHederaTokenService.RoyaltyFee[]
+            memory _fees = new IHederaTokenService.RoyaltyFee[](
+                _royalties.length
             );
 
-        for (uint256 i = 0; i < _fees.length; i++) {
-            royaltyFees[i] = IHederaTokenService.FixedFee({
-                amount: 0,
-                tokenId: address(0),
-                useHbarsForPayment: true,
-                useCurrentTokenForPayment: false,
-                feeCollector: _fees[i].account
-            });
+        uint256 _length = _royalties.length;
+        for (uint256 f = 0; f < _length; ) {
+            IHederaTokenService.RoyaltyFee memory _fee;
+            _fee.numerator = _royalties[f].numerator;
+            _fee.denominator = _royalties[f].denominator;
+            _fee.feeCollector = _royalties[f].account;
+
+            if (_royalties[f].fallbackfee != 0) {
+                _fee.amount = _royalties[f].fallbackfee;
+                _fee.useHbarsForPayment = true;
+            }
+
+            _fees[f] = _fee;
+
+            unchecked {
+                ++f;
+            }
         }
 
         (
-            int256 responseCode,
+            int32 responseCode,
             address createdToken
         ) = createNonFungibleTokenWithCustomFees(
-                token,
-                royaltyFees,
-                new IHederaTokenService.RoyaltyFee[](_fees.length)
+                _token,
+                new IHederaTokenService.FixedFee[](0),
+                _fees
             );
 
         if (responseCode != HederaResponseCodes.SUCCESS) {
             revert FailedToMint();
-        }
-
-        // Populate royalty fees array
-        IHederaTokenService.RoyaltyFee[]
-            memory finalRoyaltyFees = new IHederaTokenService.RoyaltyFee[](
-                _fees.length
-            );
-
-        for (uint256 i = 0; i < _fees.length; ) {
-            IHederaTokenService.RoyaltyFee memory _fee;
-
-            _fee.numerator = _fees[i].numerator;
-            _fee.denominator = _fees[i].denominator;
-            _fee.feeCollector = _fees[i].account;
-
-            if (_fees[i].fallbackfee != 0) {
-                _fee.amount = _fees[i].fallbackfee;
-                _fee.useHbarsForPayment = true;
-            }
-
-            finalRoyaltyFees[i] = _fee;
-
-            unchecked {
-                ++i;
-            }
         }
 
         return createdToken;
@@ -547,29 +551,49 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
 
     /// @notice Select winners after all editions are minted
     /// @dev Can be called by anyone once editions sold out
+    /// @dev IMPORTANT: This function may require multiple PRNG calls if duplicates occur.
+    /// @dev Ensure sufficient gas limit (recommend 2-3x normal estimate) to handle worst-case scenarios.
+    /// @dev In edge cases with many duplicates, the transaction may still fail due to gas limits.
     function selectWinner()
         external
         nonReentrant
         onlyPhase(Phase.EDITION_SOLD_OUT)
+        returns (uint256[] memory)
     {
-        // Generate array of random numbers using PRNG
-        uint256[] memory randomNumbers = IPrngGenerator(PRNG_GENERATOR)
-            .getPseudorandomNumberArray(
-                1,
-                editionMaxSupply,
-                uint256(blockhash(block.number - 1)),
-                prizeMaxSupply
-            );
+        uint256 targetWinners = prizeMaxSupply;
+        uint256 baseSeed = uint256(blockhash(block.number - 1)) +
+            block.timestamp;
+        uint256 nonce = 0;
 
-        // Store winning serials
-        for (uint256 i = 0; i < randomNumbers.length; i++) {
-            winningSerials.add(randomNumbers[i]);
+        // Keep generating until we have enough unique winners
+        while (winningSerials.length() < targetWinners) {
+            uint256 remaining = targetWinners - winningSerials.length();
+
+            // Generate random numbers with nonce-updated seed
+            uint256[] memory randomNumbers = IPrngGenerator(PRNG_GENERATOR)
+                .getPseudorandomNumberArray(
+                    1,
+                    editionMaxSupply,
+                    uint256(keccak256(abi.encodePacked(baseSeed, nonce))),
+                    remaining
+                );
+
+            // Add unique numbers to winning serials
+            for (uint256 i = 0; i < randomNumbers.length; i++) {
+                winningSerials.add(randomNumbers[i]);
+                if (winningSerials.length() == targetWinners) break;
+            }
+
+            nonce++;
         }
+
+        // Get final winning serials array
+        uint256[] memory finalWinners = winningSerials.values();
 
         // Move to WINNER_SELECTED phase
         currentPhase = Phase.WINNER_SELECTED;
 
-        emit WinnerSelectedEvent(randomNumbers, block.timestamp);
+        emit WinnerSelectedEvent(finalWinners, block.timestamp);
 
         emit EditionWithPrizeEvent(
             ContractEventType.WINNER_SELECTED,
@@ -582,13 +606,20 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
             msg.sender,
             uint256(Phase.WINNER_SELECTED)
         );
+
+        return finalWinners;
     }
 
     /// @notice Claim prize by presenting winning edition serial
     /// @param _editionSerial The edition serial number to exchange
     function claimPrize(
         uint256 _editionSerial
-    ) external nonReentrant onlyPhase(Phase.WINNER_SELECTED) {
+    )
+        external
+        nonReentrant
+        onlyPhase(Phase.WINNER_SELECTED)
+        returns (int64[] memory serials)
+    {
         // Check if serial is a winner (O(1) lookup)
         if (!winningSerials.contains(_editionSerial)) {
             revert NotWinningSerial();
@@ -605,13 +636,13 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         int64[] memory serialsToWipe = new int64[](1);
         serialsToWipe[0] = int64(uint64(_editionSerial));
 
-        int256 wipeResponse = wipeTokenAccountNFT(
+        int64 wipeResponse = wipeTokenAccountNFT(
             editionToken,
             msg.sender,
             serialsToWipe
         );
 
-        if (wipeResponse != HederaResponseCodes.SUCCESS) {
+        if (int32(wipeResponse) != HederaResponseCodes.SUCCESS) {
             revert WipeFailed();
         }
 
@@ -619,7 +650,7 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         bytes[] memory prizeMetadataArray = new bytes[](1);
         prizeMetadataArray[0] = bytes(prizeMetadata);
 
-        _mintAndTransfer(prizeToken, prizeMetadataArray, msg.sender);
+        serials = _mintAndTransfer(prizeToken, prizeMetadataArray, msg.sender);
 
         // Increment prize minted counter
         prizeMinted++;
@@ -649,19 +680,23 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
     /// @notice Mint editions
     /// @param _quantity Number of editions to mint
     /// @dev Enforces configured costs - HBAR paid via msg.value, LAZY via allowance
-    function mint(uint256 _quantity) external payable {
-        _mintFor(msg.sender, _quantity);
+    /// @return serials Array of minted edition serial numbers
+    function mint(
+        uint256 _quantity
+    ) external payable returns (int64[] memory serials) {
+        return _mintFor(msg.sender, _quantity);
     }
 
     /// @notice Mint editions on behalf of another address (for gas abstraction)
     /// @param _onBehalfOf Address to mint for
     /// @param _quantity Number of editions to mint
     /// @dev LAZY comes from _onBehalfOf's allowance, HBAR from msg.sender
+    /// @return serials Array of minted edition serial numbers
     function mintOnBehalfOf(
         address _onBehalfOf,
         uint256 _quantity
-    ) external payable {
-        _mintFor(_onBehalfOf, _quantity);
+    ) external payable returns (int64[] memory serials) {
+        return _mintFor(_onBehalfOf, _quantity);
     }
 
     /// @dev Internal unified minting logic
@@ -674,6 +709,7 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         onlyPhase(Phase.EDITION_MINTING)
         whenNotPaused
         whenMintOpen
+        returns (int64[] memory serials)
     {
         _validateMintQuantity(_quantity);
         _checkWhitelistAccess(_minter, _quantity);
@@ -708,7 +744,7 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         }
 
         // Mint and transfer
-        _executeMint(_minter, _quantity);
+        serials = _executeMint(_minter, _quantity);
 
         // Refund excess HBAR
         if (msg.value > hbarCost) {
@@ -836,13 +872,13 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         address _recipient
     ) private returns (int64[] memory mintedSerials) {
         // Mint the tokens
-        (int256 mintResponse, , int64[] memory serials) = mintToken(
+        (int64 mintResponse, , int64[] memory serials) = mintToken(
             _token,
             0,
             _metadata
         );
 
-        if (mintResponse != HederaResponseCodes.SUCCESS) {
+        if (int32(mintResponse) != HederaResponseCodes.SUCCESS) {
             revert FailedToMint();
         }
 
@@ -855,14 +891,14 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
             receivers[i] = _recipient;
         }
 
-        int256 transferResponse = transferNFTs(
+        int64 transferResponse = transferNFTs(
             _token,
             senders,
             receivers,
             serials
         );
 
-        if (transferResponse != HederaResponseCodes.SUCCESS) {
+        if (int32(transferResponse) != HederaResponseCodes.SUCCESS) {
             revert TransferFailed();
         }
 
@@ -870,7 +906,10 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
     }
 
     /// @dev Execute the actual minting and tracking updates
-    function _executeMint(address _minter, uint256 _quantity) private {
+    function _executeMint(
+        address _minter,
+        uint256 _quantity
+    ) private returns (int64[] memory serials) {
         // Prepare metadata array
         bytes[] memory metadataArray = new bytes[](_quantity);
         for (uint256 i = 0; i < _quantity; i++) {
@@ -878,7 +917,7 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         }
 
         // Mint and transfer using shared function
-        _mintAndTransfer(editionToken, metadataArray, _minter);
+        serials = _mintAndTransfer(editionToken, metadataArray, _minter);
 
         // Update tracking
         editionMinted += _quantity;
@@ -916,39 +955,37 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
     ) private {
         if (_token == lazyDetails.lazyToken) {
             // LAZY token - handle burn mechanism
-            if (mintEconomics.lazyFromContract) {
-                // Contract pays - transfer from contract to treasury
-                bool success = IERC20(_token).transfer(owner(), _amount);
-                if (!success) revert PaymentFailed();
-            } else {
-                // User pays with burn
-                uint256 burnAmount = (_amount * lazyDetails.lazyBurnPerc) / 100;
-                uint256 treasuryAmount = _amount - burnAmount;
-
-                // Transfer to treasury
-                if (treasuryAmount > 0) {
+            if (!mintEconomics.lazyFromContract) {
+                // Transfer from User to treasury
+                if (_amount > 0) {
                     bool success = IERC20(_token).transferFrom(
                         _from,
-                        owner(),
-                        treasuryAmount
+                        address(this),
+                        _amount
                     );
                     if (!success) revert PaymentFailed();
                 }
+            }
+            // Either way have to burn a portion if configured
+            uint256 burnAmount = (_amount * lazyDetails.lazyBurnPerc) / 100;
 
-                // Burn portion
-                if (burnAmount > 0) {
-                    int256 responseCode = lazyDetails.lazySCT.burn(
-                        _token,
-                        uint32(burnAmount)
-                    );
-                    if (responseCode != HederaResponseCodes.SUCCESS) {
-                        revert BurnFailed();
-                    }
+            // Burn portion
+            if (burnAmount > 0) {
+                int256 responseCode = lazyDetails.lazySCT.burn(
+                    _token,
+                    uint32(burnAmount)
+                );
+                if (responseCode != HederaResponseCodes.SUCCESS) {
+                    revert BurnFailed();
                 }
             }
         } else {
             // Non-LAZY token - direct transfer to treasury
-            bool success = IERC20(_token).transferFrom(_from, owner(), _amount);
+            bool success = IERC20(_token).transferFrom(
+                _from,
+                address(this),
+                _amount
+            );
             if (!success) revert PaymentFailed();
         }
     }
@@ -1313,6 +1350,28 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         }
     }
 
+    /// @notice Withdraw accumulated HBAR balance to owner
+    function withdrawHbar() external onlyOwner {
+        uint256 balance = address(this).balance;
+        if (balance > 0) {
+            Address.sendValue(payable(owner()), balance);
+        }
+    }
+
+    /// @notice Withdraw accumulated LAZY tokens to owner
+    function withdrawLazy() external onlyOwner {
+        uint256 lazyBalance = IERC20(lazyDetails.lazyToken).balanceOf(
+            address(this)
+        );
+        if (lazyBalance > 0) {
+            bool success = IERC20(lazyDetails.lazyToken).transfer(
+                owner(),
+                lazyBalance
+            );
+            if (!success) revert PaymentFailed();
+        }
+    }
+
     // ============ View/Query Functions ============
 
     /// @notice Get whitelist status and remaining slots for an address
@@ -1349,6 +1408,22 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
                     : 0;
             }
         }
+    }
+
+    /// @notice Get Mint Cost
+    function getMintCost()
+        external
+        view
+        returns (uint256 hbarPrice, uint256 lazyPrice, uint256 usdcPrice)
+    {
+        hbarPrice = mintEconomics.mintPriceHbar;
+        lazyPrice = mintEconomics.mintPriceLazy;
+        usdcPrice = mintEconomics.mintPriceUsdc;
+    }
+
+    /// @notice isPaused
+    function isPaused() external view returns (bool) {
+        return mintTiming.mintPaused;
     }
 
     /// @notice Get minting statistics for an address
@@ -1393,6 +1468,9 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         view
         returns (bool isOpen, string memory reason)
     {
+        if (editionMinted >= editionMaxSupply) {
+            return (false, "Sold out");
+        }
         if (currentPhase != Phase.EDITION_MINTING) {
             return (false, "Wrong phase");
         }
@@ -1401,9 +1479,6 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         }
         if (block.timestamp < mintTiming.mintStartTime) {
             return (false, "Not started");
-        }
-        if (editionMinted >= editionMaxSupply) {
-            return (false, "Sold out");
         }
         return (true, "");
     }
@@ -1546,10 +1621,7 @@ contract EditionWithPrize is KeyHelper, ExpiryHelper, Ownable, ReentrancyGuard {
         view
         returns (uint256[] memory winners)
     {
-        winners = new uint256[](winningSerials.length());
-        for (uint256 i = 0; i < winningSerials.length(); i++) {
-            winners[i] = winningSerials.at(i);
-        }
+        return winningSerials.values();
     }
 
     /// @notice Check if a serial number is a winner

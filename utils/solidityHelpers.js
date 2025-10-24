@@ -3,6 +3,7 @@ const axios = require('axios');
 const dotenv = require('dotenv');
 const { ContractCallQuery, Client, TransactionRecordQuery, ContractExecuteTransaction, ContractCreateFlow } = require('@hashgraph/sdk');
 const { getBaseURL } = require('./hederaMirrorHelpers');
+const { formatTransactionAnalysis } = require('./transactionHelpers');
 dotenv.config();
 
 const SLEEP_TIME = process.env.SLEEP_TIME ?? 5000;
@@ -116,7 +117,7 @@ async function parseErrorTransactionId(envOrClient, transactionId, iface) {
 		console.log(' -Error message:', record.contractFunctionResult.errorMessage, 'calling:', record.contractFunctionResult.contractId.toString(), 'with gas used:', record.contractFunctionResult.gasUsed.toString());
 		try {
 			if (!record?.contractFunctionResult?.errorMessage || record?.contractFunctionResult?.errorMessage == '0x') {
-				console.log('NO CONTRACT ERROR MESSAGE:', transactionId.toString(), record);
+				console.log('NO CONTRACT ERROR MESSAGE:', transactionId.toString(), formatTransactionAnalysis(record));
 				return `POORLY FORMED ERROR: ${transactionId}`;
 			}
 			return parseError(iface, record.contractFunctionResult.errorMessage);
@@ -154,20 +155,21 @@ async function parseErrorTransactionId(envOrClient, transactionId, iface) {
  * @param {AccountId} from
  * @param {Boolean} estimate gas estimate
  * @param {Number} gas gas limit
+ * @param {Number} value amount of hbar to send in tinybars
  * @returns {String} encoded result
  */
-async function readOnlyEVMFromMirrorNode(env, contractId, data, from, estimate = true, gas = 300_000) {
+async function readOnlyEVMFromMirrorNode(env, contractId, data, from, estimate = true, gas = 300_000, value = 0) {
 	const baseUrl = getBaseURL(env);
 
 	const body = {
 		'block': 'latest',
 		'data': data,
 		'estimate': estimate,
-		'from': from.toSolidityAddress(),
+		'from': typeof from === 'string' ? from : from.toSolidityAddress(),
 		'gas': gas,
 		'gasPrice': 100000000,
 		'to': contractId.toSolidityAddress(),
-		'value': 0,
+		'value': value,
 	};
 
 	const url = `${baseUrl}/api/v1/contracts/call`;
@@ -266,10 +268,11 @@ async function contractExecuteFunction(contractId, iface, client, gasLim, fcnNam
 		if (flagError) console.log('ERROR: Contract Transaction Failed');
 
 		if (!err?.contractFunctionResult?.errorMessage) {
-			console.log('NO CONTRACT ERROR MESSAGE:', contractExecuteTx?.transactionId?.toString(), err);
+			console.log('TX FAILED - NO CONTRACT ERROR MESSAGE:', contractExecuteTx?.transactionId?.toString(), contractExecuteTx, err);
+			return [{ status: err }, `${contractExecuteTx?.transactionId?.toString()} : ${contractId.toString()} : ${fcnName} : ${params}`, null];
 		}
 
-		return [(parseError(iface, err.contractFunctionResult.errorMessage))];
+		return [(parseError(iface, err?.contractFunctionResult?.errorMessage))];
 	}
 
 	let contractExecuteRx;

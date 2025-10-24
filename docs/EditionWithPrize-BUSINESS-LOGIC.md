@@ -352,22 +352,56 @@ event DiscountUpdated(uint256 discount);
 
 ### Winner Selection Process
 
-1. **Call PRNG**:
+**⚠️ CRITICAL GAS CONSIDERATION for Multiple Winners:**
+When `prizeMaxSupply > 1`, the `selectWinner()` function uses a robust algorithm that may require multiple PRNG calls if duplicate serial numbers are generated. **Gas estimates should be 2-3x normal estimates** to handle worst-case scenarios with many duplicates.
+
+**Algorithm Overview:**
+1. **Initialize Parameters**:
    ```solidity
-   uint256[] memory randomNumbers = IPrngGenerator(prngGenerator)
-       .getPseudorandomNumberArray(1, editionMaxSupply, blockhash(block.number - 1), prizeMaxSupply);
+   uint256 targetWinners = prizeMaxSupply;
+   uint256 baseSeed = uint256(blockhash(block.number - 1)) + block.timestamp;
+   uint256 nonce = 0;
    ```
 
-2. **Store Winning Serials** (bearer assets):
+2. **Iterative Winner Selection**:
    ```solidity
-   for (uint256 i = 0; i < randomNumbers.length; i++) {
-       winningSerials.add(randomNumbers[i]);  // EnumerableSet for O(1) lookups
+   while (winningSerials.length() < targetWinners) {
+       // Generate nonce-evolved seed for uniqueness
+       uint256 seed = uint256(keccak256(abi.encodePacked(baseSeed, nonce)));
+       
+       // Request only remaining winners needed (gas optimization)
+       uint256 remaining = targetWinners - winningSerials.length();
+       
+       // PRNG call with evolved seed
+       uint256[] memory randomNumbers = IPrngGenerator(PRNG_GENERATOR)
+           .getPseudorandomNumberArray(1, editionMaxSupply, seed, remaining);
+       
+       // Add unique winners (EnumerableSet automatically handles duplicates)
+       for (uint256 i = 0; i < randomNumbers.length; i++) {
+           winningSerials.add(randomNumbers[i]);
+           if (winningSerials.length() == targetWinners) break;
+       }
+       nonce++; // Evolve seed for next iteration
    }
    ```
 
-3. **Emit Verification**:
+3. **Duplicate Handling**:
+   - **EnumerableSet.add()** silently ignores duplicates, ensuring unique winners
+   - **Nonce evolution** ensures different random seeds across iterations
+   - **Gas-optimized** by requesting only remaining winners needed
+   - **Automatic termination** when exact target count reached
+
+4. **Statistical Analysis** (Example: 3 winners from 10 editions):
+   - **Single iteration success**: ~70% probability (no duplicates)
+   - **Two iterations**: ~99% total success probability  
+   - **Gas overhead**: Minimal for most realistic scenarios
+   - **Edge case protection**: Algorithm guarantees success regardless of duplicates
+
+5. **Final Steps**:
    ```solidity
-   emit WinnerSelectedEvent(randomNumbers, block.timestamp);
+   uint256[] memory finalWinners = winningSerials.values();
+   currentPhase = Phase.WINNER_SELECTED;
+   emit WinnerSelectedEvent(finalWinners, block.timestamp);
    ```
 
 ### Verification by Third Parties
@@ -478,6 +512,15 @@ _mintAndTransfer(prizeToken, prizeMetadataArray, msg.sender);
 - WL spots purchasable with 1000 Lazy
 - Max 5 per wallet
 - Bearer asset model allows winner to sell/trade winning ticket
+
+### Scenario 4: Multiple Winners Edition (NEW - v1.0 COMPLETE)
+- Artist creates 50 editions at 15 hbar each
+- **3 prize tokens** for multiple winners (prizeMaxSupply = 3)
+- **⚠️ Gas Consideration**: selectWinner() call requires 2-3x gas estimate
+- Algorithm guarantees exactly 3 unique winners via nonce-based seed evolution
+- **Trading Market**: Winning serials become tradeable "golden tickets"
+- Each winning serial holder can claim their individual prize
+- Statistical analysis: ~70% chance of single iteration, ~99% within two iterations
 
 ---
 

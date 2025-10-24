@@ -79,6 +79,12 @@ async function mintFT(
 
 /**
  * Helper function to send FTs
+ * @param {Client} client
+ * @param {TokenId} FTTokenId
+ * @param {Number} amount
+ * @param {AccountId} sender
+ * @param {AccountId} receiver
+ * @param {String} memo
  */
 async function sendFT(client, FTTokenId, amount, sender, receiver, memo) {
 	const transferTx = new TransferTransaction()
@@ -677,16 +683,22 @@ async function sendFTWithAllowance(
  * @param {Hbar} amount
  */
 async function sweepHbar(client, sourceId, sourcePK, targetId, amount) {
-	const sweepTx = new TransferTransaction()
-		.addHbarTransfer(targetId, amount)
-		.addHbarTransfer(sourceId, amount.negated())
-		.freezeWith(client);
+	try {
+		const sweepTx = new TransferTransaction()
+			.addHbarTransfer(targetId, amount)
+			.addHbarTransfer(sourceId, amount.negated())
+			.freezeWith(client);
 
-	const signedTx = await sweepTx.sign(sourcePK);
-	const txResp = await signedTx.execute(client);
+		const signedTx = await sweepTx.sign(sourcePK);
+		const txResp = await signedTx.execute(client);
 
-	const transferRx = await txResp.getReceipt(client);
-	return transferRx.status.toString();
+		const transferRx = await txResp.getReceipt(client);
+		return transferRx.status.toString();
+	}
+	catch (error) {
+		console.error('Error sweeping HBAR:', targetId.toString(), amount, error);
+		return 'ERROR';
+	}
 }
 
 module.exports = {

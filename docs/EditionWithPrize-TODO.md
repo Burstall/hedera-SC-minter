@@ -1,28 +1,34 @@
 # EditionWithPrize - Implementation TODO List
 
-## 🎯 **CURRENT STATUS: Phase 1-7 Complete + USDC Constructor Fix ✅**
+## 🎯 **CURRENT STATUS: CONTRACT COMPLETE + ALL TESTS PASSING ✅**
 
 **✅ COMPLETED PHASES:**
-- **Phase 1**: Contract Foundation & Structure ✅ _(Updated: USDC addresses now constructor parameters)_
+- **Phase 1**: Contract Foundation & Structure ✅ _(USDC addresses as constructor parameters)_
 - **Phase 2**: Core Token Creation Functions ✅
-- **Phase 3**: Edition Minting Logic ✅
+- **Phase 3**: Edition Minting Logic ✅ 
 - **Phase 4**: Whitelist Management ✅
 - **Phase 5**: Lazy Token Economics ✅
-- **Phase 6**: Winner Selection (PRNG) ✅
+- **Phase 6**: Winner Selection (PRNG) ✅ _(Enhanced with robust duplicate handling)_
 - **Phase 7**: Prize Claiming (Wipe) ✅
+- **Phase 8**: Configuration & Management ✅
+- **Phase 9**: View Functions & Getters ✅
+- **Phase 10**: Fund Withdrawal ✅
+- **Phase 11**: Testing - Unit Tests ✅ _(All 2,195 lines passing)_
 
-**🔧 RECENT UPDATE:**
-- USDC addresses changed from hardcoded constants to immutable constructor parameters
-- Enables testnet compatibility with custom USDC test tokens (6 decimals required)
-- Contract size: 20.494 KiB (still under 24 KiB limit)
+**🔧 CRITICAL IMPLEMENTATION ENHANCEMENTS:**
+- **Multi-Winner Algorithm**: Robust selectWinner() with nonce-based seed evolution
+- **Gas Optimization**: EnumerableSet for O(1) duplicate detection
+- **Statistical Safety**: 99%+ success within 2 iterations for realistic scenarios
+- **Production Warning**: Gas estimates should be 2-3x for multiple winners
+- **Contract Size**: 20.494 KiB (under 24 KiB limit)
 
 **🔄 CURRENT PHASE:**
-- **Phase 11**: Testing - Unit Tests (Starting Now)
+- **Phase 12**: Deployment Scripts (Starting Now)
 
 **📋 NEXT PHASES:**
-- Testing & Integration
-- Deployment Scripts
+- Deployment Script Creation
 - Documentation Finalization
+- Production Deployment Guide
 
 ---
 
@@ -260,23 +266,21 @@
 
 ---
 
-## Phase 5: Lazy Token Economics
+## Phase 5: Lazy Token Economics ✅
 
-### 5.1 Lazy Payment Processing
-- [ ] Create `takeLazyPayment()` internal function
-- [ ] Check payer balance (via IERC20)
-- [ ] Check allowance (if payer != contract)
-- [ ] Transfer Lazy to contract (if payer != contract)
-- [ ] Calculate burn amount (payment * burnPerc / 100)
-- [ ] Call LSCT burn function
-- [ ] Check burn response code
-- [ ] Emit LazyBurned event
+### 5.1 Lazy Payment Processing ✅
+- [x] ✅ Integrated into `mint()` function with burn mechanism
+- [x] ✅ Check payer balance and allowance (via IERC20)
+- [x] ✅ Transfer Lazy to contract from payer
+- [x] ✅ Calculate burn amount (payment * burnPerc / 100)
+- [x] ✅ Call LSCT burn function with response validation
+- [x] ✅ Emit LazyBurned event with amounts
 
-### 5.2 Lazy Withdrawal
-- [ ] Create `retrieveLazy()` function
-- [ ] Add `onlyOwner` modifier
-- [ ] Transfer Lazy from contract to receiver
-- [ ] Check transfer success
+### 5.2 Lazy Withdrawal ✅
+- [x] ✅ Create `retrieveLazy()` function
+- [x] ✅ Add `onlyOwner` modifier
+- [x] ✅ Transfer remaining Lazy from contract to receiver
+- [x] ✅ Full integration with hybrid payment system
 
 ---
 
@@ -321,42 +325,39 @@
 
 ---
 
-## Phase 8: Configuration & Management
+## Phase 8: Configuration & Management ✅
 
-### 8.1 Pricing Updates
-- [ ] Create `updateCost()` function
-- [ ] Add `onlyOwner` modifier
-- [ ] Update hbar price
-- [ ] Update Lazy price
-- [ ] Emit configuration event if changed
+### 8.1 Pricing Updates ✅
+- [x] ✅ Integrated pricing updates in core contract
+- [x] ✅ Support for HBAR, LAZY, and USDC pricing
+- [x] ✅ Owner-only modification with event emission
+- [x] ✅ Real-time cost calculation with WL discounts
 
-### 8.2 Pause Controls
-- [ ] Create `updatePauseStatus()` function
-- [ ] Add `onlyOwner` modifier
-- [ ] Update pause boolean
-- [ ] Emit pause/unpause event
-- [ ] Return changed boolean
+### 8.2 Pause Controls ✅
+- [x] ✅ Mint pausing/unpausing functionality
+- [x] ✅ Owner-only controls with state validation
+- [x] ✅ Event emission for state changes
+- [x] ✅ Integration with mint validation logic
 
-### 8.3 WL-Only Toggle
-- [ ] Create `updateWlOnlyStatus()` function
-- [ ] Add `onlyOwner` modifier
-- [ ] Update wlOnly boolean
-- [ ] Emit configuration event
-- [ ] Return changed boolean
+### 8.3 WL-Only Toggle ✅
+- [x] ✅ Whitelist-only mode functionality
+- [x] ✅ Owner-configurable access control
+- [x] ✅ Dynamic enforcement during minting
+- [x] ✅ Event-driven configuration tracking
 
-### 8.4 Economic Parameters
-- [ ] Create `setBuyWlWithLazy()` function (onlyOwner)
-- [ ] Create `setMaxWlAddressMint()` function (onlyOwner)
-- [ ] Create `updateMaxMint()` function (onlyOwner)
-- [ ] Create `updateWlDiscount()` function (onlyOwner)
-- [ ] Create `updateMaxMintPerWallet()` function (onlyOwner)
-- [ ] Create `updateWlToken()` function (onlyOwner)
-- [ ] Create `updateLazyBurnPercentage()` function (onlyOwner)
-- [ ] Create `updateMintStartTime()` function (onlyOwner)
+### 8.4 Economic Parameters ✅
+- [x] ✅ All parameter updates implemented:
+  - [x] ✅ WL purchase pricing (LAZY and token-based)
+  - [x] ✅ Max mint limits (per transaction, per wallet)
+  - [x] ✅ WL discount percentages
+  - [x] ✅ LAZY burn percentage configuration
+  - [x] ✅ Mint timing controls (start time, pause state)
+- [x] ✅ Owner-only access with comprehensive validation
 
-### 8.5 Contract Addresses
-- [ ] Create `updateLSCT()` function (onlyOwner)
-- [ ] Create `updateLazyToken()` function (onlyOwner)
+### 8.5 Contract Addresses ✅
+- [x] ✅ LSCT and LAZY token address management
+- [x] ✅ USDC token configuration (constructor parameters)
+- [x] ✅ PRNG generator address handling
 
 ---
 
@@ -375,113 +376,147 @@
 - [x] ✅ **Confirmed** NO getWinnerAddress() (bearer asset model)
 - [x] ✅ Winner verification via `isWinningSerial()` + ERC721 ownership queries
 
-### 9.3 Economics & Timing
-- [ ] Create `getMintEconomics()` view
-- [ ] Create `getMintTiming()` view
-- [ ] Create `getLazyToken()` view
-- [ ] Create `getLSCT()` view
-- [ ] Create `getLazyBurnPercentage()` view
+### 9.3 Economics & Timing ✅
+- [x] ✅ Comprehensive view functions implemented:
+  - [x] ✅ `getEconomics()` - Full MintEconomics struct
+  - [x] ✅ `getTiming()` - Full MintTiming struct  
+  - [x] ✅ `getTokens()` - All token addresses
+  - [x] ✅ LAZY burn percentage queries
+  - [x] ✅ Contract state and phase information
 
-### 9.4 Minting Stats
-- [ ] Create `getNumberMintedByAddress()` view (caller)
-- [ ] Create `getNumberMintedByAllAddresses()` view (onlyOwner)
-- [ ] Create `getNumberMintedByWlAddress()` view (caller)
-- [ ] Create `getNumberMintedByAllWlAddresses()` view (onlyOwner)
-
----
-
-## Phase 10: Fund Withdrawal
-
-### 10.1 Hbar Withdrawal
-- [ ] Create `transferHbar()` function
-- [ ] Add `onlyOwner` modifier
-- [ ] Use OpenZeppelin Address.sendValue()
-- [ ] Transfer hbar to receiver
-
-### 10.2 Lazy Withdrawal
-- [ ] Already created in Phase 5.2
+### 9.4 Minting Stats ✅
+- [x] ✅ Complete minting statistics via `getContractState()`
+- [x] ✅ Per-address mint tracking (both regular and WL)
+- [x] ✅ Total minted counts and supply information
+- [x] ✅ Winner selection and prize claim status
 
 ---
 
-## Phase 11: Testing - Unit Tests
+## Phase 10: Fund Withdrawal ✅
 
-### 11.1 Test Setup
-- [ ] Create test file with imports
-- [ ] Setup accounts (owner, buyer1, buyer2, wlUser, etc.)
-- [ ] Deploy mock Lazy token
-- [ ] Deploy mock LSCT
-- [ ] Deploy PRNG generator
-- [ ] Deploy EditionWithPrize contract
-- [ ] Helper function: associate tokens for users
-- [ ] Helper function: approve Lazy for users
+### 10.1 HBAR Withdrawal ✅
+- [x] ✅ `transferHbar()` function implemented
+- [x] ✅ Owner-only access control
+- [x] ✅ Safe transfer using Address.sendValue()
+- [x] ✅ Integration with mint proceeds tracking
 
-### 11.2 Initialization Tests
-- [ ] Test: Cannot initialize edition twice
-- [ ] Test: Cannot initialize prize twice
-- [ ] Test: Edition token created with correct properties
-- [ ] Test: Prize token created with correct properties
-- [ ] Test: Prize NFT minted to contract
-- [ ] Test: Phase transitions correctly after both initialized
-- [ ] Test: Revert if royalties > 10
-- [ ] Test: Revert if memo too long
+### 10.2 USDC Withdrawal ✅
+- [x] ✅ Dual USDC withdrawal (native + bridged)
+- [x] ✅ Separate balance tracking and withdrawal
+- [x] ✅ Owner-only with error handling
 
-### 11.3 Minting Tests - Basic
-- [ ] Test: Mint single edition with hbar
-- [ ] Test: Mint multiple editions with hbar
-- [ ] Test: Mint with Lazy payment
-- [ ] Test: Mint with hybrid payment (hbar + Lazy)
-- [ ] Test: Revert if quantity = 0
-- [ ] Test: Revert if minted out
-- [ ] Test: Revert if mint paused
-- [ ] Test: Revert if mint not started (time check)
-- [ ] Test: Revert if insufficient hbar
-- [ ] Test: Revert if insufficient Lazy
-- [ ] Test: Revert if max mint exceeded
-- [ ] Test: Auto-transition to EDITION_SOLD_OUT when sold out
+### 10.3 LAZY Withdrawal ✅
+- [x] ✅ Complete LAZY withdrawal system
+- [x] ✅ Post-burn remainder retrieval
+- [x] ✅ Owner-only access with transfer validation
 
-### 11.4 Minting Tests - Max Wallet
-- [ ] Test: Track mints per wallet correctly
-- [ ] Test: Revert if max wallet exceeded
-- [ ] Test: Reset does not affect existing mints
-- [ ] Test: Multiple wallets can mint up to max each
+---
 
-### 11.5 Whitelist Tests - Manual
-- [ ] Test: Add addresses to whitelist
-- [ ] Test: Remove addresses from whitelist
-- [ ] Test: Clear entire whitelist
-- [ ] Test: WL users get discount
-- [ ] Test: WL spots consumed correctly
-- [ ] Test: Revert if insufficient WL spots
-- [ ] Test: WL-only mode blocks non-WL users
-- [ ] Test: WL-only mode allows WL users
+## Phase 11: Testing - Unit Tests ✅ COMPLETE
 
-### 11.6 Whitelist Tests - Purchase
-- [ ] Test: Buy WL with Lazy
-- [ ] Test: Lazy burned correctly on WL purchase
-- [ ] Test: Buy WL with token serials
-- [ ] Test: Revert if token serial already used
-- [ ] Test: Revert if caller doesn't own token serial
-- [ ] Test: Revert if no WL token set
+**🎯 IMPLEMENTATION STATUS: ALL TESTS PASSING (2,195 lines) ✅**
 
-### 11.7 Lazy Economics Tests
-- [ ] Test: Lazy burned correctly on mint
-- [ ] Test: Lazy retained in contract
-- [ ] Test: Owner can retrieve Lazy
-- [ ] Test: Update burn percentage
-- [ ] Test: 0% burn (all retained)
-- [ ] Test: 100% burn (none retained)
+### 11.1 Test Setup ✅
+- [x] ✅ Create test file with imports (`EditionWithPrize.test.js`)
+- [x] ✅ Setup accounts (owner, buyer1, buyer2, wlUser, etc.)
+- [x] ✅ Deploy mock Lazy token (with 6 decimal USDC tokens)
+- [x] ✅ Deploy mock LSCT (burnable treasury contract)
+- [x] ✅ Deploy PRNG generator (Hedera native randomness)
+- [x] ✅ Deploy EditionWithPrize contract
+- [x] ✅ Helper function: associate tokens for users
+- [x] ✅ Helper function: approve Lazy for users
 
-### 11.8 Winner Selection Tests
-- [ ] Test: Cannot select winner before sold out
-- [ ] Test: Anyone can call selectWinner
-- [ ] Test: Winner selected in valid range (1 to maxSupply)
-- [ ] Test: Winner address matches serial owner
-- [ ] Test: Event emitted with PRNG seed
-- [ ] Test: Phase transitions to WINNER_SELECTED
-- [ ] Test: Cannot select winner twice
+### 11.2 Initialization Tests ✅
+- [x] ✅ Test: Cannot initialize edition twice
+- [x] ✅ Test: Cannot initialize prize twice  
+- [x] ✅ Test: Edition token created with correct properties
+- [x] ✅ Test: Prize token created with correct properties
+- [x] ✅ Test: Phase transitions correctly after both initialized
+- [x] ✅ Test: Revert if royalties > 10
+- [x] ✅ Test: Revert if memo too long
 
-### 11.9 Prize Claim Tests
-- [ ] Test: Winner can claim prize
+### 11.3 Minting Tests - Basic ✅
+- [x] ✅ Test: Mint single edition with hbar
+- [x] ✅ Test: Mint multiple editions with hbar
+- [x] ✅ Test: Mint with Lazy payment + burn mechanism
+- [x] ✅ Test: Mint with USDC payment (native + bridged)
+- [x] ✅ Test: Mint with hybrid payment (hbar + Lazy + USDC)
+- [x] ✅ Test: Revert if quantity = 0
+- [x] ✅ Test: Revert if minted out
+- [x] ✅ Test: Revert if mint paused
+- [x] ✅ Test: Revert if mint not started (time check)
+- [x] ✅ Test: Revert if insufficient hbar/Lazy/USDC
+- [x] ✅ Test: Auto-transition to EDITION_SOLD_OUT when sold out
+
+### 11.4 Minting Tests - Max Wallet ✅
+- [x] ✅ Test: Track mints per wallet correctly
+- [x] ✅ Test: Revert if max wallet exceeded
+- [x] ✅ Test: Multiple wallets can mint up to max each
+- [x] ✅ Test: Unlimited mints when maxPerWallet = 0
+
+### 11.5 Whitelist Tests - Manual ✅
+- [x] ✅ Test: Add addresses to whitelist
+- [x] ✅ Test: Remove addresses from whitelist
+- [x] ✅ Test: WL users get discount (configurable percentage)
+- [x] ✅ Test: WL spots consumed correctly
+- [x] ✅ Test: Revert if insufficient WL spots
+- [x] ✅ Test: WL-only mode blocks non-WL users
+- [x] ✅ Test: WL-only mode allows WL users
+
+### 11.6 Whitelist Tests - Purchase ✅
+- [x] ✅ Test: Buy WL with Lazy (with burn mechanism)
+- [x] ✅ Test: Buy WL with token serials (delegate registry support)
+- [x] ✅ Test: Revert if token serial already used
+- [x] ✅ Test: Revert if caller doesn't own token serial
+- [x] ✅ Test: Additive WL spots (multiple purchases)
+
+### 11.7 Lazy Economics Tests ✅
+- [x] ✅ Test: Lazy burned correctly on mint (configurable percentage)
+- [x] ✅ Test: Lazy retained in contract (remainder after burn)
+- [x] ✅ Test: Owner can retrieve Lazy after completion
+- [x] ✅ Test: 0% burn (all retained), 100% burn (none retained)
+- [x] ✅ Test: LSCT integration for burning
+
+### 11.8 Winner Selection Tests ✅
+- [x] ✅ Test: Cannot select winner before sold out
+- [x] ✅ Test: Anyone can call selectWinner (permissionless)
+- [x] ✅ Test: **Multiple winners with duplicate handling** 
+- [x] ✅ Test: **Gas optimization for remaining winner requests**
+- [x] ✅ Test: **Nonce-based seed evolution algorithm**
+- [x] ✅ Test: Winner serials in valid range [1, maxSupply]
+- [x] ✅ Test: Event emitted with winning serials array
+- [x] ✅ Test: Phase transitions to WINNER_SELECTED
+- [x] ✅ Test: Cannot select winner twice
+- [x] ✅ Test: EnumerableSet O(1) winner verification
+
+### 11.9 Prize Claim Tests ✅
+- [x] ✅ Test: Winner can claim prize (bearer asset model)
+- [x] ✅ Test: Wipe mechanism removes edition NFT
+- [x] ✅ Test: Prize minted on-demand to claimer
+- [x] ✅ Test: Revert if non-winner tries to claim
+- [x] ✅ Test: Revert if not serial owner (bearer asset)
+- [x] ✅ Test: **Winning serial can be traded before claim**
+- [x] ✅ Test: Multiple winners can claim independently
+
+### 11.10 Fund Withdrawal Tests ✅
+- [x] ✅ Test: Owner withdraw HBAR proceeds
+- [x] ✅ Test: Owner withdraw LAZY proceeds (after burn)
+- [x] ✅ Test: Owner withdraw USDC proceeds (native + bridged)
+- [x] ✅ Test: Cannot withdraw before phase completion
+- [x] ✅ Test: Non-owner cannot withdraw
+
+### 11.11 Configuration Tests ✅
+- [x] ✅ Test: Update pricing (HBAR, LAZY, USDC)
+- [x] ✅ Test: Update WL discount and parameters
+- [x] ✅ Test: Update max mint limits and timing
+- [x] ✅ Test: Pause/unpause minting
+- [x] ✅ Test: Only owner can configure
+
+### 11.12 Integration Tests ✅
+- [x] ✅ Test: Complete full journey (init → mint → select → claim)
+- [x] ✅ Test: Multi-winner scenarios with trading
+- [x] ✅ Test: Gas analysis for duplicate handling
+- [x] ✅ Test: Edge cases and error conditions
 - [ ] Test: Edition wiped from winner's wallet
 - [ ] Test: Prize transferred to winner
 - [ ] Test: Event emitted with details
@@ -514,101 +549,87 @@
 - [ ] Test: Get economics/timing structs
 - [ ] Test: Get whitelist
 
-### 11.12 Edge Case Tests
-- [ ] Test: Mint exactly maxSupply
-- [ ] Test: Winner transfers edition before claim
-- [ ] Test: Pause during minting, resume later
-- [ ] Test: Multiple WL purchases by same address
-- [ ] Test: Gas refund on overpayment
-- [ ] Test: Reentrancy protection on mint
-- [ ] Test: Reentrancy protection on claim
+### 11.12 Integration & Edge Case Tests ✅
+- [x] ✅ Test: Complete journey (init → mint → select → claim → withdraw)
+- [x] ✅ Test: Multiple users with diverse scenarios (WL, non-WL)
+- [x] ✅ Test: Winner transfers edition before claim (bearer asset)
+- [x] ✅ Test: Pause/resume during minting cycles
+- [x] ✅ Test: Multiple WL purchases by same address (additive)
+- [x] ✅ Test: HBAR overpayment handling with refunds
+- [x] ✅ Test: Reentrancy protection on all state-changing functions
+- [x] ✅ Test: Full LAZY economics cycle with burn verification
+- [x] ✅ Test: USDC dual-token payment integration
+- [x] ✅ Test: All whitelist types working together
+- [x] ✅ Test: Gas optimization scenarios for winner selection
 
 ---
 
-## Phase 12: Testing - Integration Tests
+## Phase 12: Deployment Scripts ⏳ CURRENT PHASE
 
-### 12.1 Full Flow Test
-- [ ] Test: Complete journey (init → mint → select → claim)
-- [ ] Verify all phase transitions
-- [ ] Verify all events emitted
-- [ ] Verify final balances (hbar, Lazy, NFTs)
+**🎯 NEXT DEVELOPMENT FOCUS**
 
-### 12.2 Multiple Users Test
-- [ ] Test: 10+ users mint different quantities
-- [ ] Some WL, some non-WL
-- [ ] Verify tracking is accurate
-- [ ] Select winner from diverse pool
-- [ ] Verify only winner can claim
-
-### 12.3 Lazy Economics Integration
-- [ ] Test: Full cycle with Lazy burning
-- [ ] Verify burn amounts match percentage
-- [ ] Verify LSCT interactions
-- [ ] Verify contract Lazy balance
-- [ ] Owner withdrawal
-
-### 12.4 Whitelist Integration
-- [ ] Test: Mix of manual WL, Lazy purchase, token purchase
-- [ ] Verify all WL types work together
-- [ ] Verify discount applied correctly
-- [ ] Verify spots tracked independently
-
----
-
-## Phase 13: Deployment Scripts
-
-### 13.1 Deployment Script
-- [ ] Create deployment script file
+### 12.1 Deployment Script ⏳
+- [ ] Create `deployEditionWithPrize.js` in `scripts/deployment/`
 - [ ] Accept network parameter (testnet/mainnet)
-- [ ] Accept Lazy token address
-- [ ] Accept LSCT address
-- [ ] Accept Lazy burn percentage
+- [ ] Accept Lazy token address (constructor parameter)
+- [ ] Accept LSCT address (constructor parameter)
+- [ ] Accept LAZY burn percentage (constructor parameter)
+- [ ] Accept USDC addresses (native + bridged, constructor parameters)
+- [ ] Accept PRNG generator address (constructor parameter)
+- [ ] Accept delegate registry address (constructor parameter)
 - [ ] Deploy EditionWithPrize contract
 - [ ] Verify deployment
 - [ ] Save contract address to file
 - [ ] Log deployment details
 
-### 13.2 Configuration Script
-- [ ] Create config helper script
-- [ ] Functions to set economics
-- [ ] Functions to set timing
-- [ ] Functions to initialize tokens
-- [ ] Functions to add whitelist
-- [ ] Save configuration to JSON
+### 12.2 Configuration Script
+- [ ] Create `configureEditionWithPrize.js` helper script  
+- [ ] Functions to set economics (pricing, discounts, limits)
+- [ ] Functions to set timing (start time, pause state)
+- [ ] Functions to initialize tokens (edition + prize)
+- [ ] Functions to manage whitelist (manual + purchase options)
+- [ ] Save configuration to JSON for verification
 
-### 13.3 Interaction Scripts
-- [ ] Create mint helper script
-- [ ] Create select winner script
-- [ ] Create claim prize script
-- [ ] Create query status script
+### 12.3 Interaction Scripts
+- [ ] Create `mintEditions.js` helper script
+- [ ] Create `selectWinner.js` script (with gas estimation warnings)
+- [ ] Create `claimPrize.js` script  
+- [ ] Create `queryContractState.js` status script
+- [ ] Create `withdrawFunds.js` owner script
+
+### 12.4 Testing Scripts
+- [ ] Create `testnetDemo.js` full demonstration script
+- [ ] Create gas analysis tools for winner selection
+- [ ] Create multi-winner scenario testing tools
 
 ---
 
-## Phase 14: Documentation
+## Phase 13: Documentation Finalization
 
-### 14.1 Code Documentation
-- [ ] Add NatSpec comments to all public functions
-- [ ] Add NatSpec comments to all events
-- [ ] Add inline comments for complex logic
-- [ ] Document all custom errors
+### 13.1 Code Documentation ✅ PARTIALLY COMPLETE
+- [x] ✅ NatSpec comments on all public functions
+- [x] ✅ Comprehensive event documentation  
+- [x] ✅ Custom error documentation
+- [x] ✅ **CRITICAL**: Gas requirement warnings for selectWinner()
+- [ ] Final review and consistency check
 
-### 14.2 README Updates
+### 13.2 README Updates
 - [ ] Add EditionWithPrize to main README
-- [ ] Link to business logic doc
-- [ ] Link to testing doc
-- [ ] Include example usage
+- [ ] Link to updated business logic doc
+- [ ] Link to completed testing doc
+- [ ] Include example usage and gas considerations
 
-### 14.3 Deployment Guide
-- [ ] Create deployment checklist
-- [ ] Document configuration steps
+### 13.3 Deployment Guide
+- [ ] Create deployment checklist with gas requirements
+- [ ] Document configuration steps for multiple winners
 - [ ] Document verification process
-- [ ] Include testnet examples
+- [ ] Include testnet examples with realistic scenarios
 
 ---
 
-## Phase 15: Security & Optimization
+## Phase 14: Security & Optimization ✅ COMPLETE
 
-### 15.1 Security Review ✅
+### 14.1 Security Review ✅
 - [x] ✅ All external calls protected (OpenZeppelin Address.sendValue)
 - [x] ✅ CEI pattern enforced throughout (checks-effects-interactions)
 - [x] ✅ Comprehensive access controls (owner + delegate pattern)
