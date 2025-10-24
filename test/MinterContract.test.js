@@ -54,7 +54,7 @@ let contractAddress;
 let client, clientAlice;
 let alicePK, aliceId;
 let wlTokenId, extendedTestingTokenId;
-let lazyTokenId, lazySCT;
+let lazyTokenId, lazySCT, lazyDelegateRegistry;
 let minterIface, lazyIface;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -174,6 +174,30 @@ describe('Deployment: ', function () {
 		expect(lazySCT.toString().match(addressRegex).length == 2).to.be.true;
 		expect(lazyTokenId.toString().match(addressRegex).length == 2).to.be.true;
 
+		// Deploy LazyDelegateRegistry
+		const lazyDelegateRegistryName = 'LazyDelegateRegistry';
+		const lazyDelegateRegistryJson = JSON.parse(
+			fs.readFileSync(
+				`./artifacts/contracts/${lazyDelegateRegistryName}.sol/${lazyDelegateRegistryName}.json`,
+			),
+		);
+
+		if (process.env.LAZY_DELEGATE_REGISTRY_CONTRACT_ID) {
+			lazyDelegateRegistry = ContractId.fromString(process.env.LAZY_DELEGATE_REGISTRY_CONTRACT_ID);
+			console.log('\n-Using existing Lazy Delegate Registry:', lazyDelegateRegistry.toString());
+		}
+		else {
+			console.log('\n-Deploying Lazy Delegate Registry...');
+			[lazyDelegateRegistry] = await contractDeployFunction(
+				client,
+				lazyDelegateRegistryJson.bytecode,
+				2_800_000,
+			);
+			console.log('Lazy Delegate Registry deployed:', lazyDelegateRegistry.toString());
+		}
+
+		expect(lazyDelegateRegistry.toString().match(addressRegex).length == 2).to.be.true;
+
 		// check if operator has $LAZY tokens on hand else draw down from the Lazy SCT
 		const operatorLazyBal = await checkMirrorBalance(env, operatorId, lazyTokenId);
 		if (!operatorLazyBal || operatorLazyBal < 50) {
@@ -214,7 +238,8 @@ describe('Deployment: ', function () {
 		const constructorParams = new ContractFunctionParameters()
 			.addAddress(lazySCT.toSolidityAddress())
 			.addAddress(lazyTokenId.toSolidityAddress())
-			.addUint256(lazyBurnPerc);
+			.addUint256(lazyBurnPerc)
+			.addAddress(lazyDelegateRegistry.toSolidityAddress());
 
 		// [contractId, contractAddress] = await contractDeployFunction(client, readyToDeployBytecode, gasLimit, constructorParams);
 
@@ -294,6 +319,20 @@ describe('Check SC deployment...', function () {
 
 		const addressLazyToken = minterIface.decodeFunctionResult('getLazyToken', result);
 		expect(addressLazyToken[0].slice(2).toLowerCase()).to.be.equal(lazyTokenId.toSolidityAddress());
+
+		// now check the lazy delegate registry with getLazyDelegateRegistry
+		encodedCommand = minterIface.encodeFunctionData('getLazyDelegateRegistry');
+
+		result = await readOnlyEVMFromMirrorNode(
+			env,
+			contractId,
+			encodedCommand,
+			operatorId,
+			false,
+		);
+
+		const addressLazyDelegateRegistry = minterIface.decodeFunctionResult('getLazyDelegateRegistry', result);
+		expect(addressLazyDelegateRegistry[0].slice(2).toLowerCase()).to.be.equal(lazyDelegateRegistry.toSolidityAddress());
 	});
 
 	it('Check default values are set in Constructor', async function () {

@@ -1033,12 +1033,12 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
         }
 
         // Check if serial is delegated to user via LazyDelegateRegistry
-        address delegatedTo = lazyDelegateRegistry.getNFTDelegatedTo(
-            _token,
-            _serial
-        );
-
-        return delegatedTo == _user;
+        return
+            lazyDelegateRegistry.checkDelegateToken(
+                msg.sender,
+                _token,
+                _serial
+            );
     }
 
     /// @notice Build and sort discount slots from user's tokens (combined for efficiency)

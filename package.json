@@ -10,6 +10,7 @@
     "test-sbt": "npx hardhat test test/SoulboundMinter.test.js",
     "test-badges": "npx hardhat test test/SoulboundBadgeMinter.test.js",
     "test-forever": "npx hardhat test test/ForeverMinter.test.js",
+    "test-ewp": "npx hardhat test test/EditionWithPrize.test.js",
     "deploy-ft": "npx hardhat run scripts/deployment/deploy-FTC.js",
     "deploy-nft": "npx hardhat run scripts/deployment/deploy-MC.js",
     "deploy-sbt": "npx hardhat run scripts/deployment/deploy-SBT.js",

@@ -49,6 +49,7 @@ pragma solidity >=0.8.12 <0.9.0;
 import {HederaResponseCodes} from "./HederaResponseCodes.sol";
 import {IHederaTokenService} from "./interfaces/IHederaTokenService.sol";
 import {IPrngGenerator} from "./interfaces/IPrngGenerator.sol";
+import {ILazyDelegateRegistry} from "./interfaces/ILazyDelegateRegistry.sol";
 import {ExpiryHelper} from "./ExpiryHelper.sol";
 import {Bits} from "./KeyHelper.sol";
 
@@ -173,6 +174,7 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
 
     address private token;
     address public prngGenerator;
+    address public immutable LAZY_DELEGATE_REGISTRY;
 
     enum ContractEventType {
         INITIALISE,
@@ -225,8 +227,15 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @param lsct the address of the Lazy Smart Contract Treasury (for burn)
     /// @param lazy the address of the Lazy Token
     /// @param lazyBurnPerc the percentage of Lazy to burn on each mint
-    constructor(address lsct, address lazy, uint256 lazyBurnPerc) {
+    /// @param _delegateRegistry the address of the Lazy Delegate Registry
+    constructor(
+        address lsct,
+        address lazy,
+        uint256 lazyBurnPerc,
+        address _delegateRegistry
+    ) {
         lazyDetails = LazyDetails(lazy, lazyBurnPerc, IBurnableHTS(lsct));
+        LAZY_DELEGATE_REGISTRY = _delegateRegistry;
 
         int256 responseCode = associateToken(
             address(this),
@@ -662,11 +671,24 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
         for (uint8 i = 0; i < _serials.length; i++) {
             // check no double dipping
             if (wlSerialsUsed.contains(_serials[i])) revert WLTokenUsed();
-            // check user owns the token
-            if (
-                IERC721(mintEconomics.wlToken).ownerOf(_serials[i]) !=
-                msg.sender
-            ) revert NotTokenOwner();
+
+            // check user owns the token (direct ownership first)
+            address tokenOwner = IERC721(mintEconomics.wlToken).ownerOf(
+                _serials[i]
+            );
+            bool isOwner = (tokenOwner == msg.sender);
+
+            // If not direct owner, check delegate registry (for staked tokens)
+            if (!isOwner && LAZY_DELEGATE_REGISTRY != address(0)) {
+                isOwner = ILazyDelegateRegistry(LAZY_DELEGATE_REGISTRY)
+                    .checkDelegateToken(
+                        msg.sender,
+                        mintEconomics.wlToken,
+                        _serials[i]
+                    );
+            }
+
+            if (!isOwner) revert NotTokenOwner();
             wlSerialsUsed.add(_serials[i]);
             emit MinterContractMessage(
                 ContractEventType.WL_PURCHASE_TOKEN,
@@ -1178,6 +1200,15 @@ contract MinterContract is ExpiryHelper, Ownable, ReentrancyGuard {
     /// @return _lazy the address set for Lazy FT token
     function getLazyToken() external view returns (address _lazy) {
         _lazy = lazyDetails.lazyToken;
+    }
+
+    /// @return _delegateRegistry the address of the Lazy Delegate Registry
+    function getLazyDelegateRegistry()
+        external
+        view
+        returns (address _delegateRegistry)
+    {
+        _delegateRegistry = LAZY_DELEGATE_REGISTRY;
     }
 
     /// @return _numMinted helper function to check how many a wallet has minted

@@ -9,9 +9,10 @@ const { readOnlyEVMFromMirrorNode } = require('./solidityHelpers');
  * @param {string} functionName - Function name to call
  * @param {Array} parameters - Function parameters
  * @param {number} fallbackGas - Fallback gas limit if estimation fails
+ * @param {number} [value=0] - Amount of hbar to send in tinybars
  * @returns {Promise<{gasLimit: number, isEstimated: boolean, estimatedGas?: number}>}
  */
-async function estimateGas(env, contractId, contractInterface, operatorId, functionName, parameters, fallbackGas) {
+async function estimateGas(env, contractId, contractInterface, operatorId, functionName, parameters, fallbackGas, value = 0) {
 	try {
 		console.log(`🔍 Estimating gas for ${functionName}...`);
 
@@ -24,12 +25,13 @@ async function estimateGas(env, contractId, contractInterface, operatorId, funct
 			operatorId,
 			true,
 			fallbackGas * 2,
+			value,
 		);
 
 		const estimatedGas = Number(gasEstimate);
-		const gasWithBuffer = Math.ceil(estimatedGas * 1.05);
+		const gasWithBuffer = Math.ceil(estimatedGas * 1.1);
 
-		console.log(`📊 Gas Estimate: ${estimatedGas.toLocaleString()} | With 5% buffer: ${gasWithBuffer.toLocaleString()}`);
+		console.log(`📊 Gas Estimate: ${estimatedGas.toLocaleString()} | With 10% buffer: ${gasWithBuffer.toLocaleString()}`);
 
 		return {
 			gasLimit: gasWithBuffer,
@@ -39,7 +41,7 @@ async function estimateGas(env, contractId, contractInterface, operatorId, funct
 	}
 	catch (error) {
 		console.log(`⚠️  Gas estimation failed for ${functionName}:`, error.message);
-		console.log(`📋 Using fallback gas limit: ${fallbackGas.toLocaleString()}`);
+		console.log(`📋 Using fallback gas limit: ${fallbackGas}`);
 
 		return {
 			gasLimit: fallbackGas,

@@ -4,6 +4,7 @@ const {
 	PrivateKey,
 	ContractId,
 	TokenId,
+	HbarUnit,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const fs = require('fs');
@@ -368,6 +369,7 @@ const main = async () => {
 			'mintNFT',
 			[quantity, discountTokens, serialsByToken, sacrificeSerials],
 			800_000,
+			Number(totalHbarCost),
 		);
 
 		const result = await contractExecuteFunction(
@@ -377,7 +379,7 @@ const main = async () => {
 			gasInfo.gasLimit,
 			'mintNFT',
 			[quantity, discountTokens, serialsByToken, sacrificeSerials],
-			Number(totalHbarCost),
+			new hbarAllowanceAmount(Number(totalHbarCost), HbarUnit.Tinybar),
 		);
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
