@@ -1,0 +1,927 @@
+{
+    "contractName": "LazyGasStation",
+    "sourceName": "contracts/LazyGasStation.sol",
+    "abi": [
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_lazyToken",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_lazySCT",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "constructor"
+        },
+        {
+            "inputs": [],
+            "name": "AssociationFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BadArgument",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BadInput",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BurnFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_required",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_available",
+                    "type": "uint256"
+                }
+            ],
+            "name": "Empty",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "InsufficientAllowance",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "LastAdmin",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NetPayoutFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "PayoutFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                },
+                {
+                    "internalType": "enum IRoles.Role",
+                    "name": "_role",
+                    "type": "uint8"
+                }
+            ],
+            "name": "PermissionDenied",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "ToLGSTransferFailed",
+            "type": "error"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "_executor",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "bool",
+                    "name": "_added",
+                    "type": "bool"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "enum IRoles.Role",
+                    "name": "_role",
+                    "type": "uint8"
+                }
+            ],
+            "name": "GasStationAccessControlEvent",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "_callingContract",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "_burnPercentage",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "bool",
+                    "name": "_fromUser",
+                    "type": "bool"
+                }
+            ],
+            "name": "GasStationFunding",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "_callingContract",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "enum LazyGasStation.PaymentType",
+                    "name": "_type",
+                    "type": "uint8"
+                }
+            ],
+            "name": "GasStationRefillEvent",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": false,
+                    "internalType": "string",
+                    "name": "message",
+                    "type": "string"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "address",
+                    "name": "sender",
+                    "type": "address"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "value",
+                    "type": "uint256"
+                }
+            ],
+            "name": "GasStationStatus",
+            "type": "event"
+        },
+        {
+            "stateMutability": "payable",
+            "type": "fallback"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_admin",
+                    "type": "address"
+                }
+            ],
+            "name": "addAdmin",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_added",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_authorized",
+                    "type": "address"
+                }
+            ],
+            "name": "addAuthorizer",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_added",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_deployer",
+                    "type": "address"
+                }
+            ],
+            "name": "addContractUser",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_added",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_burnPercentage",
+                    "type": "uint256"
+                }
+            ],
+            "name": "drawLazyFrom",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_burnPercentage",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_payTo",
+                    "type": "address"
+                }
+            ],
+            "name": "drawLazyFromPayTo",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getAdmins",
+            "outputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_admins",
+                    "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getAuthorizers",
+            "outputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_authorizers",
+                    "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getContractUsers",
+            "outputs": [
+                {
+                    "internalType": "address[]",
+                    "name": "_contractUsers",
+                    "type": "address[]"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                }
+            ],
+            "name": "getTokenExpiryInfo",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                },
+                {
+                    "components": [
+                        {
+                            "internalType": "uint32",
+                            "name": "second",
+                            "type": "uint32"
+                        },
+                        {
+                            "internalType": "address",
+                            "name": "autoRenewAccount",
+                            "type": "address"
+                        },
+                        {
+                            "internalType": "uint32",
+                            "name": "autoRenewPeriod",
+                            "type": "uint32"
+                        }
+                    ],
+                    "internalType": "struct IHederaTokenService.Expiry",
+                    "name": "expiryInfo",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "account",
+                    "type": "address"
+                }
+            ],
+            "name": "grantTokenKyc",
+            "outputs": [
+                {
+                    "internalType": "int64",
+                    "name": "responseCode",
+                    "type": "int64"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_admin",
+                    "type": "address"
+                }
+            ],
+            "name": "isAdmin",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_isAdmin",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_authorizer",
+                    "type": "address"
+                }
+            ],
+            "name": "isAuthorizer",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_isAuthorizer",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_contractUser",
+                    "type": "address"
+                }
+            ],
+            "name": "isContractUser",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_isContractUser",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "account",
+                    "type": "address"
+                }
+            ],
+            "name": "isKyc",
+            "outputs": [
+                {
+                    "internalType": "int64",
+                    "name": "responseCode",
+                    "type": "int64"
+                },
+                {
+                    "internalType": "bool",
+                    "name": "kycGranted",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "lazySCT",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "lazyToken",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                }
+            ],
+            "name": "pauseToken",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_user",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_burnPercentage",
+                    "type": "uint256"
+                }
+            ],
+            "name": "payoutLazy",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_payoutAmount",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "refillHbar",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "refillLazy",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_admin",
+                    "type": "address"
+                }
+            ],
+            "name": "removeAdmin",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_removed",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_authorized",
+                    "type": "address"
+                }
+            ],
+            "name": "removeAuthorizer",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_removed",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_deployer",
+                    "type": "address"
+                }
+            ],
+            "name": "removeContractUser",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_removed",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_receiver",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "_amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "retrieveLazy",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "account",
+                    "type": "address"
+                }
+            ],
+            "name": "revokeTokenKyc",
+            "outputs": [
+                {
+                    "internalType": "int64",
+                    "name": "responseCode",
+                    "type": "int64"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address payable",
+                    "name": "receiverAddress",
+                    "type": "address"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "amount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "transferHbar",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                }
+            ],
+            "name": "unpauseToken",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "components": [
+                        {
+                            "internalType": "uint32",
+                            "name": "second",
+                            "type": "uint32"
+                        },
+                        {
+                            "internalType": "address",
+                            "name": "autoRenewAccount",
+                            "type": "address"
+                        },
+                        {
+                            "internalType": "uint32",
+                            "name": "autoRenewPeriod",
+                            "type": "uint32"
+                        }
+                    ],
+                    "internalType": "struct IHederaTokenService.Expiry",
+                    "name": "expiryInfo",
+                    "type": "tuple"
+                }
+            ],
+            "name": "updateTokenExpiryInfo",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "token",
+                    "type": "address"
+                },
+                {
+                    "components": [
+                        {
+                            "internalType": "string",
+                            "name": "name",
+                            "type": "string"
+                        },
+                        {
+                            "internalType": "string",
+                            "name": "symbol",
+                            "type": "string"
+                        },
+                        {
+                            "internalType": "address",
+                            "name": "treasury",
+                            "type": "address"
+                        },
+                        {
+                            "internalType": "string",
+                            "name": "memo",
+                            "type": "string"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "tokenSupplyType",
+                            "type": "bool"
+                        },
+                        {
+                            "internalType": "int64",
+                            "name": "maxSupply",
+                            "type": "int64"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "freezeDefault",
+                            "type": "bool"
+                        },
+                        {
+                            "components": [
+                                {
+                                    "internalType": "uint256",
+                                    "name": "keyType",
+                                    "type": "uint256"
+                                },
+                                {
+                                    "components": [
+                                        {
+                                            "internalType": "bool",
+                                            "name": "inheritAccountKey",
+                                            "type": "bool"
+                                        },
+                                        {
+                                            "internalType": "address",
+                                            "name": "contractId",
+                                            "type": "address"
+                                        },
+                                        {
+                                            "internalType": "bytes",
+                                            "name": "ed25519",
+                                            "type": "bytes"
+                                        },
+                                        {
+                                            "internalType": "bytes",
+                                            "name": "ECDSA_secp256k1",
+                                            "type": "bytes"
+                                        },
+                                        {
+                                            "internalType": "address",
+                                            "name": "delegatableContractId",
+                                            "type": "address"
+                                        }
+                                    ],
+                                    "internalType": "struct IHederaTokenService.KeyValue",
+                                    "name": "key",
+                                    "type": "tuple"
+                                }
+                            ],
+                            "internalType": "struct IHederaTokenService.TokenKey[]",
+                            "name": "tokenKeys",
+                            "type": "tuple[]"
+                        },
+                        {
+                            "components": [
+                                {
+                                    "internalType": "uint32",
+                                    "name": "second",
+                                    "type": "uint32"
+                                },
+                                {
+                                    "internalType": "address",
+                                    "name": "autoRenewAccount",
+                                    "type": "address"
+                                },
+                                {
+                                    "internalType": "uint32",
+                                    "name": "autoRenewPeriod",
+                                    "type": "uint32"
+                                }
+                            ],
+                            "internalType": "struct IHederaTokenService.Expiry",
+                            "name": "expiry",
+                            "type": "tuple"
+                        }
+                    ],
+                    "internalType": "struct IHederaTokenService.HederaToken",
+                    "name": "tokenInfo",
+                    "type": "tuple"
+                }
+            ],
+            "name": "updateTokenInfo",
+            "outputs": [
+                {
+                    "internalType": "int256",
+                    "name": "responseCode",
+                    "type": "int256"
+                }
+            ],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "stateMutability": "payable",
+            "type": "receive"
+        }
+    ]
+}

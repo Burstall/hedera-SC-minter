@@ -35,6 +35,19 @@
         },
         {
             "inputs": [],
+            "name": "DEFAULT_AUTO_RENEW_PERIOD",
+            "outputs": [
+                {
+                    "internalType": "uint32",
+                    "name": "",
+                    "type": "uint32"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
             "name": "PRECOMPILE_ADDRESS",
             "outputs": [
                 {

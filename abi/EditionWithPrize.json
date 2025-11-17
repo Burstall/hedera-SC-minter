@@ -1,32 +1,52 @@
 {
-    "contractName": "MinterContract",
-    "sourceName": "contracts/MinterContract.sol",
+    "contractName": "EditionWithPrize",
+    "sourceName": "contracts/EditionWithPrize.sol",
     "abi": [
         {
             "inputs": [
                 {
                     "internalType": "address",
-                    "name": "lsct",
+                    "name": "_lazyToken",
                     "type": "address"
                 },
                 {
                     "internalType": "address",
-                    "name": "lazy",
+                    "name": "_lsct",
                     "type": "address"
                 },
                 {
                     "internalType": "uint256",
-                    "name": "lazyBurnPerc",
+                    "name": "_lazyBurnPerc",
                     "type": "uint256"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_prngGenerator",
+                    "type": "address"
                 },
                 {
                     "internalType": "address",
                     "name": "_delegateRegistry",
                     "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_usdcNative",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "_usdcBridged",
+                    "type": "address"
                 }
             ],
             "stateMutability": "nonpayable",
             "type": "constructor"
+        },
+        {
+            "inputs": [],
+            "name": "AlreadyInitialized",
+            "type": "error"
         },
         {
             "inputs": [],
@@ -39,13 +59,7 @@
             "type": "error"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "quantity",
-                    "type": "uint256"
-                }
-            ],
+            "inputs": [],
             "name": "BadQuantity",
             "type": "error"
         },
@@ -56,12 +70,12 @@
         },
         {
             "inputs": [],
-            "name": "EmptyMetadata",
+            "name": "EditionNotSoldOut",
             "type": "error"
         },
         {
             "inputs": [],
-            "name": "FailedNFTMint",
+            "name": "EmptyMetadata",
             "type": "error"
         },
         {
@@ -71,17 +85,7 @@
         },
         {
             "inputs": [],
-            "name": "FailedToPayLazy",
-            "type": "error"
-        },
-        {
-            "inputs": [],
-            "name": "HbarCooldown",
-            "type": "error"
-        },
-        {
-            "inputs": [],
-            "name": "LazyCooldown",
+            "name": "InvalidPhase",
             "type": "error"
         },
         {
@@ -96,22 +100,12 @@
         },
         {
             "inputs": [],
-            "name": "MaxSerials",
-            "type": "error"
-        },
-        {
-            "inputs": [],
-            "name": "MemoTooLong",
+            "name": "MaxSupplyReached",
             "type": "error"
         },
         {
             "inputs": [],
             "name": "MintedOut",
-            "type": "error"
-        },
-        {
-            "inputs": [],
-            "name": "NFTTransferFailed",
             "type": "error"
         },
         {
@@ -131,7 +125,17 @@
         },
         {
             "inputs": [],
+            "name": "NotEnoughUsdc",
+            "type": "error"
+        },
+        {
+            "inputs": [],
             "name": "NotEnoughWLSlots",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "NotInitialized",
             "type": "error"
         },
         {
@@ -140,14 +144,8 @@
             "type": "error"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                }
-            ],
-            "name": "NotReset",
+            "inputs": [],
+            "name": "NotSerialOwner",
             "type": "error"
         },
         {
@@ -162,7 +160,22 @@
         },
         {
             "inputs": [],
+            "name": "NotWinningSerial",
+            "type": "error"
+        },
+        {
+            "inputs": [],
             "name": "Paused",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "PaymentFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "PrizeAlreadyClaimed",
             "type": "error"
         },
         {
@@ -172,7 +185,12 @@
         },
         {
             "inputs": [],
-            "name": "TooMuchMetadata",
+            "name": "TransferFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "UsdcWithdrawFailed",
             "type": "error"
         },
         {
@@ -186,29 +204,14 @@
             "type": "error"
         },
         {
-            "anonymous": false,
-            "inputs": [
-                {
-                    "indexed": true,
-                    "internalType": "address",
-                    "name": "_burnerAddress",
-                    "type": "address"
-                },
-                {
-                    "indexed": false,
-                    "internalType": "int64[]",
-                    "name": "_serials",
-                    "type": "int64[]"
-                },
-                {
-                    "indexed": false,
-                    "internalType": "uint64",
-                    "name": "_newSupply",
-                    "type": "uint64"
-                }
-            ],
-            "name": "BurnEvent",
-            "type": "event"
+            "inputs": [],
+            "name": "WinnerAlreadySelected",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "WipeFailed",
+            "type": "error"
         },
         {
             "anonymous": false,
@@ -216,54 +219,54 @@
                 {
                     "indexed": true,
                     "internalType": "address",
-                    "name": "_msgAddress",
+                    "name": "minter",
                     "type": "address"
                 },
                 {
                     "indexed": false,
                     "internalType": "bool",
-                    "name": "_mintType",
+                    "name": "isLazyPayment",
                     "type": "bool"
                 },
                 {
-                    "indexed": true,
+                    "indexed": false,
                     "internalType": "uint256",
-                    "name": "_serial",
+                    "name": "quantity",
                     "type": "uint256"
                 },
                 {
                     "indexed": false,
-                    "internalType": "string",
-                    "name": "_metadata",
-                    "type": "string"
+                    "internalType": "uint256",
+                    "name": "totalPaid",
+                    "type": "uint256"
                 }
             ],
-            "name": "MintEvent",
+            "name": "EditionMintEvent",
             "type": "event"
         },
         {
             "anonymous": false,
             "inputs": [
                 {
-                    "indexed": false,
-                    "internalType": "enum MinterContract.ContractEventType",
-                    "name": "_eventType",
+                    "indexed": true,
+                    "internalType": "enum EditionWithPrize.ContractEventType",
+                    "name": "eventType",
                     "type": "uint8"
                 },
                 {
                     "indexed": true,
                     "internalType": "address",
-                    "name": "_msgAddress",
+                    "name": "msgAddress",
                     "type": "address"
                 },
                 {
                     "indexed": false,
                     "internalType": "uint256",
-                    "name": "_msgNumeric",
+                    "name": "msgNumeric",
                     "type": "uint256"
                 }
             ],
-            "name": "MinterContractMessage",
+            "name": "EditionWithPrizeEvent",
             "type": "event"
         },
         {
@@ -286,8 +289,48 @@
             "type": "event"
         },
         {
-            "stateMutability": "payable",
-            "type": "fallback"
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": true,
+                    "internalType": "address",
+                    "name": "claimer",
+                    "type": "address"
+                },
+                {
+                    "indexed": true,
+                    "internalType": "uint256",
+                    "name": "editionSerial",
+                    "type": "uint256"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "timestamp",
+                    "type": "uint256"
+                }
+            ],
+            "name": "PrizeClaimedEvent",
+            "type": "event"
+        },
+        {
+            "anonymous": false,
+            "inputs": [
+                {
+                    "indexed": false,
+                    "internalType": "uint256[]",
+                    "name": "winningSerials",
+                    "type": "uint256[]"
+                },
+                {
+                    "indexed": false,
+                    "internalType": "uint256",
+                    "name": "timestamp",
+                    "type": "uint256"
+                }
+            ],
+            "name": "WinnerSelectedEvent",
+            "type": "event"
         },
         {
             "inputs": [],
@@ -329,30 +372,55 @@
             "type": "function"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "string[]",
-                    "name": "_metadata",
-                    "type": "string[]"
-                }
-            ],
-            "name": "addMetadata",
+            "inputs": [],
+            "name": "PRNG_GENERATOR",
             "outputs": [
                 {
-                    "internalType": "uint256",
-                    "name": "_totalLoaded",
-                    "type": "uint256"
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
                 }
             ],
-            "stateMutability": "nonpayable",
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "USDC_BRIDGED",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "USDC_NATIVE",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
             "type": "function"
         },
         {
             "inputs": [
                 {
                     "internalType": "address[]",
-                    "name": "_newAddresses",
+                    "name": "_addresses",
                     "type": "address[]"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "_quantities",
+                    "type": "uint256[]"
                 }
             ],
             "name": "addToWhitelist",
@@ -363,61 +431,60 @@
         {
             "inputs": [
                 {
-                    "internalType": "int64[]",
-                    "name": "_serialNumbers",
-                    "type": "int64[]"
-                }
-            ],
-            "name": "burnNFTs",
-            "outputs": [
+                    "internalType": "uint256",
+                    "name": "_quantity",
+                    "type": "uint256"
+                },
                 {
-                    "internalType": "uint64",
-                    "name": "_newTotalSupply",
-                    "type": "uint64"
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
                 }
             ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "buyWlWithLazy",
+            "name": "calculateMintCost",
             "outputs": [
                 {
                     "internalType": "uint256",
-                    "name": "_wlSpotsPurchased",
+                    "name": "hbarCost",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "lazyCost",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "usdcCost",
                     "type": "uint256"
                 }
             ],
-            "stateMutability": "nonpayable",
+            "stateMutability": "view",
             "type": "function"
         },
         {
             "inputs": [
                 {
-                    "internalType": "uint256[]",
-                    "name": "_serials",
-                    "type": "uint256[]"
-                }
-            ],
-            "name": "buyWlWithTokens",
-            "outputs": [
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                },
                 {
                     "internalType": "uint256",
-                    "name": "_wlSpotsPurchased",
+                    "name": "_quantity",
                     "type": "uint256"
                 }
             ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "cid",
+            "name": "canAddressMint",
             "outputs": [
                 {
+                    "internalType": "bool",
+                    "name": "canMint",
+                    "type": "bool"
+                },
+                {
                     "internalType": "string",
-                    "name": "",
+                    "name": "reason",
                     "type": "string"
                 }
             ],
@@ -425,13 +492,19 @@
             "type": "function"
         },
         {
-            "inputs": [],
-            "name": "clearWhitelist",
-            "outputs": [
+            "inputs": [
                 {
                     "internalType": "uint256",
-                    "name": "_numAddressesRemoved",
+                    "name": "_editionSerial",
                     "type": "uint256"
+                }
+            ],
+            "name": "claimPrize",
+            "outputs": [
+                {
+                    "internalType": "int64[]",
+                    "name": "serials",
+                    "type": "int64[]"
                 }
             ],
             "stateMutability": "nonpayable",
@@ -439,11 +512,24 @@
         },
         {
             "inputs": [],
-            "name": "getBatchSize",
+            "name": "currentPhase",
+            "outputs": [
+                {
+                    "internalType": "enum EditionWithPrize.Phase",
+                    "name": "",
+                    "type": "uint8"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "editionMaxSupply",
             "outputs": [
                 {
                     "internalType": "uint256",
-                    "name": "_batchSize",
+                    "name": "",
                     "type": "uint256"
                 }
             ],
@@ -452,93 +538,63 @@
         },
         {
             "inputs": [],
-            "name": "getCost",
+            "name": "editionMinted",
             "outputs": [
                 {
                     "internalType": "uint256",
-                    "name": "_hbarCost",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "editionToken",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getContractState",
+            "outputs": [
+                {
+                    "internalType": "enum EditionWithPrize.Phase",
+                    "name": "phase",
+                    "type": "uint8"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "editionsMinted",
                     "type": "uint256"
                 },
                 {
                     "internalType": "uint256",
-                    "name": "_lazyCost",
-                    "type": "uint256"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getLSCT",
-            "outputs": [
-                {
-                    "internalType": "address",
-                    "name": "_lsct",
-                    "type": "address"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getLazyBurnPercentage",
-            "outputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_lazyBurn",
-                    "type": "uint256"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getLazyDelegateRegistry",
-            "outputs": [
-                {
-                    "internalType": "address",
-                    "name": "_delegateRegistry",
-                    "type": "address"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getLazyToken",
-            "outputs": [
-                {
-                    "internalType": "address",
-                    "name": "_lazy",
-                    "type": "address"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_startIndex",
+                    "name": "editionsMax",
                     "type": "uint256"
                 },
                 {
                     "internalType": "uint256",
-                    "name": "_endIndex",
+                    "name": "prizesMax",
                     "type": "uint256"
-                }
-            ],
-            "name": "getMetadataArray",
-            "outputs": [
+                },
                 {
-                    "internalType": "string[]",
-                    "name": "_metadataList",
-                    "type": "string[]"
+                    "internalType": "uint256",
+                    "name": "prizesMinted",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "winners",
+                    "type": "uint256[]"
                 }
             ],
             "stateMutability": "view",
@@ -546,7 +602,7 @@
         },
         {
             "inputs": [],
-            "name": "getMintEconomics",
+            "name": "getEconomics",
             "outputs": [
                 {
                     "components": [
@@ -567,6 +623,11 @@
                         },
                         {
                             "internalType": "uint256",
+                            "name": "mintPriceUsdc",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
                             "name": "wlDiscount",
                             "type": "uint256"
                         },
@@ -578,6 +639,11 @@
                         {
                             "internalType": "uint256",
                             "name": "buyWlWithLazy",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "wlSlotsPerPurchase",
                             "type": "uint256"
                         },
                         {
@@ -596,8 +662,8 @@
                             "type": "address"
                         }
                     ],
-                    "internalType": "struct MinterContract.MintEconomics",
-                    "name": "_mintEconomics",
+                    "internalType": "struct EditionWithPrize.MintEconomics",
+                    "name": "",
                     "type": "tuple"
                 }
             ],
@@ -606,7 +672,54 @@
         },
         {
             "inputs": [],
-            "name": "getMintTiming",
+            "name": "getMintCost",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "hbarPrice",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "lazyPrice",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "usdcPrice",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                }
+            ],
+            "name": "getMintStats",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "totalMinted",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "wlMinted",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getTiming",
             "outputs": [
                 {
                     "components": [
@@ -626,23 +739,13 @@
                             "type": "bool"
                         },
                         {
-                            "internalType": "uint256",
-                            "name": "cooldownPeriod",
-                            "type": "uint256"
-                        },
-                        {
-                            "internalType": "uint256",
-                            "name": "refundWindow",
-                            "type": "uint256"
-                        },
-                        {
                             "internalType": "bool",
                             "name": "wlOnly",
                             "type": "bool"
                         }
                     ],
-                    "internalType": "struct MinterContract.MintTiming",
-                    "name": "_mintTiming",
+                    "internalType": "struct EditionWithPrize.MintTiming",
+                    "name": "",
                     "type": "tuple"
                 }
             ],
@@ -651,61 +754,32 @@
         },
         {
             "inputs": [],
-            "name": "getNFTTokenAddress",
+            "name": "getTokens",
             "outputs": [
                 {
                     "internalType": "address",
-                    "name": "_token",
+                    "name": "edition",
                     "type": "address"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getNumberMintedByAddress",
-            "outputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_numMinted",
-                    "type": "uint256"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getNumberMintedByAllAddresses",
-            "outputs": [
-                {
-                    "internalType": "address[]",
-                    "name": "_walletList",
-                    "type": "address[]"
                 },
                 {
-                    "internalType": "uint256[]",
-                    "name": "_numMintedList",
-                    "type": "uint256[]"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getNumberMintedByAllWlAddresses",
-            "outputs": [
-                {
-                    "internalType": "address[]",
-                    "name": "_wlWalletList",
-                    "type": "address[]"
+                    "internalType": "address",
+                    "name": "prize",
+                    "type": "address"
                 },
                 {
-                    "internalType": "uint256[]",
-                    "name": "_wlNumMintedList",
-                    "type": "uint256[]"
+                    "internalType": "address",
+                    "name": "lazy",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "usdcNative",
+                    "type": "address"
+                },
+                {
+                    "internalType": "address",
+                    "name": "usdcBridged",
+                    "type": "address"
                 }
             ],
             "stateMutability": "view",
@@ -714,70 +788,44 @@
         {
             "inputs": [
                 {
+                    "internalType": "address",
+                    "name": "_address",
+                    "type": "address"
+                }
+            ],
+            "name": "getWhitelistStatus",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "isWhitelisted",
+                    "type": "bool"
+                },
+                {
                     "internalType": "uint256",
-                    "name": "_offset",
+                    "name": "slotsTotal",
                     "type": "uint256"
                 },
                 {
                     "internalType": "uint256",
-                    "name": "_batchSize",
+                    "name": "slotsUsed",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "slotsRemaining",
                     "type": "uint256"
                 }
             ],
-            "name": "getNumberMintedByAllWlAddressesBatch",
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getWinningSerials",
             "outputs": [
-                {
-                    "internalType": "address[]",
-                    "name": "_wlWalletList",
-                    "type": "address[]"
-                },
                 {
                     "internalType": "uint256[]",
-                    "name": "_wlNumMintedList",
-                    "type": "uint256[]"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getNumberMintedByWlAddress",
-            "outputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_wlNumMinted",
-                    "type": "uint256"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getRemainingMint",
-            "outputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_remainingMint",
-                    "type": "uint256"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getWhitelist",
-            "outputs": [
-                {
-                    "internalType": "address[]",
-                    "name": "_wl",
-                    "type": "address[]"
-                },
-                {
-                    "internalType": "uint256[]",
-                    "name": "_wlQty",
+                    "name": "winners",
                     "type": "uint256[]"
                 }
             ],
@@ -803,8 +851,13 @@
                 },
                 {
                     "internalType": "string",
-                    "name": "_cid",
+                    "name": "_metadata",
                     "type": "string"
+                },
+                {
+                    "internalType": "int64",
+                    "name": "_maxSupply",
+                    "type": "int64"
                 },
                 {
                     "components": [
@@ -829,27 +882,152 @@
                             "type": "address"
                         }
                     ],
-                    "internalType": "struct MinterContract.NFTFeeObject[]",
-                    "name": "_royalties",
+                    "internalType": "struct EditionWithPrize.NFTFeeObject[]",
+                    "name": "_fees",
                     "type": "tuple[]"
-                },
-                {
-                    "internalType": "int64",
-                    "name": "_maxIssuance",
-                    "type": "int64"
                 }
             ],
-            "name": "initialiseNFTMint",
+            "name": "initializeEditionToken",
             "outputs": [
                 {
                     "internalType": "address",
-                    "name": "_createdTokenAddress",
+                    "name": "",
                     "type": "address"
+                }
+            ],
+            "stateMutability": "payable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "string",
+                    "name": "_name",
+                    "type": "string"
                 },
                 {
-                    "internalType": "uint256",
+                    "internalType": "string",
+                    "name": "_symbol",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_memo",
+                    "type": "string"
+                },
+                {
+                    "internalType": "string",
+                    "name": "_metadata",
+                    "type": "string"
+                },
+                {
+                    "internalType": "int64",
                     "name": "_maxSupply",
+                    "type": "int64"
+                },
+                {
+                    "components": [
+                        {
+                            "internalType": "uint32",
+                            "name": "numerator",
+                            "type": "uint32"
+                        },
+                        {
+                            "internalType": "uint32",
+                            "name": "denominator",
+                            "type": "uint32"
+                        },
+                        {
+                            "internalType": "uint32",
+                            "name": "fallbackfee",
+                            "type": "uint32"
+                        },
+                        {
+                            "internalType": "address",
+                            "name": "account",
+                            "type": "address"
+                        }
+                    ],
+                    "internalType": "struct EditionWithPrize.NFTFeeObject[]",
+                    "name": "_fees",
+                    "type": "tuple[]"
+                }
+            ],
+            "name": "initializePrizeToken",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "payable",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "isMintOpen",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "isOpen",
+                    "type": "bool"
+                },
+                {
+                    "internalType": "string",
+                    "name": "reason",
+                    "type": "string"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "isPaused",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_serial",
                     "type": "uint256"
+                }
+            ],
+            "name": "isWinningSerial",
+            "outputs": [
+                {
+                    "internalType": "bool",
+                    "name": "isWinner",
+                    "type": "bool"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_quantity",
+                    "type": "uint256"
+                }
+            ],
+            "name": "mint",
+            "outputs": [
+                {
+                    "internalType": "int64[]",
+                    "name": "serials",
+                    "type": "int64[]"
                 }
             ],
             "stateMutability": "payable",
@@ -859,58 +1037,21 @@
             "inputs": [
                 {
                     "internalType": "address",
-                    "name": "addressToCheck",
+                    "name": "_onBehalfOf",
                     "type": "address"
-                }
-            ],
-            "name": "isAddressWL",
-            "outputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_inWl",
-                    "type": "bool"
                 },
                 {
                     "internalType": "uint256",
-                    "name": "_qty",
+                    "name": "_quantity",
                     "type": "uint256"
                 }
             ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "maxSupply",
-            "outputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "",
-                    "type": "uint256"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_numberToMint",
-                    "type": "uint256"
-                }
-            ],
-            "name": "mintNFT",
+            "name": "mintOnBehalfOf",
             "outputs": [
                 {
                     "internalType": "int64[]",
-                    "name": "_serials",
+                    "name": "serials",
                     "type": "int64[]"
-                },
-                {
-                    "internalType": "bytes[]",
-                    "name": "_metadataForMint",
-                    "type": "bytes[]"
                 }
             ],
             "stateMutability": "payable",
@@ -931,7 +1072,33 @@
         },
         {
             "inputs": [],
-            "name": "prngGenerator",
+            "name": "prizeMaxSupply",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "prizeMinted",
+            "outputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "",
+                    "type": "uint256"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "prizeToken",
             "outputs": [
                 {
                     "internalType": "address",
@@ -943,10 +1110,30 @@
             "type": "function"
         },
         {
+            "inputs": [],
+            "name": "purchaseWhitelistWithLazy",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_serial",
+                    "type": "uint256"
+                }
+            ],
+            "name": "purchaseWhitelistWithToken",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
             "inputs": [
                 {
                     "internalType": "address[]",
-                    "name": "_oldAddresses",
+                    "name": "_addresses",
                     "type": "address[]"
                 }
             ],
@@ -963,24 +1150,13 @@
             "type": "function"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_removeToken",
-                    "type": "bool"
-                },
-                {
-                    "internalType": "uint256",
-                    "name": "_batch",
-                    "type": "uint256"
-                }
-            ],
-            "name": "resetContract",
+            "inputs": [],
+            "name": "selectWinner",
             "outputs": [
                 {
-                    "internalType": "uint256",
-                    "name": "_remaingItems",
-                    "type": "uint256"
+                    "internalType": "uint256[]",
+                    "name": "",
+                    "type": "uint256[]"
                 }
             ],
             "stateMutability": "nonpayable",
@@ -989,17 +1165,12 @@
         {
             "inputs": [
                 {
-                    "internalType": "address",
-                    "name": "_receiver",
-                    "type": "address"
-                },
-                {
                     "internalType": "uint256",
-                    "name": "_amount",
+                    "name": "_price",
                     "type": "uint256"
                 }
             ],
-            "name": "retrieveLazy",
+            "name": "setBuyWlWithLazy",
             "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
@@ -1008,18 +1179,25 @@
             "inputs": [
                 {
                     "internalType": "uint256",
-                    "name": "_lazyAmt",
+                    "name": "_percentage",
                     "type": "uint256"
                 }
             ],
-            "name": "setBuyWlWithLazy",
-            "outputs": [
+            "name": "setLazyBurnPercentage",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
                 {
                     "internalType": "bool",
-                    "name": "_changed",
+                    "name": "_fromContract",
                     "type": "bool"
                 }
             ],
+            "name": "setLazyFromContract",
+            "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
         },
@@ -1031,44 +1209,124 @@
                     "type": "uint256"
                 }
             ],
-            "name": "setMaxWlAddressMint",
-            "outputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_changed",
-                    "type": "bool"
-                }
-            ],
+            "name": "setMaxMint",
+            "outputs": [],
             "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "totalMinted",
-            "outputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "",
-                    "type": "uint256"
-                }
-            ],
-            "stateMutability": "view",
             "type": "function"
         },
         {
             "inputs": [
                 {
-                    "internalType": "address payable",
-                    "name": "receiverAddress",
-                    "type": "address"
-                },
-                {
                     "internalType": "uint256",
-                    "name": "amount",
+                    "name": "_maxMintPerWallet",
                     "type": "uint256"
                 }
             ],
-            "name": "transferHbar",
+            "name": "setMaxMintPerWallet",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_maxWlAddressMint",
+                    "type": "uint256"
+                }
+            ],
+            "name": "setMaxWlAddressMint",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_price",
+                    "type": "uint256"
+                }
+            ],
+            "name": "setMintPriceUsdc",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_startTime",
+                    "type": "uint256"
+                }
+            ],
+            "name": "setMintStartTime",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_paused",
+                    "type": "bool"
+                }
+            ],
+            "name": "setPaused",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_discount",
+                    "type": "uint256"
+                }
+            ],
+            "name": "setWhitelistDiscount",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "bool",
+                    "name": "_wlOnly",
+                    "type": "bool"
+                }
+            ],
+            "name": "setWhitelistOnly",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_slots",
+                    "type": "uint256"
+                }
+            ],
+            "name": "setWlSlotsPerPurchase",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                {
+                    "internalType": "address",
+                    "name": "_token",
+                    "type": "address"
+                }
+            ],
+            "name": "setWlToken",
             "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
@@ -1090,273 +1348,45 @@
             "inputs": [
                 {
                     "internalType": "uint256",
-                    "name": "_batchSize",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateBatchSize",
-            "outputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_changed",
-                    "type": "bool"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "string",
-                    "name": "_cid",
-                    "type": "string"
-                }
-            ],
-            "name": "updateCID",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_lazyFromContract",
-                    "type": "bool"
-                }
-            ],
-            "name": "updateContractPaysLazy",
-            "outputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_changed",
-                    "type": "bool"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_cooldownPeriod",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateCooldown",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_hbarCost",
+                    "name": "_hbarPrice",
                     "type": "uint256"
                 },
                 {
                     "internalType": "uint256",
-                    "name": "_lazyCost",
+                    "name": "_lazyPrice",
                     "type": "uint256"
-                }
-            ],
-            "name": "updateCost",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "_lsct",
-                    "type": "address"
-                }
-            ],
-            "name": "updateLSCT",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_lbp",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateLazyBurnPercentage",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "_lazy",
-                    "type": "address"
-                }
-            ],
-            "name": "updateLazyToken",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_maxMint",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateMaxMint",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_max",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateMaxMintPerWallet",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "string[]",
-                    "name": "_metadata",
-                    "type": "string[]"
                 },
                 {
                     "internalType": "uint256",
-                    "name": "_startIndex",
+                    "name": "_usdcPrice",
                     "type": "uint256"
                 }
             ],
-            "name": "updateMetadataArray",
+            "name": "updateMintCost",
             "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_startTime",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateMintStartTime",
+            "inputs": [],
+            "name": "withdrawHbar",
             "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_mintPaused",
-                    "type": "bool"
-                }
-            ],
-            "name": "updatePauseStatus",
-            "outputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_changed",
-                    "type": "bool"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "_prng",
-                    "type": "address"
-                }
-            ],
-            "name": "updatePrng",
+            "inputs": [],
+            "name": "withdrawLazy",
             "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
         },
         {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_refundWindow",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateRefundWindow",
+            "inputs": [],
+            "name": "withdrawUSDC",
             "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "_wlDiscount",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateWlDiscount",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_wlOnly",
-                    "type": "bool"
-                }
-            ],
-            "name": "updateWlOnlyStatus",
-            "outputs": [
-                {
-                    "internalType": "bool",
-                    "name": "_changed",
-                    "type": "bool"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "_wlToken",
-                    "type": "address"
-                }
-            ],
-            "name": "updateWlToken",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "stateMutability": "payable",
-            "type": "receive"
         }
     ]
 }

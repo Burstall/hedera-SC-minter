@@ -238,7 +238,7 @@
         },
         {
             "inputs": [],
-            "name": "WithdrawalCooldownActive",
+            "name": "WithdrawalDuringRefundWindow",
             "type": "error"
         },
         {
@@ -567,6 +567,19 @@
         },
         {
             "inputs": [],
+            "name": "DEFAULT_AUTO_RENEW_PERIOD",
+            "outputs": [
+                {
+                    "internalType": "uint32",
+                    "name": "",
+                    "type": "uint32"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
             "name": "NFT_TOKEN",
             "outputs": [
                 {
@@ -690,7 +703,13 @@
             "type": "function"
         },
         {
-            "inputs": [],
+            "inputs": [
+                {
+                    "internalType": "uint256",
+                    "name": "_quantity",
+                    "type": "uint256"
+                }
+            ],
             "name": "buyWhitelistWithLazy",
             "outputs": [],
             "stateMutability": "nonpayable",
@@ -904,7 +923,32 @@
         },
         {
             "inputs": [],
-            "name": "getEconomics",
+            "name": "getLazyDetails",
+            "outputs": [
+                {
+                    "components": [
+                        {
+                            "internalType": "address",
+                            "name": "lazyToken",
+                            "type": "address"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "lazyBurnPerc",
+                            "type": "uint256"
+                        }
+                    ],
+                    "internalType": "struct ForeverMinter.LazyDetails",
+                    "name": "",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "getMintEconomics",
             "outputs": [
                 {
                     "components": [
@@ -969,22 +1013,42 @@
         },
         {
             "inputs": [],
-            "name": "getLazyDetails",
+            "name": "getMintTiming",
             "outputs": [
                 {
                     "components": [
                         {
-                            "internalType": "address",
-                            "name": "lazyToken",
-                            "type": "address"
+                            "internalType": "uint256",
+                            "name": "lastMintTime",
+                            "type": "uint256"
                         },
                         {
                             "internalType": "uint256",
-                            "name": "lazyBurnPerc",
+                            "name": "mintStartTime",
                             "type": "uint256"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "mintPaused",
+                            "type": "bool"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "refundWindow",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "uint256",
+                            "name": "refundPercentage",
+                            "type": "uint256"
+                        },
+                        {
+                            "internalType": "bool",
+                            "name": "wlOnly",
+                            "type": "bool"
                         }
                     ],
-                    "internalType": "struct ForeverMinter.LazyDetails",
+                    "internalType": "struct ForeverMinter.MintTiming",
                     "name": "",
                     "type": "tuple"
                 }
@@ -1018,11 +1082,21 @@
                     "type": "uint256"
                 }
             ],
-            "name": "getSerialDiscountUsage",
+            "name": "getSerialDiscountInfo",
             "outputs": [
                 {
+                    "internalType": "bool",
+                    "name": "isEligible",
+                    "type": "bool"
+                },
+                {
                     "internalType": "uint256",
-                    "name": "",
+                    "name": "remainingUses",
+                    "type": "uint256"
+                },
+                {
+                    "internalType": "uint256",
+                    "name": "currentUsage",
                     "type": "uint256"
                 }
             ],
@@ -1077,51 +1151,6 @@
                         }
                     ],
                     "internalType": "struct ForeverMinter.MintPayment",
-                    "name": "",
-                    "type": "tuple"
-                }
-            ],
-            "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "getTiming",
-            "outputs": [
-                {
-                    "components": [
-                        {
-                            "internalType": "uint256",
-                            "name": "lastMintTime",
-                            "type": "uint256"
-                        },
-                        {
-                            "internalType": "uint256",
-                            "name": "mintStartTime",
-                            "type": "uint256"
-                        },
-                        {
-                            "internalType": "bool",
-                            "name": "mintPaused",
-                            "type": "bool"
-                        },
-                        {
-                            "internalType": "uint256",
-                            "name": "refundWindow",
-                            "type": "uint256"
-                        },
-                        {
-                            "internalType": "uint256",
-                            "name": "refundPercentage",
-                            "type": "uint256"
-                        },
-                        {
-                            "internalType": "bool",
-                            "name": "wlOnly",
-                            "type": "bool"
-                        }
-                    ],
-                    "internalType": "struct ForeverMinter.MintTiming",
                     "name": "",
                     "type": "tuple"
                 }
@@ -1189,17 +1218,22 @@
         {
             "inputs": [
                 {
-                    "internalType": "uint256",
-                    "name": "_serial",
-                    "type": "uint256"
+                    "internalType": "uint256[]",
+                    "name": "_serials",
+                    "type": "uint256[]"
                 }
             ],
-            "name": "isSerialAvailable",
+            "name": "isRefundOwed",
             "outputs": [
                 {
-                    "internalType": "bool",
-                    "name": "",
-                    "type": "bool"
+                    "internalType": "bool[]",
+                    "name": "isOwed",
+                    "type": "bool[]"
+                },
+                {
+                    "internalType": "uint256[]",
+                    "name": "expiryTimes",
+                    "type": "uint256[]"
                 }
             ],
             "stateMutability": "view",
@@ -1208,12 +1242,12 @@
         {
             "inputs": [
                 {
-                    "internalType": "address",
-                    "name": "_token",
-                    "type": "address"
+                    "internalType": "uint256",
+                    "name": "_serial",
+                    "type": "uint256"
                 }
             ],
-            "name": "isTokenDiscountEligible",
+            "name": "isSerialAvailable",
             "outputs": [
                 {
                     "internalType": "bool",
@@ -1378,9 +1412,9 @@
         {
             "inputs": [
                 {
-                    "internalType": "address",
-                    "name": "_address",
-                    "type": "address"
+                    "internalType": "address[]",
+                    "name": "_addresses",
+                    "type": "address[]"
                 }
             ],
             "name": "removeFromWhitelist",
@@ -1500,7 +1534,7 @@
                     "type": "uint256"
                 }
             ],
-            "name": "updateLazyBurnPerc",
+            "name": "updateLazyBurnPercentage",
             "outputs": [],
             "stateMutability": "nonpayable",
             "type": "function"
@@ -1554,19 +1588,6 @@
         {
             "inputs": [
                 {
-                    "internalType": "uint256",
-                    "name": "_cooldown",
-                    "type": "uint256"
-                }
-            ],
-            "name": "updateWithdrawalCooldown",
-            "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
                     "internalType": "address",
                     "name": "_recipient",
                     "type": "address"
@@ -1598,19 +1619,6 @@
             "name": "withdrawLazy",
             "outputs": [],
             "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "withdrawalCooldown",
-            "outputs": [
-                {
-                    "internalType": "uint256",
-                    "name": "",
-                    "type": "uint256"
-                }
-            ],
-            "stateMutability": "view",
             "type": "function"
         },
         {

@@ -3,6 +3,86 @@
     "sourceName": "contracts/FungibleTokenCreator.sol",
     "abi": [
         {
+            "inputs": [],
+            "name": "AllowanceApprovalFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BurnAtTreasuryFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "BurnFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "GetAllowanceFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MintNoKeysFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MintSupplyFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MintWipeKeyFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MintWipeSupplyFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "MintWithFeesFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "PositiveTransfersOnly",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "SendHbarFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "SpenderNotOnWL",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TooManyFees",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TransferBatchFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TransferHTSFailed",
+            "type": "error"
+        },
+        {
+            "inputs": [],
+            "name": "TransferTokensFailed",
+            "type": "error"
+        },
+        {
             "anonymous": false,
             "inputs": [
                 {
@@ -55,6 +135,32 @@
         {
             "stateMutability": "payable",
             "type": "fallback"
+        },
+        {
+            "inputs": [],
+            "name": "DEFAULT_AUTO_RENEW_PERIOD",
+            "outputs": [
+                {
+                    "internalType": "uint32",
+                    "name": "",
+                    "type": "uint32"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [],
+            "name": "PRECOMPILE_ADDRESS",
+            "outputs": [
+                {
+                    "internalType": "address",
+                    "name": "",
+                    "type": "address"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
         },
         {
             "inputs": [
@@ -119,9 +225,9 @@
             "name": "batchTransferTokens",
             "outputs": [
                 {
-                    "internalType": "int256",
+                    "internalType": "int32",
                     "name": "responseCode",
-                    "type": "int256"
+                    "type": "int32"
                 }
             ],
             "stateMutability": "nonpayable",
@@ -143,9 +249,9 @@
             "name": "burn",
             "outputs": [
                 {
-                    "internalType": "int256",
+                    "internalType": "int32",
                     "name": "responseCode",
-                    "type": "int256"
+                    "type": "int32"
                 }
             ],
             "stateMutability": "nonpayable",
@@ -172,9 +278,9 @@
             "name": "burnFromTreasury",
             "outputs": [
                 {
-                    "internalType": "int256",
+                    "internalType": "int32",
                     "name": "responseCode",
-                    "type": "int256"
+                    "type": "int32"
                 },
                 {
                     "internalType": "uint64",
@@ -500,71 +606,6 @@
             "inputs": [
                 {
                     "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                }
-            ],
-            "name": "getTokenExpiryInfo",
-            "outputs": [
-                {
-                    "internalType": "int256",
-                    "name": "responseCode",
-                    "type": "int256"
-                },
-                {
-                    "components": [
-                        {
-                            "internalType": "uint32",
-                            "name": "second",
-                            "type": "uint32"
-                        },
-                        {
-                            "internalType": "address",
-                            "name": "autoRenewAccount",
-                            "type": "address"
-                        },
-                        {
-                            "internalType": "uint32",
-                            "name": "autoRenewPeriod",
-                            "type": "uint32"
-                        }
-                    ],
-                    "internalType": "struct IHederaTokenService.Expiry",
-                    "name": "expiryInfo",
-                    "type": "tuple"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                },
-                {
-                    "internalType": "address",
-                    "name": "account",
-                    "type": "address"
-                }
-            ],
-            "name": "grantTokenKyc",
-            "outputs": [
-                {
-                    "internalType": "int64",
-                    "name": "responseCode",
-                    "type": "int64"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
                     "name": "addressToCheck",
                     "type": "address"
                 }
@@ -588,35 +629,6 @@
                     "type": "address"
                 },
                 {
-                    "internalType": "address",
-                    "name": "account",
-                    "type": "address"
-                }
-            ],
-            "name": "isKyc",
-            "outputs": [
-                {
-                    "internalType": "int64",
-                    "name": "responseCode",
-                    "type": "int64"
-                },
-                {
-                    "internalType": "bool",
-                    "name": "kycGranted",
-                    "type": "bool"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                },
-                {
                     "internalType": "uint64",
                     "name": "amount",
                     "type": "uint64"
@@ -625,9 +637,9 @@
             "name": "mintAdditionalSupply",
             "outputs": [
                 {
-                    "internalType": "int256",
+                    "internalType": "int32",
                     "name": "responseCode",
-                    "type": "int256"
+                    "type": "int32"
                 },
                 {
                     "internalType": "uint64",
@@ -655,25 +667,6 @@
             "inputs": [
                 {
                     "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                }
-            ],
-            "name": "pauseToken",
-            "outputs": [
-                {
-                    "internalType": "int256",
-                    "name": "responseCode",
-                    "type": "int256"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
                     "name": "oldAddress",
                     "type": "address"
                 }
@@ -687,30 +680,6 @@
             "inputs": [],
             "name": "renounceOwnership",
             "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                },
-                {
-                    "internalType": "address",
-                    "name": "account",
-                    "type": "address"
-                }
-            ],
-            "name": "revokeTokenKyc",
-            "outputs": [
-                {
-                    "internalType": "int64",
-                    "name": "responseCode",
-                    "type": "int64"
-                }
-            ],
             "stateMutability": "nonpayable",
             "type": "function"
         },
@@ -764,9 +733,9 @@
             "name": "transferHTS",
             "outputs": [
                 {
-                    "internalType": "int256",
+                    "internalType": "int32",
                     "name": "responseCode",
-                    "type": "int256"
+                    "type": "int32"
                 }
             ],
             "stateMutability": "nonpayable",
@@ -800,193 +769,6 @@
             ],
             "name": "transferOwnership",
             "outputs": [],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                }
-            ],
-            "name": "unpauseToken",
-            "outputs": [
-                {
-                    "internalType": "int256",
-                    "name": "responseCode",
-                    "type": "int256"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                },
-                {
-                    "components": [
-                        {
-                            "internalType": "uint32",
-                            "name": "second",
-                            "type": "uint32"
-                        },
-                        {
-                            "internalType": "address",
-                            "name": "autoRenewAccount",
-                            "type": "address"
-                        },
-                        {
-                            "internalType": "uint32",
-                            "name": "autoRenewPeriod",
-                            "type": "uint32"
-                        }
-                    ],
-                    "internalType": "struct IHederaTokenService.Expiry",
-                    "name": "expiryInfo",
-                    "type": "tuple"
-                }
-            ],
-            "name": "updateTokenExpiryInfo",
-            "outputs": [
-                {
-                    "internalType": "int256",
-                    "name": "responseCode",
-                    "type": "int256"
-                }
-            ],
-            "stateMutability": "nonpayable",
-            "type": "function"
-        },
-        {
-            "inputs": [
-                {
-                    "internalType": "address",
-                    "name": "token",
-                    "type": "address"
-                },
-                {
-                    "components": [
-                        {
-                            "internalType": "string",
-                            "name": "name",
-                            "type": "string"
-                        },
-                        {
-                            "internalType": "string",
-                            "name": "symbol",
-                            "type": "string"
-                        },
-                        {
-                            "internalType": "address",
-                            "name": "treasury",
-                            "type": "address"
-                        },
-                        {
-                            "internalType": "string",
-                            "name": "memo",
-                            "type": "string"
-                        },
-                        {
-                            "internalType": "bool",
-                            "name": "tokenSupplyType",
-                            "type": "bool"
-                        },
-                        {
-                            "internalType": "int64",
-                            "name": "maxSupply",
-                            "type": "int64"
-                        },
-                        {
-                            "internalType": "bool",
-                            "name": "freezeDefault",
-                            "type": "bool"
-                        },
-                        {
-                            "components": [
-                                {
-                                    "internalType": "uint256",
-                                    "name": "keyType",
-                                    "type": "uint256"
-                                },
-                                {
-                                    "components": [
-                                        {
-                                            "internalType": "bool",
-                                            "name": "inheritAccountKey",
-                                            "type": "bool"
-                                        },
-                                        {
-                                            "internalType": "address",
-                                            "name": "contractId",
-                                            "type": "address"
-                                        },
-                                        {
-                                            "internalType": "bytes",
-                                            "name": "ed25519",
-                                            "type": "bytes"
-                                        },
-                                        {
-                                            "internalType": "bytes",
-                                            "name": "ECDSA_secp256k1",
-                                            "type": "bytes"
-                                        },
-                                        {
-                                            "internalType": "address",
-                                            "name": "delegatableContractId",
-                                            "type": "address"
-                                        }
-                                    ],
-                                    "internalType": "struct IHederaTokenService.KeyValue",
-                                    "name": "key",
-                                    "type": "tuple"
-                                }
-                            ],
-                            "internalType": "struct IHederaTokenService.TokenKey[]",
-                            "name": "tokenKeys",
-                            "type": "tuple[]"
-                        },
-                        {
-                            "components": [
-                                {
-                                    "internalType": "uint32",
-                                    "name": "second",
-                                    "type": "uint32"
-                                },
-                                {
-                                    "internalType": "address",
-                                    "name": "autoRenewAccount",
-                                    "type": "address"
-                                },
-                                {
-                                    "internalType": "uint32",
-                                    "name": "autoRenewPeriod",
-                                    "type": "uint32"
-                                }
-                            ],
-                            "internalType": "struct IHederaTokenService.Expiry",
-                            "name": "expiry",
-                            "type": "tuple"
-                        }
-                    ],
-                    "internalType": "struct IHederaTokenService.HederaToken",
-                    "name": "tokenInfo",
-                    "type": "tuple"
-                }
-            ],
-            "name": "updateTokenInfo",
-            "outputs": [
-                {
-                    "internalType": "int256",
-                    "name": "responseCode",
-                    "type": "int256"
-                }
-            ],
             "stateMutability": "nonpayable",
             "type": "function"
         },
