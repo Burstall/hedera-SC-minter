@@ -302,6 +302,7 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
     error TransferFailed();
     error EmptyArray();
     error ArrayLengthMismatch();
+    error RefundBlockedDueToDiscountUsage(uint256 serial);
 
     // ============ Modifiers ============
 
@@ -746,6 +747,12 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
                 block.timestamp > mintTime + mintTiming.refundWindow
             ) {
                 revert RefundWindowExpired();
+            }
+
+            // Block refund if serial has been used as discount token
+            // This prevents: mint at full price → use for discount → refund → profit
+            if (serialDiscountUsage[NFT_TOKEN][serial] > 0) {
+                revert RefundBlockedDueToDiscountUsage(serial);
             }
 
             // Calculate refund
