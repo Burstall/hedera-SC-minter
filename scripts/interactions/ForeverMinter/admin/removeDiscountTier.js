@@ -3,6 +3,7 @@ const {
 	AccountId,
 	PrivateKey,
 	ContractId,
+	TokenId,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const fs = require('fs');
@@ -14,7 +15,7 @@ const { estimateGas, logTransactionResult } = require('../../../../utils/gasHelp
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -24,18 +25,22 @@ const main = async () => {
 		return;
 	}
 
-	// Parse tier index from arguments
+	// Parse token address from arguments
 	if (process.argv.length < 3) {
-		console.log('Usage: node removeDiscountTier.js <index>');
-		console.log('\nExample: node removeDiscountTier.js 0');
-		console.log('\n💡 Use getContractInfo.js to see all tiers and their indices');
+		console.log('Usage: node removeDiscountTier.js <tokenId>');
+		console.log('\nExample: node removeDiscountTier.js 0.0.123456');
+		console.log('\n💡 Use getContractInfo.js to see all tiers and their tokens');
 		return;
 	}
 
-	const tierIndex = parseInt(process.argv[2]);
+	const tokenIdStr = process.argv[2];
 
-	if (isNaN(tierIndex) || tierIndex < 0) {
-		console.log('❌ Error: Invalid tier index');
+	let tokenId;
+	try {
+		tokenId = TokenId.fromString(tokenIdStr);
+	}
+	catch {
+		console.log('❌ Error: Invalid token ID');
 		return;
 	}
 
@@ -68,11 +73,10 @@ const main = async () => {
 	const minterIface = new ethers.Interface(json.abi);
 
 	try {
-		console.log(`Removing tier at index: ${tierIndex}`);
+		console.log(`Removing discount tier for token: ${tokenId.toString()}`);
 
 		console.log('\n⚠️  Warning: This will permanently remove the discount tier');
-		console.log('   Tier indices above this will shift down by 1');
-		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+		console.log('┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 		const confirm = readlineSync.question('Proceed with removal? (y/N): ');
 		if (confirm.toLowerCase() !== 'y') {
@@ -88,7 +92,7 @@ const main = async () => {
 			minterIface,
 			operatorId,
 			'removeDiscountTier',
-			[tierIndex],
+			[tokenId.toSolidityAddress()],
 			250_000,
 		);
 
@@ -98,7 +102,7 @@ const main = async () => {
 			client,
 			gasInfo.gasLimit,
 			'removeDiscountTier',
-			[tierIndex],
+			[tokenId.toSolidityAddress()],
 		);
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {

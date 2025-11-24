@@ -8,13 +8,13 @@ require('dotenv').config();
 const fs = require('fs');
 const { ethers } = require('ethers');
 const readlineSync = require('readline-sync');
-const { contractExecuteFunction } = require('../../../../utils/solidityHelpers');
+const { contractExecuteFunction, readOnlyEVMFromMirrorNode } = require('../../../../utils/solidityHelpers');
 const { estimateGas, logTransactionResult } = require('../../../../utils/gasHelpers');
 
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -53,63 +53,105 @@ const main = async () => {
 	const minterIface = new ethers.Interface(json.abi);
 
 	try {
-		console.log('📋 Enter new mint timing values:');
-		console.log('   (Press Enter to skip a field and keep current value)\n');
+		// Fetch current timing configuration
+		console.log('🔍 Fetching current timing configuration...\n');
+		console.log(`   Contract ID: ${contractId.toString()}`);
+		console.log(`   Environment: ${env}\n`);
 
-		// Collect inputs
-		const startTimeInput = readlineSync.question('Start Time (Unix timestamp, 0 = immediate): ');
-		const refundWindowInput = readlineSync.question('Refund Window (seconds): ');
-		const refundPercentageInput = readlineSync.question('Refund Percentage (0-100): ');
+		const encodedCommand = minterIface.encodeFunctionData('getMintTiming');
+		const queryResult = await readOnlyEVMFromMirrorNode(env, contractId, encodedCommand, operatorId, false);
 
-		// Validate and convert
-		const startTime = startTimeInput ? parseInt(startTimeInput) : null;
-		const refundWindow = refundWindowInput ? parseInt(refundWindowInput) : null;
-		const refundPercentage = refundPercentageInput ? parseInt(refundPercentageInput) : null;
-
-		// Check if any values provided
-		if (startTime === null && refundWindow === null && refundPercentage === null) {
-			console.log('\n❌ Error: No values provided');
+		if (!queryResult || queryResult === '0x' || queryResult.length <= 2) {
+			console.log('❌ Error: Contract returned empty data');
+			console.log('   This usually means:');
+			console.log('   1. The FOREVER_MINTER_CONTRACT_ID in .env is incorrect');
+			console.log('   2. The contract is not deployed on this network');
+			console.log('   3. The contract has not been initialized\n');
+			console.log(`   Current FOREVER_MINTER_CONTRACT_ID: ${contractId.toString()}`);
+			console.log(`   Current ENVIRONMENT: ${env}`);
 			return;
 		}
 
+		const currentTiming = minterIface.decodeFunctionResult('getMintTiming', queryResult);
+
+		// Extract current values
+		const currentStartTime = Number(currentTiming[0][1]);
+		const currentMintPaused = currentTiming[0][2];
+		const currentRefundWindow = Number(currentTiming[0][3]);
+		const currentRefundPercentage = Number(currentTiming[0][4]);
+		const currentWlOnly = currentTiming[0][5];
+
+		console.log('📊 Current Timing Configuration:');
+		console.log(`   Start Time: ${currentStartTime === 0 ? 'Immediate' : new Date(currentStartTime * 1000).toLocaleString()} (${currentStartTime})`);
+		console.log(`   Mint Paused: ${currentMintPaused}`);
+		console.log(`   Refund Window: ${currentRefundWindow} seconds (${currentRefundWindow / 3600} hours)`);
+		console.log(`   Refund Percentage: ${currentRefundPercentage}%`);
+		console.log(`   Whitelist Only: ${currentWlOnly}`);
+
+		console.log('\n📋 Enter new mint timing values:');
+		console.log('   (Press Enter to keep current value)\n');
+
+		// Collect inputs
+		const startTimeInput = readlineSync.question('Start Time (Unix timestamp, 0 = immediate): ');
+		const mintPausedInput = readlineSync.question('Mint Paused (true/false): ');
+		const refundWindowInput = readlineSync.question('Refund Window (seconds): ');
+		const refundPercentageInput = readlineSync.question('Refund Percentage (0-100): ');
+		const wlOnlyInput = readlineSync.question('Whitelist Only (true/false): ');
+
+		// Validate and convert
+		// Default to current values
+		const startTime = startTimeInput.trim() ? parseInt(startTimeInput) : currentStartTime;
+		const mintPaused = mintPausedInput.trim() ? mintPausedInput.toLowerCase() === 'true' : currentMintPaused;
+		const refundWindow = refundWindowInput.trim() ? parseInt(refundWindowInput) : currentRefundWindow;
+		const refundPercentage = refundPercentageInput.trim() ? parseInt(refundPercentageInput) : currentRefundPercentage;
+		const wlOnly = wlOnlyInput.trim() ? wlOnlyInput.toLowerCase() === 'true' : currentWlOnly;
+
 		// Validate values
-		if (startTime !== null && (isNaN(startTime) || startTime < 0)) {
+		if (isNaN(startTime) || startTime < 0) {
 			console.log('❌ Error: Invalid start time');
 			return;
 		}
 
-		if (refundWindow !== null && (isNaN(refundWindow) || refundWindow < 0)) {
+		if (isNaN(refundWindow) || refundWindow < 0) {
 			console.log('❌ Error: Invalid refund window');
 			return;
 		}
 
-		if (refundPercentage !== null && (isNaN(refundPercentage) || refundPercentage < 0 || refundPercentage > 100)) {
+		if (isNaN(refundPercentage) || refundPercentage < 0 || refundPercentage > 100) {
 			console.log('❌ Error: Invalid refund percentage (must be 0-100)');
 			return;
 		}
 
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-		console.log('📋 SUMMARY - New Values');
+		console.log('📋 SUMMARY - Parameters to be sent');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-		if (startTime !== null) {
-			if (startTime === 0) {
-				console.log('Start Time: Immediate (no delay)');
-			}
-			else {
-				console.log(`Start Time: ${new Date(startTime * 1000).toLocaleString()}`);
-				console.log(`   (Unix timestamp: ${startTime})`);
-			}
+		// Calculate what's changing
+		const startChanged = startTime !== currentStartTime;
+		const pausedChanged = mintPaused !== currentMintPaused;
+		const windowChanged = refundWindow !== currentRefundWindow;
+		const percentageChanged = refundPercentage !== currentRefundPercentage;
+		const wlOnlyChanged = wlOnly !== currentWlOnly;
+
+		const changeMarker = (changed) => changed ? ' ⭐ CHANGED' : '';
+
+		// Show all parameters with change indicators
+		if (startTime === 0) {
+			console.log(`Start Time: Immediate (no delay)${changeMarker(startChanged)}`);
+		}
+		else {
+			console.log(`Start Time: ${new Date(startTime * 1000).toLocaleString()}${changeMarker(startChanged)}`);
+			console.log(`   (Unix timestamp: ${startTime})`);
 		}
 
-		if (refundWindow !== null) {
-			const hours = refundWindow / 3600;
-			console.log(`Refund Window: ${refundWindow} seconds (${hours} hours)`);
-		}
+		console.log(`Mint Paused: ${mintPaused}${changeMarker(pausedChanged)}`);
 
-		if (refundPercentage !== null) {
-			console.log(`Refund Percentage: ${refundPercentage}%`);
-		}
+		const hours = refundWindow / 3600;
+		console.log(`Refund Window: ${refundWindow} seconds (${hours} hours)${changeMarker(windowChanged)}`);
+
+		console.log(`Refund Percentage: ${refundPercentage}%${changeMarker(percentageChanged)}`);
+
+		console.log(`Whitelist Only: ${wlOnly}${changeMarker(wlOnlyChanged)}`);
 
 		console.log('\n⚠️  Warning: This will update the contract configuration');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
@@ -120,18 +162,14 @@ const main = async () => {
 			return;
 		}
 
-		// Prepare arguments
-		const args = [
-			startTime ?? 0,
-			refundWindow ?? 0,
-			refundPercentage ?? 0,
-		];
-
-		// Prepare flags (0 = skip, 1 = update)
-		const flags = [
-			startTime !== null ? 1 : 0,
-			refundWindow !== null ? 1 : 0,
-			refundPercentage !== null ? 1 : 0,
+		// Prepare arguments for updateTiming()
+		// All 5 parameters are required by the contract
+		const params = [
+			startTime,
+			mintPaused,
+			refundWindow,
+			refundPercentage,
+			wlOnly,
 		];
 
 		console.log('\n🔄 Updating mint timing...\n');
@@ -141,8 +179,8 @@ const main = async () => {
 			contractId,
 			minterIface,
 			operatorId,
-			'updateMintTiming',
-			[...args, flags],
+			'updateTiming',
+			params,
 			250_000,
 		);
 
@@ -151,8 +189,8 @@ const main = async () => {
 			minterIface,
 			client,
 			gasInfo.gasLimit,
-			'updateMintTiming',
-			[...args, flags],
+			'updateTiming',
+			params,
 		);
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
@@ -161,21 +199,20 @@ const main = async () => {
 
 			console.log('\n📊 Updated Values:');
 
-			if (startTime !== null) {
-				if (startTime === 0) {
-					console.log('   Start Time: Immediate (no delay)');
-				}
-				else {
-					console.log(`   Start Time: ${new Date(startTime * 1000).toLocaleString()}`);
-				}
+			if (startTime === 0) {
+				console.log(`   Start Time: Immediate (no delay)${changeMarker(startChanged)}`);
+			}
+			else {
+				console.log(`   Start Time: ${new Date(startTime * 1000).toLocaleString()}${changeMarker(startChanged)}`);
 			}
 
-			if (refundWindow !== null) {
-				console.log(`   Refund Window: ${refundWindow / 3600} hours`);
-			}
+			console.log(`   Mint Paused: ${mintPaused}${changeMarker(pausedChanged)}`);
+			console.log(`   Refund Window: ${refundWindow / 3600} hours${changeMarker(windowChanged)}`);
+			console.log(`   Refund Percentage: ${refundPercentage}%${changeMarker(percentageChanged)}`);
+			console.log(`   Whitelist Only: ${wlOnly}${changeMarker(wlOnlyChanged)}`);
 
-			if (refundPercentage !== null) {
-				console.log(`   Refund Percentage: ${refundPercentage}%`);
+			if (startChanged || pausedChanged || windowChanged || percentageChanged || wlOnlyChanged) {
+				console.log('\n   ⭐ = Value changed from current');
 			}
 
 			console.log('\n💡 Verify with: node getContractInfo.js');

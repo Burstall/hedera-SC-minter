@@ -4,16 +4,18 @@ const {
 	PrivateKey,
 	ContractId,
 	TokenId,
+	Hbar,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const fs = require('fs');
 const { ethers } = require('ethers');
 const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
+const { getTokenDetails } = require('../../../utils/hederaMirrorHelpers');
 
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -82,6 +84,14 @@ const main = async () => {
 		const lazyDetails = minterIface.decodeFunctionResult('getLazyDetails', lazyResult)[0];
 		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails.lazyToken);
 
+		// Get LAZY token info for decimal precision
+		const lazyTokenInfo = await getTokenDetails(env, lazyTokenId);
+		if (!lazyTokenInfo) {
+			console.log('❌ Error: Could not fetch LAZY token details');
+			return;
+		}
+		const lazyDecimals = parseInt(lazyTokenInfo.decimals);
+
 		// Get LazyGasStation
 		const gasStationCommand = minterIface.encodeFunctionData('lazyGasStation');
 		const gasStationResult = await readOnlyEVMFromMirrorNode(env, contractId, gasStationCommand, operatorId, false);
@@ -128,8 +138,12 @@ const main = async () => {
 		console.log('💰 Pricing Configuration');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-		console.log(`Base Price (HBAR): ${Number(economics.hbarPrice)} tℏ`);
-		console.log(`Base Price (LAZY): ${Number(economics.lazyPrice)} tokens`);
+		const hbarPrice = Hbar.fromTinybars(Number(economics.hbarPrice));
+		const lazyPrice = Number(economics.lazyPrice) / Math.pow(10, lazyDecimals);
+		const wlSlotCost = Number(economics.wlSlotCost) / Math.pow(10, lazyDecimals);
+
+		console.log(`Base Price (HBAR): ${hbarPrice.toString()}`);
+		console.log(`Base Price (${lazyTokenInfo.symbol}): ${lazyPrice.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
 		console.log(`Sacrifice Discount: ${Number(economics.sacrificeDiscount)}%`);
 		console.log(`Max Per Mint: ${Number(economics.maxPerMint)} NFTs`);
 		console.log(`Max Per Wallet: ${Number(economics.maxPerWallet)} NFTs (0 = unlimited)`);
@@ -166,7 +180,7 @@ const main = async () => {
 		console.log('🎟️  Whitelist Configuration');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-		console.log(`WL Slot Cost (LAZY): ${Number(economics.wlSlotCost)} tokens`);
+		console.log(`WL Slot Cost (${lazyTokenInfo.symbol}): ${wlSlotCost.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
 
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('💎 LAZY Token Configuration');

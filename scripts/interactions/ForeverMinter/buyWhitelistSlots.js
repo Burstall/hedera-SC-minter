@@ -12,15 +12,15 @@ const readlineSync = require('readline-sync');
 const {
 	contractExecuteFunction,
 	readOnlyEVMFromMirrorNode,
-	setFTAllowance,
 } = require('../../../utils/solidityHelpers');
-const { checkTokenAssociation } = require('../../../utils/hederaHelpers');
+const { associateTokenToAccount, setFTAllowance } = require('../../../utils/hederaHelpers');
+const { checkMirrorBalance, getTokenDetails } = require('../../../utils/hederaMirrorHelpers');
 const { estimateGas, logTransactionResult } = require('../../../utils/gasHelpers');
 
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -80,26 +80,37 @@ const main = async () => {
 		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails.lazyToken);
 
 		// Check LAZY token association
-		const isAssociated = await checkTokenAssociation(env, operatorId, lazyTokenId);
+		const balance = await checkMirrorBalance(env, operatorId, lazyTokenId);
 
-		if (!isAssociated) {
-			console.log(`❌ Error: Your account is not associated with LAZY token ${lazyTokenId.toString()}`);
-			console.log('   Please associate the token first');
-			return;
+		if (balance === null) {
+			console.log(`\n❌ LAZY token ${lazyTokenId.toString()} is not associated with your account`);
+			console.log('   Associating token...\n');
+			await associateTokenToAccount(client, operatorId, operatorKey, lazyTokenId);
+			console.log('✅ Token associated\n');
 		}
 
 		// Get economics for WL slot cost
 		const economicsCommand = minterIface.encodeFunctionData('getMintEconomics');
 		const economicsResult = await readOnlyEVMFromMirrorNode(env, contractId, economicsCommand, operatorId, false);
 		const economics = minterIface.decodeFunctionResult('getMintEconomics', economicsResult)[0];
-		const wlSlotCost = Number(economics.wlSlotCost);
+		const wlSlotCost = Number(economics.buyWlWithLazy);
+		const slotsPerPurchase = Number(economics.buyWlSlotCount);
+
+		// Get LAZY token info for decimal precision
+		const lazyTokenInfo = await getTokenDetails(env, lazyTokenId);
+		if (!lazyTokenInfo) {
+			console.log('❌ Error: Could not fetch LAZY token details');
+			return;
+		}
+		const lazyDecimals = parseInt(lazyTokenInfo.decimals);
 
 		const totalCost = wlSlotCost * quantity;
 
 		// Get current WL slots
-		const wlSlotsCommand = minterIface.encodeFunctionData('whitelistSlots', [operatorId.toSolidityAddress()]);
+		const wlSlotsCommand = minterIface.encodeFunctionData('getBatchWhitelistSlots', [[operatorId.toSolidityAddress()]]);
 		const wlSlotsResult = await readOnlyEVMFromMirrorNode(env, contractId, wlSlotsCommand, operatorId, false);
-		const currentSlots = Number(minterIface.decodeFunctionResult('whitelistSlots', wlSlotsResult)[0]);
+		const slotsArray = minterIface.decodeFunctionResult('getBatchWhitelistSlots', wlSlotsResult)[0];
+		const currentSlots = Number(slotsArray[0]);
 
 		// Get LazyGasStation for allowance
 		const gasStationCommand = minterIface.encodeFunctionData('lazyGasStation');
@@ -113,11 +124,16 @@ const main = async () => {
 
 		console.log(`Current WL Slots: ${currentSlots}`);
 		console.log(`Quantity to Buy: ${quantity}`);
-		console.log(`New Total: ${currentSlots + quantity} slots`);
+		console.log(`Slots Per Purchase: ${slotsPerPurchase}`);
+		console.log(`New Total: ${currentSlots + (quantity * slotsPerPurchase)} slots`);
+
+		const wlSlotCostFormatted = wlSlotCost / Math.pow(10, lazyDecimals);
+		const totalCostFormatted = totalCost / Math.pow(10, lazyDecimals);
 
 		console.log('\n💰 Cost:');
-		console.log(`   Per Slot: ${wlSlotCost} LAZY`);
-		console.log(`   Total: ${totalCost} LAZY`);
+		console.log(`   Per Purchase: ${wlSlotCostFormatted.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
+		console.log(`   Total: ${totalCostFormatted.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
+		console.log(`   You Get: ${quantity * slotsPerPurchase} slots`);
 
 		console.log('\n💡 What are Whitelist Slots?');
 		console.log('   WL slots allow you to mint at full price BEFORE');
@@ -136,9 +152,8 @@ const main = async () => {
 
 		await setFTAllowance(
 			client,
-			operatorId,
-			operatorKey,
 			lazyTokenId,
+			operatorId,
 			gasStationId,
 			totalCost,
 		);
@@ -153,7 +168,7 @@ const main = async () => {
 			contractId,
 			minterIface,
 			operatorId,
-			'buyWhitelistSlots',
+			'buyWhitelistWithLazy',
 			[quantity],
 			200_000,
 		);
@@ -163,7 +178,7 @@ const main = async () => {
 			minterIface,
 			client,
 			gasInfo.gasLimit,
-			'buyWhitelistSlots',
+			'buyWhitelistWithLazy',
 			[quantity],
 		);
 
@@ -173,11 +188,11 @@ const main = async () => {
 
 			console.log('\n📊 Your Updated WL Slots:');
 			console.log(`   Previous: ${currentSlots}`);
-			console.log(`   Purchased: ${quantity}`);
-			console.log(`   New Total: ${currentSlots + quantity}`);
+			console.log(`   Purchased: ${quantity * slotsPerPurchase}`);
+			console.log(`   New Total: ${currentSlots + (quantity * slotsPerPurchase)}`);
 
-			console.log('\n💰 LAZY Spent:');
-			console.log(`   ${totalCost} LAZY tokens`);
+			console.log('\n💰 ${lazyTokenInfo.symbol} Spent:');
+			console.log(`   ${totalCostFormatted.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
 
 			console.log('\n💡 Next Steps:');
 			console.log('   • Your WL slots will be consumed during minting');

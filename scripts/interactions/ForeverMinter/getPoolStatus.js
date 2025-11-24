@@ -12,7 +12,7 @@ const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -71,106 +71,72 @@ const main = async () => {
 	const minterIface = new ethers.Interface(json.abi);
 
 	try {
-		// Get supply information
+		// Get remaining supply
 		const supplyCommand = minterIface.encodeFunctionData('getRemainingSupply');
 		const supplyResult = await readOnlyEVMFromMirrorNode(env, contractId, supplyCommand, operatorId, false);
-		const supply = minterIface.decodeFunctionResult('getRemainingSupply', supplyResult)[0];
-
-		const poolSize = Number(supply.poolSize);
-		const poolUsed = Number(supply.poolUsed);
-		const remaining = poolSize - poolUsed;
+		const remainingSupply = Number(minterIface.decodeFunctionResult('getRemainingSupply', supplyResult)[0]);
 
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('📊 Pool Overview');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-		console.log(`Total Pool Size: ${poolSize} NFTs`);
-		console.log(`Used: ${poolUsed} NFTs`);
-		console.log(`Remaining: ${remaining} NFTs`);
+		console.log(`Remaining Supply: ${remainingSupply} NFTs`);
 
-		const usedPercent = poolSize > 0 ? ((poolUsed / poolSize) * 100).toFixed(2) : 0;
-		console.log(`Usage: ${usedPercent}%`);
-
-		if (remaining === 0) {
+		if (remainingSupply === 0) {
 			console.log('\n⚠️  Pool is empty - no NFTs available for minting');
 			return;
 		}
 
 		// Get paginated serials
 		const startIndex = (page - 1) * pageSize;
-		const endIndex = Math.min(startIndex + pageSize, poolSize);
+		const limit = pageSize;
 
-		if (startIndex >= poolSize) {
-			console.log(`\n❌ Error: Page ${page} exceeds available pool size`);
-			console.log(`   Pool has ${poolSize} serials, page starts at index ${startIndex}`);
+		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+		console.log(`📋 Available Pool Serials (Page ${page})`);
+		console.log(`   Offset: ${startIndex}, Limit: ${limit}`);
+		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+		// Get paginated available serials
+		const serialsCommand = minterIface.encodeFunctionData('getAvailableSerialsPaginated', [startIndex, limit]);
+		const serialsResult = await readOnlyEVMFromMirrorNode(env, contractId, serialsCommand, operatorId, false);
+		const serials = minterIface.decodeFunctionResult('getAvailableSerialsPaginated', serialsResult)[0];
+
+		if (serials.length === 0) {
+			if (startIndex === 0) {
+				console.log('No serials available in pool\n');
+			}
+			else {
+				console.log(`❌ No serials at offset ${startIndex}`);
+				console.log(`   Pool may have fewer than ${startIndex + 1} serials\n`);
+			}
 			return;
 		}
 
-		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-		console.log(`📋 Pool Serials (Page ${page})`);
-		console.log(`   Showing indices ${startIndex}-${endIndex - 1} of ${poolSize}`);
-		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-		// Get serials in batches to avoid large single queries
-		const batchSize = 20;
-		const serials = [];
-
-		for (let i = startIndex; i < endIndex; i += batchSize) {
-			const batchEnd = Math.min(i + batchSize, endIndex);
-			const indices = [];
-
-			for (let j = i; j < batchEnd; j++) {
-				indices.push(j);
-			}
-
-			// Query batch
-			const batchCommand = minterIface.encodeFunctionData('getNFTsInPool', [indices]);
-			const batchResult = await readOnlyEVMFromMirrorNode(env, contractId, batchCommand, operatorId, false);
-			const batchSerials = minterIface.decodeFunctionResult('getNFTsInPool', batchResult)[0];
-
-			for (let k = 0; k < batchSerials.length; k++) {
-				serials.push({
-					index: indices[k],
-					serial: Number(batchSerials[k]),
-					used: indices[k] < poolUsed,
-				});
-			}
-
-			// Progress indicator
-			process.stdout.write(`\rLoading serials... ${Math.min(batchEnd, endIndex)} of ${endIndex}`);
-		}
-
-		console.log('\n');
-
 		// Display serials
-		const available = serials.filter(s => !s.used);
-		const used = serials.filter(s => s.used);
+		console.log(`Found ${serials.length} serials:\n`);
 
-		if (available.length > 0) {
-			console.log('✅ Available Serials:');
-			console.log(`   ${available.map(s => s.serial).join(', ')}`);
-		}
-
-		if (used.length > 0) {
-			console.log('\n🔴 Used Serials:');
-			console.log(`   ${used.map(s => s.serial).join(', ')}`);
+		// Display in rows of 10
+		for (let i = 0; i < serials.length; i += 10) {
+			const chunk = serials.slice(i, Math.min(i + 10, serials.length));
+			const serialNumbers = chunk.map(s => Number(s));
+			console.log(`   ${serialNumbers.join(', ')}`);
 		}
 
 		// Pagination info
-		const totalPages = Math.ceil(poolSize / pageSize);
+		const hasMore = serials.length === limit;
 
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('📖 Pagination');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-		console.log(`Page ${page} of ${totalPages}`);
-		console.log(`Showing ${serials.length} serials (${available.length} available, ${used.length} used)`);
+		console.log(`Page ${page} (showing ${serials.length} serials)`);
+		console.log(`Remaining in pool: ${remainingSupply}`);
 
 		if (page > 1) {
 			console.log(`\n⬅️  Previous page: node getPoolStatus.js ${page - 1} ${pageSize}`);
 		}
 
-		if (page < totalPages) {
+		if (hasMore) {
 			console.log(`➡️  Next page: node getPoolStatus.js ${page + 1} ${pageSize}`);
 		}
 

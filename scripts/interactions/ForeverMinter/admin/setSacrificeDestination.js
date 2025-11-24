@@ -10,11 +10,12 @@ const { ethers } = require('ethers');
 const readlineSync = require('readline-sync');
 const { contractExecuteFunction } = require('../../../../utils/solidityHelpers');
 const { estimateGas, logTransactionResult } = require('../../../../utils/gasHelpers');
+const { homebrewPopulateAccountEvmAddress, homebrewPopulateAccountNum } = require('../../../../utils/hederaMirrorHelpers');
 
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -35,12 +36,38 @@ const main = async () => {
 	const accountIdStr = process.argv[2];
 
 	let targetId;
-	try {
-		targetId = AccountId.fromString(accountIdStr);
+	let targetEvmAddress;
+
+	// Check if empty string or just spaces - use zero address
+	if (!accountIdStr || accountIdStr.trim() === '') {
+		targetId = AccountId.fromString('0.0.0');
+		targetEvmAddress = ethers.ZeroAddress;
 	}
-	catch {
-		console.log('❌ Error: Invalid account ID');
-		return;
+	// Check if input is an EVM address (starts with 0x)
+	else if (accountIdStr.startsWith('0x')) {
+		try {
+			// Validate and normalize the EVM address
+			targetEvmAddress = ethers.getAddress(accountIdStr);
+			// Use Mirror Node to get the corresponding Hedera account ID
+			const hederaAccountId = await homebrewPopulateAccountNum(env, targetEvmAddress);
+			targetId = AccountId.fromString(hederaAccountId);
+		}
+		catch {
+			console.log('❌ Error: Invalid EVM address');
+			return;
+		}
+	}
+	// Input is a Hedera account ID (e.g., 0.0.123456)
+	else {
+		try {
+			targetId = AccountId.fromString(accountIdStr);
+			// Use Mirror Node to get the correct EVM address
+			targetEvmAddress = await homebrewPopulateAccountEvmAddress(env, targetId);
+		}
+		catch {
+			console.log('❌ Error: Invalid account ID');
+			return;
+		}
 	}
 
 	console.log('\n🔥 ForeverMinter - Set Sacrifice Destination');
@@ -77,7 +104,7 @@ const main = async () => {
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 		console.log(`New Destination: ${targetId.toString()}`);
-		console.log(`Address: ${targetId.toSolidityAddress()}`);
+		console.log(`Address: ${targetEvmAddress}`);
 
 		if (targetId.toString() === '0.0.0') {
 			console.log('\n🔥 Sacrificed NFTs will be BURNED (sent to 0.0.0)');
@@ -103,7 +130,7 @@ const main = async () => {
 			minterIface,
 			operatorId,
 			'setSacrificeDestination',
-			[targetId.toSolidityAddress()],
+			[targetEvmAddress],
 			150_000,
 		);
 
@@ -113,7 +140,7 @@ const main = async () => {
 			client,
 			gasInfo.gasLimit,
 			'setSacrificeDestination',
-			[targetId.toSolidityAddress()],
+			[targetEvmAddress],
 		);
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {

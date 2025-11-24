@@ -3,17 +3,19 @@ const {
 	AccountId,
 	PrivateKey,
 	ContractId,
+	TokenId,
+	Hbar,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const fs = require('fs');
 const { ethers } = require('ethers');
 const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
-const { homebrewPopulateAccountEvmAddress } = require('../../../utils/hederaMirrorHelpers');
+const { homebrewPopulateAccountEvmAddress, getTokenDetails } = require('../../../utils/hederaMirrorHelpers');
 
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -100,6 +102,18 @@ const main = async () => {
 		const economicsResult = await readOnlyEVMFromMirrorNode(env, contractId, economicsCommand, operatorId, false);
 		const economics = minterIface.decodeFunctionResult('getMintEconomics', economicsResult)[0];
 
+		// Get LAZY token details
+		const lazyCommand = minterIface.encodeFunctionData('getLazyDetails');
+		const lazyResult = await readOnlyEVMFromMirrorNode(env, contractId, lazyCommand, operatorId, false);
+		const lazyDetails = minterIface.decodeFunctionResult('getLazyDetails', lazyResult)[0];
+		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails.lazyToken);
+		const lazyTokenInfo = await getTokenDetails(env, lazyTokenId);
+		if (!lazyTokenInfo) {
+			console.log('❌ Error: Could not fetch LAZY token details');
+			return;
+		}
+		const lazyDecimals = parseInt(lazyTokenInfo.decimals);
+
 		// Get WL slots
 		const wlSlotsCommand = minterIface.encodeFunctionData('whitelistSlots', [
 			(await homebrewPopulateAccountEvmAddress(env, operatorId)).startsWith('0x')
@@ -130,19 +144,27 @@ const main = async () => {
 		const baseHbarCost = Number(economics.mintPriceHbar) * quantity;
 		const baseLazyCost = Number(economics.mintPriceLazy) * quantity;
 
+		// Format for display
+		const baseHbarFormatted = Hbar.fromTinybars(baseHbarCost);
+		const baseLazyFormatted = baseLazyCost / Math.pow(10, lazyDecimals);
+		const finalHbarFormatted = Hbar.fromTinybars(Number(totalHbarCost));
+		const finalLazyFormatted = Number(totalLazyCost) / Math.pow(10, lazyDecimals);
+		const savedHbar = Hbar.fromTinybars(baseHbarCost - Number(totalHbarCost));
+		const savedLazy = (baseLazyCost - Number(totalLazyCost)) / Math.pow(10, lazyDecimals);
+
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('💰 COST BREAKDOWN');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 		console.log('Base Cost (no discounts):');
-		console.log(`   ${baseHbarCost} tℏ + ${baseLazyCost} LAZY`);
+		console.log(`   ${baseHbarFormatted.toString()} + ${baseLazyFormatted.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
 
 		console.log('\nWith Discounts Applied:');
-		console.log(`   ${Number(totalHbarCost)} tℏ + ${Number(totalLazyCost)} LAZY`);
+		console.log(`   ${finalHbarFormatted.toString()} + ${finalLazyFormatted.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
 
 		console.log('\n📊 Discount Summary:');
 		console.log(`   Average Discount: ${Number(totalDiscount)}%`);
-		console.log(`   You Save: ${baseHbarCost - Number(totalHbarCost)} tℏ + ${baseLazyCost - Number(totalLazyCost)} LAZY`);
+		console.log(`   You Save: ${savedHbar.toString()} + ${savedLazy.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
 
 		console.log('\n🎫 Slot Usage:');
 		console.log(`   Holder Slots Consumed: ${Number(holderSlotsUsed)}`);

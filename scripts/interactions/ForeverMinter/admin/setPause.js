@@ -14,7 +14,7 @@ const { estimateGas, logTransactionResult } = require('../../../../utils/gasHelp
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -101,7 +101,7 @@ const main = async () => {
 			contractId,
 			minterIface,
 			operatorId,
-			'setPause',
+			'updatePauseStatus',
 			[shouldPause],
 			150_000,
 		);
@@ -111,7 +111,7 @@ const main = async () => {
 			minterIface,
 			client,
 			gasInfo.gasLimit,
-			'setPause',
+			'updatePauseStatus',
 			[shouldPause],
 		);
 

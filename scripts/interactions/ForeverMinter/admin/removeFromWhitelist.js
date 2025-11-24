@@ -14,7 +14,7 @@ const { estimateGas, logTransactionResult } = require('../../../../utils/gasHelp
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -93,7 +93,7 @@ const main = async () => {
 			minterIface,
 			operatorId,
 			'removeFromWhitelist',
-			[targetId.toSolidityAddress()],
+			[[targetId.toSolidityAddress()]],
 			200_000,
 		);
 
@@ -103,7 +103,7 @@ const main = async () => {
 			client,
 			gasInfo.gasLimit,
 			'removeFromWhitelist',
-			[targetId.toSolidityAddress()],
+			[[targetId.toSolidityAddress()]],
 		);
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {

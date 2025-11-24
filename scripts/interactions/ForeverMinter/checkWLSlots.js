@@ -12,7 +12,7 @@ const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -75,7 +75,8 @@ const main = async () => {
 		const economicsCommand = minterIface.encodeFunctionData('getMintEconomics');
 		const economicsResult = await readOnlyEVMFromMirrorNode(env, contractId, economicsCommand, operatorId, false);
 		const economics = minterIface.decodeFunctionResult('getMintEconomics', economicsResult)[0];
-		const wlSlotCost = Number(economics.wlSlotCost);
+		const wlSlotCost = Number(economics.buyWlWithLazy);
+		const slotsPerPurchase = Number(economics.buyWlSlotCount);
 
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('🎟️  Whitelist Slot Status');
@@ -104,7 +105,8 @@ const main = async () => {
 		console.log('   3. Whitelist (consume WL slots)');
 		console.log('   4. Full Price (no slots consumed)');
 		console.log('');
-		console.log(`Each WL slot costs: ${wlSlotCost} LAZY tokens`);
+		console.log(`Cost to purchase: ${wlSlotCost} LAZY per purchase`);
+		console.log(`Slots per purchase: ${slotsPerPurchase}`);
 
 		if (wlSlots === 0) {
 			console.log('\n📝 To purchase whitelist slots:');

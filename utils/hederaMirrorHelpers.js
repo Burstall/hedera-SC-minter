@@ -552,6 +552,90 @@ async function homebrewPopulateAccountNum(env, evmAddress) {
 	return accountId;
 }
 
+/**
+ * Parse contract events from mirror node with pagination support
+ * @param {string} env - Environment (TEST/MAIN/PREVIEW)
+ * @param {string} contractId - Contract ID (e.g., "0.0.12345")
+ * @param {object} iface - Ethers contract interface for parsing events
+ * @param {number} limit - Maximum number of logs per page (default: 100, max: 100)
+ * @param {boolean} fetchAll - Whether to paginate through all results (default: false)
+ * @param {string} order - Sort order: 'asc' or 'desc' (default: 'desc')
+ * @returns {Promise<Array>} Array of parsed events with metadata
+ */
+async function parseContractEvents(env, contractId, iface, limit = 100, fetchAll = false, order = 'desc') {
+	const baseUrl = getBaseURL(env);
+	const events = [];
+	let nextLink = `${baseUrl}/api/v1/contracts/${contractId}/results/logs?order=${order}&limit=${limit}`;
+
+	do {
+		try {
+			const response = await axios.get(nextLink);
+			const data = response.data;
+
+			if (!data.logs || data.logs.length === 0) {
+				break;
+			}
+
+			// Process each log
+			for (const log of data.logs) {
+				// Skip empty data
+				if (!log || log.data === '0x' || !log.topics || log.topics.length === 0) {
+					continue;
+				}
+
+				try {
+					// Parse the event
+					const parsedEvent = iface.parseLog({
+						topics: log.topics,
+						data: log.data,
+					});
+
+					if (parsedEvent) {
+						// Convert log timestamp to Date object
+						const timestamp = new Date(parseFloat(log.timestamp) * 1000);
+
+						events.push({
+							name: parsedEvent.name,
+							args: parsedEvent.args,
+							signature: parsedEvent.signature,
+							topic: parsedEvent.topic,
+							timestamp: timestamp.toISOString(),
+							timestampSeconds: parseFloat(log.timestamp),
+							blockNumber: log.block_number,
+							transactionHash: log.transaction_hash,
+							logIndex: log.index,
+							rawLog: log,
+						});
+					}
+				}
+				catch (parseError) {
+					// Log parse errors but continue processing
+					console.error(`Failed to parse log at index ${log.index}:`, parseError.message);
+				}
+			}
+
+			// Check for next page
+			nextLink = data.links?.next ? `${baseUrl}${data.links.next}` : null;
+
+			// If not fetching all, break after first page
+			if (!fetchAll) {
+				break;
+			}
+
+			// Add a small delay between requests to avoid rate limiting
+			if (nextLink) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+		}
+		catch (error) {
+			console.error('Error fetching events from mirror node:', error.message);
+			break;
+		}
+	} while (nextLink && fetchAll);
+
+	return events;
+}
+
 module.exports = {
 	checkMirrorAllowance,
 	checkMirrorNFTAllowance,
@@ -572,4 +656,5 @@ module.exports = {
 	homebrewPopulateAccountEvmAddress,
 	homebrewPopulateAccountNum,
 	hasUserGotAutoAssociations,
+	parseContractEvents,
 };

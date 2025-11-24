@@ -10,3 +10,8 @@ cache
 artifacts
 
 package-lock.json
+deployment-*.json
+deployment-*.txt
+
+testnet-metadata.json
+testnet-royalties.json

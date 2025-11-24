@@ -14,7 +14,7 @@ const { estimateGas, logTransactionResult } = require('../../../../utils/gasHelp
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
@@ -27,8 +27,8 @@ const main = async () => {
 	if (process.argv.length < 3) {
 		console.log('Usage: node addToPool.js <serial1> [serial2] [serial3] ...');
 		console.log('\nExample: node addToPool.js 123 456 789');
-		console.log('\n💡 This adds NFTs to the pool without full registration');
-		console.log('   (Use registerPoolNFTs.js for initial pool setup)');
+		console.log('\n💡 This adds NFTs to the pool');
+		console.log('   (Use registerNFTs.js for initial NFT registration)');
 		return;
 	}
 
@@ -91,7 +91,7 @@ const main = async () => {
 			contractId,
 			minterIface,
 			operatorId,
-			'addToPool',
+			'addNFTsToPool',
 			[serials],
 			300_000 + (serials.length * 30_000),
 		);
@@ -101,7 +101,7 @@ const main = async () => {
 			minterIface,
 			client,
 			gasInfo.gasLimit,
-			'addToPool',
+			'addNFTsToPool',
 			[serials],
 		);
 

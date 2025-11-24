@@ -24,14 +24,14 @@ async function estimateGas(env, contractId, contractInterface, operatorId, funct
 			encodedCommand,
 			operatorId,
 			true,
-			fallbackGas * 2,
+			Math.max(fallbackGas * 1.5, 14_999_999),
 			value,
 		);
 
 		const estimatedGas = Number(gasEstimate);
-		const gasWithBuffer = Math.ceil(estimatedGas * 1.1);
+		const gasWithBuffer = Math.ceil(estimatedGas * 1.15);
 
-		console.log(`📊 Gas Estimate: ${estimatedGas.toLocaleString()} | With 10% buffer: ${gasWithBuffer.toLocaleString()}`);
+		console.log(`📊 Gas Estimate: ${estimatedGas.toLocaleString()} | With 15% buffer: ${gasWithBuffer.toLocaleString()}`);
 
 		return {
 			gasLimit: gasWithBuffer,

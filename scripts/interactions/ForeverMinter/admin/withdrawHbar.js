@@ -3,6 +3,8 @@ const {
 	AccountId,
 	PrivateKey,
 	ContractId,
+	Hbar,
+	HbarUnit,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const fs = require('fs');
@@ -14,13 +16,37 @@ const { estimateGas, logTransactionResult } = require('../../../../utils/gasHelp
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
 const contractName = 'ForeverMinter';
-const contractId = ContractId.fromString(process.env.CONTRACT_ID || '');
+const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
 let client;
 
 const main = async () => {
 	if (!operatorId || !operatorKey || !contractId || contractId.toString() === '0.0.0') {
 		console.log('❌ Error: Missing configuration in .env file');
+		return;
+	}
+
+	if (process.argv.length < 4) {
+		console.log('Usage: node withdrawHbar.js <recipient> <amount>');
+		console.log('\nExample: node withdrawHbar.js 0.0.123456 100');
+		console.log('\n💡 Amount is in HBAR');
+		return;
+	}
+
+	const recipientStr = process.argv[2];
+	const amountHbar = parseFloat(process.argv[3]);
+
+	let recipientId;
+	try {
+		recipientId = AccountId.fromString(recipientStr);
+	}
+	catch {
+		console.log('❌ Error: Invalid recipient account ID');
+		return;
+	}
+
+	if (isNaN(amountHbar) || amountHbar <= 0) {
+		console.log('❌ Error: Amount must be positive');
 		return;
 	}
 
@@ -53,8 +79,15 @@ const main = async () => {
 	const minterIface = new ethers.Interface(json.abi);
 
 	try {
-		console.log('⚠️  Warning: This will withdraw ALL contract HBAR to the contract owner');
-		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+		console.log('┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+		console.log('💰 HBAR Withdrawal');
+		console.log('┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+		console.log(`Recipient: ${recipientId.toString()}`);
+		console.log(`Amount: ${amountHbar} HBAR`);
+
+		console.log('\n⚠️  Warning: This will withdraw HBAR from the contract');
+		console.log('┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 		const confirm = readlineSync.question('Proceed with HBAR withdrawal? (y/N): ');
 		if (confirm.toLowerCase() !== 'y') {
@@ -70,7 +103,7 @@ const main = async () => {
 			minterIface,
 			operatorId,
 			'withdrawHbar',
-			[],
+			[recipientId.toSolidityAddress(), Hbar.from(amountHbar, HbarUnit.Hbar).toTinybars().toString()],
 			200_000,
 		);
 
@@ -80,14 +113,16 @@ const main = async () => {
 			client,
 			gasInfo.gasLimit,
 			'withdrawHbar',
-			[],
+			[recipientId.toSolidityAddress(), Hbar.from(amountHbar, HbarUnit.Hbar).toTinybars().toString()],
 		);
 
 		if (result[0]?.status?.toString() === 'SUCCESS') {
 			console.log('✅ SUCCESS! HBAR withdrawn');
 			console.log(`   Transaction ID: ${result[2]?.transactionId?.toString()}`);
 
-			console.log('\n💰 HBAR has been transferred to contract owner');
+			console.log('\n💰 Details:');
+			console.log(`   Amount: ${amountHbar} HBAR`);
+			console.log(`   Recipient: ${recipientId.toString()}`);
 		}
 		else {
 			console.log('❌ Failed to withdraw:', result[0]?.status?.toString());
