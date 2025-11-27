@@ -73,15 +73,15 @@ const main = async () => {
 		const timing = minterIface.decodeFunctionResult('getMintTiming', timingResult)[0];
 
 		console.log('📊 Refund Configuration:');
-		console.log(`   Refund Window: ${Number(timing.refundWindow) / 3600} hours`);
-		console.log(`   Refund Percentage: ${Number(timing.refundPercentage)}%`);
+		console.log(`   Refund Window: ${Number(timing[3]) / 3600} hours`);
+		console.log(`   Refund Percentage: ${Number(timing[4])}%`);
 		console.log('');
 
 		// Get LAZY token details
 		const lazyCommand = minterIface.encodeFunctionData('getLazyDetails');
 		const lazyResult = await readOnlyEVMFromMirrorNode(env, contractId, lazyCommand, operatorId, false);
 		const lazyDetails = minterIface.decodeFunctionResult('getLazyDetails', lazyResult)[0];
-		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails.lazyToken);
+		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails[0]);
 
 		// Get token details for formatting
 		const { getTokenDetails } = require('../../../utils/hederaMirrorHelpers');
@@ -131,8 +131,8 @@ const main = async () => {
 
 				const hbarPaid = Number(payment.hbarPaid);
 				const lazyPaid = Number(payment.lazyPaid);
-				const hbarRefund = Math.floor((hbarPaid * Number(timing.refundPercentage)) / 100);
-				const lazyRefund = Math.floor((lazyPaid * Number(timing.refundPercentage)) / 100);
+				const hbarRefund = Math.floor((hbarPaid * Number(timing[4])) / 100);
+				const lazyRefund = Math.floor((lazyPaid * Number(timing[4])) / 100);
 
 				eligibleNFTs.push({
 					serial,

@@ -28,6 +28,11 @@ const main = async () => {
 	console.log('\n📊 ForeverMinter - Contract Information');
 	console.log('==========================================\n');
 
+	if (!env) {
+		console.log('❌ Error: Missing ENVIRONMENT in .env file');
+		return;
+	}
+
 	// Setup client
 	if (env.toUpperCase() == 'TEST') {
 		client = Client.forTestnet();
@@ -82,7 +87,7 @@ const main = async () => {
 		const lazyCommand = minterIface.encodeFunctionData('getLazyDetails');
 		const lazyResult = await readOnlyEVMFromMirrorNode(env, contractId, lazyCommand, operatorId, false);
 		const lazyDetails = minterIface.decodeFunctionResult('getLazyDetails', lazyResult)[0];
-		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails.lazyToken);
+		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails[0]);
 
 		// Get LAZY token info for decimal precision
 		const lazyTokenInfo = await getTokenDetails(env, lazyTokenId);
@@ -110,15 +115,12 @@ const main = async () => {
 			const tierResult = await readOnlyEVMFromMirrorNode(env, contractId, tierCommand, operatorId, false);
 			const tier = minterIface.decodeFunctionResult('getDiscountTier', tierResult)[0];
 
-			const tierTokenId = TokenId.fromSolidityAddress(tier.tokenAddress);
-
 			discountTiers.push({
 				index: i,
-				name: tier.tierName,
-				tokenId: tierTokenId.toString(),
-				discountPerSerial: Number(tier.discountPerSerial),
-				maxSerialsPerMint: Number(tier.maxSerialsPerMint),
-				maxDiscount: Number(tier.maxDiscount),
+				// First element is discountPercentage
+				discountPercentage: Number(tier[0]),
+				// Second element is maxUsesPerSerial
+				maxUsesPerSerial: Number(tier[1]),
 			});
 		}
 
@@ -129,32 +131,31 @@ const main = async () => {
 
 		console.log(`NFT Token ID: ${nftTokenId.toString()}`);
 		console.log(`NFT Token Address: ${nftTokenAddress}`);
-		console.log(`Total Minted: ${Number(economics.totalMinted)} NFTs`);
-		console.log(`Pool Size: ${Number(supply.poolSize)} NFTs`);
-		console.log(`Pool Used: ${Number(supply.poolUsed)} NFTs`);
-		console.log(`Remaining in Pool: ${Number(supply.poolSize) - Number(supply.poolUsed)} NFTs`);
+		console.log(`Remaining in Pool: ${Number(supply)} NFTs`);
+		console.log('(Note: getRemainingSupply returns available serials count only)');
 
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('💰 Pricing Configuration');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-		const hbarPrice = Hbar.fromTinybars(Number(economics.hbarPrice));
-		const lazyPrice = Number(economics.lazyPrice) / Math.pow(10, lazyDecimals);
-		const wlSlotCost = Number(economics.wlSlotCost) / Math.pow(10, lazyDecimals);
+		const hbarPrice = new Hbar(Number(economics[0]) / 100000000);
+		const lazyPrice = Number(economics[1]) / Math.pow(10, lazyDecimals);
+		const wlSlotCost = Number(economics[6]) / Math.pow(10, lazyDecimals);
 
 		console.log(`Base Price (HBAR): ${hbarPrice.toString()}`);
 		console.log(`Base Price (${lazyTokenInfo.symbol}): ${lazyPrice.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
-		console.log(`Sacrifice Discount: ${Number(economics.sacrificeDiscount)}%`);
-		console.log(`Max Per Mint: ${Number(economics.maxPerMint)} NFTs`);
-		console.log(`Max Per Wallet: ${Number(economics.maxPerWallet)} NFTs (0 = unlimited)`);
+		console.log(`WL Discount: ${Number(economics[2])}%`);
+		console.log(`Sacrifice Discount: ${Number(economics[3])}%`);
+		console.log(`Max Per Mint: ${Number(economics[4])} NFTs`);
+		console.log(`Max Per Wallet: ${Number(economics[5])} NFTs (0 = unlimited)`);
 
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('⏰ Timing Configuration');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 		const now = Math.floor(Date.now() / 1000);
-		const isPaused = timing.pausedState;
-		const startTime = Number(timing.startTime);
+		const isPaused = timing[2];
+		const startTime = Number(timing[1]);
 
 		console.log(`Paused: ${isPaused ? '🔴 YES' : '🟢 NO'}`);
 
@@ -173,8 +174,9 @@ const main = async () => {
 			console.log('Start Time: Not set (immediate)');
 		}
 
-		console.log(`Refund Window: ${Number(timing.refundWindow) / 3600} hours`);
-		console.log(`Refund Percentage: ${Number(timing.refundPercentage)}%`);
+		console.log(`Refund Window: ${Number(timing[3]) / 3600} hours`);
+		console.log(`Refund Percentage: ${Number(timing[4])}%`);
+		console.log(`WL Only Mode: ${timing[5] ? '🔴 YES' : '🟢 NO'}`);
 
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('🎟️  Whitelist Configuration');
@@ -187,10 +189,10 @@ const main = async () => {
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 		console.log(`LAZY Token ID: ${lazyTokenId.toString()}`);
-		console.log(`LAZY Token Address: ${lazyDetails.lazyToken}`);
+		console.log(`LAZY Token Address: ${lazyDetails[0]}`);
 		console.log(`LazyGasStation ID: ${gasStationId.toString()}`);
 		console.log(`LazyGasStation Address: ${gasStationAddress}`);
-		console.log(`LAZY Burn Percentage: ${Number(lazyDetails.lazyBurnPercentage)}%`);
+		console.log(`LAZY Burn Percentage: ${Number(lazyDetails[1])}%`);
 
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('🎁 Discount Tiers');
@@ -200,12 +202,13 @@ const main = async () => {
 			console.log('No discount tiers configured');
 		}
 		else {
+			console.log('Note: Each discount token is assigned to a tier.');
+			console.log('Use getTokenTierIndex(tokenAddress) to see which tier a token uses.\n');
+
 			discountTiers.forEach(tier => {
-				console.log(`Tier ${tier.index}: ${tier.name}`);
-				console.log(`   Token: ${tier.tokenId}`);
-				console.log(`   Discount per Serial: ${tier.discountPerSerial}%`);
-				console.log(`   Max Serials per Mint: ${tier.maxSerialsPerMint}`);
-				console.log(`   Max Discount: ${tier.maxDiscount}%`);
+				console.log(`Tier ${tier.index}:`);
+				console.log(`   Discount Percentage: ${tier.discountPercentage}%`);
+				console.log(`   Max Uses Per Serial: ${tier.maxUsesPerSerial}`);
 				console.log('');
 			});
 		}
@@ -216,7 +219,7 @@ const main = async () => {
 
 	}
 	catch (error) {
-		console.log('❌ Error loading configuration:', error.message);
+		console.log('❌ Error loading configuration:', error.message, error);
 	}
 };
 

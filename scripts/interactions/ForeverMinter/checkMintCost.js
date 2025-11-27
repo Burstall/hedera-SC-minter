@@ -115,13 +115,13 @@ const main = async () => {
 		const lazyDecimals = parseInt(lazyTokenInfo.decimals);
 
 		// Get WL slots
-		const wlSlotsCommand = minterIface.encodeFunctionData('whitelistSlots', [
-			(await homebrewPopulateAccountEvmAddress(env, operatorId)).startsWith('0x')
-				? await homebrewPopulateAccountEvmAddress(env, operatorId)
-				: operatorId.toSolidityAddress(),
-		]);
+		const userAddress = (await homebrewPopulateAccountEvmAddress(env, operatorId)).startsWith('0x')
+			? await homebrewPopulateAccountEvmAddress(env, operatorId)
+			: operatorId.toSolidityAddress();
+		const wlSlotsCommand = minterIface.encodeFunctionData('getBatchWhitelistSlots', [[userAddress]]);
 		const wlSlotsResult = await readOnlyEVMFromMirrorNode(env, contractId, wlSlotsCommand, operatorId, false);
-		const wlSlots = ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], wlSlotsResult)[0];
+		const slotsArray = minterIface.decodeFunctionResult('getBatchWhitelistSlots', wlSlotsResult)[0];
+		const wlSlots = Number(slotsArray[0]);
 
 		console.log(`   Your WL Slots: ${Number(wlSlots)}`);
 		console.log('');

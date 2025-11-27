@@ -128,7 +128,7 @@ const main = async () => {
 		const lazyCommand = minterIface.encodeFunctionData('getLazyDetails');
 		const lazyResult = await readOnlyEVMFromMirrorNode(env, contractId, lazyCommand, operatorId, false);
 		const lazyDetails = minterIface.decodeFunctionResult('getLazyDetails', lazyResult)[0];
-		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails.lazyToken);
+		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails[0]);
 
 		// Get LAZY token details for decimal precision
 		const lazyTokenInfo = await getTokenDetails(env, lazyTokenId);
@@ -145,18 +145,18 @@ const main = async () => {
 		const lazyGasStationId = ContractId.fromSolidityAddress(lazyGasStationAddress);
 
 		// Format prices for display
-		const hbarPrice = Hbar.fromTinybars(Number(economics.mintPriceHbar));
-		const lazyPrice = Number(economics.mintPriceLazy) / Math.pow(10, lazyDecimals);
+		const hbarPrice = new Hbar(Number(economics[0]) / 100000000);
+		const lazyPrice = Number(economics[1]) / Math.pow(10, lazyDecimals);
 
 		// Check if paused or not started
-		if (timing.mintPaused) {
+		if (timing[2]) {
 			console.log('❌ Error: Minting is currently paused');
 			return;
 		}
 
 		const now = Math.floor(Date.now() / 1000);
-		if (now < Number(timing.mintStartTime)) {
-			const startDate = new Date(Number(timing.mintStartTime) * 1000);
+		if (now < Number(timing[1])) {
+			const startDate = new Date(Number(timing[1]) * 1000);
 			console.log(`❌ Error: Minting has not started yet. Starts at ${startDate.toLocaleString()}`);
 			return;
 		}
@@ -166,11 +166,11 @@ const main = async () => {
 		console.log(`   - NFT Token: ${nftTokenId.toString()}`);
 		console.log(`   - Available Supply: ${Number(remainingSupply)} NFTs`);
 		console.log(`   - Mint Price: ${hbarPrice.toString()} + ${lazyPrice.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
-		console.log(`   - WL Discount: ${Number(economics.wlDiscount)}%`);
-		console.log(`   - Sacrifice Discount: ${Number(economics.sacrificeDiscount)}%`);
-		console.log(`   - Max Mint Per Transaction: ${Number(economics.maxMint) || 'Unlimited'}`);
-		console.log(`   - Max Mint Per Wallet: ${Number(economics.maxMintPerWallet) || 'Unlimited'}`);
-		console.log(`   - Refund Window: ${Number(timing.refundWindow) / 3600} hours (${Number(timing.refundPercentage)}% refund)`);
+		console.log(`   - WL Discount: ${Number(economics[2])}%`);
+		console.log(`   - Sacrifice Discount: ${Number(economics[3])}%`);
+		console.log(`   - Max Mint Per Transaction: ${Number(economics[4]) || 'Unlimited'}`);
+		console.log(`   - Max Mint Per Wallet: ${Number(economics[5]) || 'Unlimited'}`);
+		console.log(`   - Refund Window: ${Number(timing[3]) / 3600} hours (${Number(timing[4])}% refund)`);
 
 		if (Number(remainingSupply) === 0) {
 			console.log('\n❌ Error: No NFTs available in pool. Sold out!');
@@ -329,7 +329,7 @@ const main = async () => {
 		const ownedSerials = await getSerialsOwned(env, operatorId, nftTokenId);
 
 		if (ownedSerials.length > 0) {
-			console.log(`✅ Found ${ownedSerials.length} NFTs eligible for sacrifice (${Number(economics.sacrificeDiscount)}% discount, exclusive)`);
+			console.log(`✅ Found ${ownedSerials.length} NFTs eligible for sacrifice (${Number(economics[3])}% discount, exclusive)`);
 		}
 
 		// Step 4: Get mint quantity
@@ -342,9 +342,9 @@ const main = async () => {
 		else {
 			const maxAllowed = Math.min(
 				Number(remainingSupply),
-				Number(economics.maxMint) || Number(remainingSupply),
-				Number(economics.maxMintPerWallet) > 0
-					? Number(economics.maxMintPerWallet) - Number(currentMintCount)
+				Number(economics[4]) || Number(remainingSupply),
+				Number(economics[5]) > 0
+					? Number(economics[5]) - Number(currentMintCount)
 					: Number(remainingSupply),
 			);
 
@@ -518,7 +518,7 @@ const main = async () => {
 		const sacrificeSerials = [];
 
 		if (ownedSerials.length > 0) {
-			const useSacrifice = readlineSync.question(`Would you like to sacrifice NFTs for ${Number(economics.sacrificeDiscount)}% discount? (y/N): `);
+			const useSacrifice = readlineSync.question(`Would you like to sacrifice NFTs for ${Number(economics[3])}% discount? (y/N): `);
 
 			if (useSacrifice.toLowerCase() === 'y') {
 				console.log(`\nAvailable serials: ${ownedSerials.join(', ')}`);
@@ -668,9 +668,9 @@ const main = async () => {
 			console.log(`   LAZY Paid: ${(Number(totalLazyCost) / Math.pow(10, lazyDecimals)).toFixed(lazyDecimals)} ${lazyTokenInfo.symbol}`);
 
 			console.log('\n⏰ Refund Info:');
-			const refundMinutes = Number(timing.refundWindow) / 60;
-			console.log(`   Refund eligible for: ${refundMinutes} minutes`);
-			console.log(`   Refund amount: ${Number(timing.refundPercentage)}%`);
+			const refundMinutes = Number(timing[3]) / 60;
+			console.log(`   Refund window: ${refundMinutes} minutes`);
+			console.log(`   Refund amount: ${Number(timing[4])}%`);
 
 			console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 			console.log('🎉 Minting complete! Enjoy your NFTs!');

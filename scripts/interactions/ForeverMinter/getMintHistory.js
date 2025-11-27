@@ -3,11 +3,14 @@ const {
 	AccountId,
 	PrivateKey,
 	ContractId,
+	Hbar,
+	TokenId,
 } = require('@hashgraph/sdk');
 require('dotenv').config();
 const fs = require('fs');
 const { ethers } = require('ethers');
 const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
+const { getTokenDetails } = require('../../../utils/hederaMirrorHelpers');
 
 const operatorKey = PrivateKey.fromStringED25519(process.env.PRIVATE_KEY);
 const operatorId = AccountId.fromString(process.env.ACCOUNT_ID);
@@ -71,29 +74,29 @@ const main = async () => {
 		console.log(`Account: ${targetAccountId.toString()}`);
 		console.log('');
 
-		// Get mint count
-		const mintCountCommand = minterIface.encodeFunctionData('getUserMintCount', [targetAddress]);
+		// Get mint count using correct function
+		const mintCountCommand = minterIface.encodeFunctionData('getWalletMintCount', [targetAddress]);
 		const mintCountResult = await readOnlyEVMFromMirrorNode(env, contractId, mintCountCommand, operatorId, false);
-		const mintCount = Number(minterIface.decodeFunctionResult('getUserMintCount', mintCountResult)[0]);
+		const mintCount = Number(minterIface.decodeFunctionResult('getWalletMintCount', mintCountResult)[0]);
 
 		if (mintCount === 0) {
 			console.log('❌ No mint history found for this account');
 			return;
 		}
 
-		// Get average payment
-		const avgPaymentCommand = minterIface.encodeFunctionData('getAveragePayment', [targetAddress]);
-		const avgPaymentResult = await readOnlyEVMFromMirrorNode(env, contractId, avgPaymentCommand, operatorId, false);
-		const avgPayment = minterIface.decodeFunctionResult('getAveragePayment', avgPaymentResult)[0];
-
-		const avgHbar = Number(avgPayment.averageHbar);
-		const avgLazy = Number(avgPayment.averageLazy);
-
-		// Get max per wallet for context
+		// Get max per wallet and LAZY token info for context
 		const economicsCommand = minterIface.encodeFunctionData('getMintEconomics');
 		const economicsResult = await readOnlyEVMFromMirrorNode(env, contractId, economicsCommand, operatorId, false);
 		const economics = minterIface.decodeFunctionResult('getMintEconomics', economicsResult)[0];
-		const maxPerWallet = Number(economics.maxPerWallet);
+		const maxPerWallet = Number(economics[5]); // maxMintPerWallet
+
+		// Get LAZY token details
+		const lazyDetailsCommand = minterIface.encodeFunctionData('getLazyDetails');
+		const lazyDetailsResult = await readOnlyEVMFromMirrorNode(env, contractId, lazyDetailsCommand, operatorId, false);
+		const lazyDetails = minterIface.decodeFunctionResult('getLazyDetails', lazyDetailsResult)[0];
+		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails[0]);
+		const lazyTokenInfo = await getTokenDetails(env, lazyTokenId);
+		const lazyDecimals = parseInt(lazyTokenInfo.decimals);
 
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('📈 Mint Statistics');
@@ -113,46 +116,24 @@ const main = async () => {
 			console.log('Wallet Limit: Unlimited');
 		}
 
+		// Get base prices for reference
+		const baseHbar = new Hbar(Number(economics[0]) / 100000000); // mintPriceHbar
+		const baseLazy = Number(economics[1]) / Math.pow(10, lazyDecimals); // mintPriceLazy
+
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-		console.log('💰 Average Payment per Mint');
+		console.log('💰 Base Mint Prices');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-		console.log(`Average HBAR: ${avgHbar} tℏ`);
-		console.log(`Average LAZY: ${avgLazy} tokens`);
+		console.log(`Base HBAR Price: ${baseHbar.toString()} per NFT`);
+		console.log(`Base ${lazyTokenInfo.symbol} Price: ${baseLazy.toFixed(lazyDecimals)} ${lazyTokenInfo.symbol} per NFT`);
 
-		console.log('\nTotal Spent:');
-		console.log(`   HBAR: ${avgHbar * mintCount} tℏ`);
-		console.log(`   LAZY: ${avgLazy * mintCount} tokens`);
+		console.log('\n💡 Note: Actual costs may be lower with discounts (sacrifice, holder, whitelist)');
 
-		// Get base prices for comparison
-		const baseHbar = Number(economics.hbarPrice);
-		const baseLazy = Number(economics.lazyPrice);
 
-		if (avgHbar < baseHbar || avgLazy < baseLazy) {
-			const hbarSavings = (baseHbar - avgHbar) * mintCount;
-			const lazySavings = (baseLazy - avgLazy) * mintCount;
-			const hbarDiscountPercent = ((1 - (avgHbar / baseHbar)) * 100).toFixed(2);
-			const lazyDiscountPercent = ((1 - (avgLazy / baseLazy)) * 100).toFixed(2);
-
-			console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-			console.log('💎 Discount Performance');
-			console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-			console.log(`Base Price: ${baseHbar} tℏ + ${baseLazy} LAZY`);
-			console.log(`Your Average: ${avgHbar} tℏ + ${avgLazy} LAZY`);
-
-			console.log('\nAverage Discount:');
-			console.log(`   HBAR: ${hbarDiscountPercent}%`);
-			console.log(`   LAZY: ${lazyDiscountPercent}%`);
-
-			console.log('\nTotal Savings:');
-			console.log(`   HBAR: ${hbarSavings} tℏ`);
-			console.log(`   LAZY: ${lazySavings} tokens`);
-		}
+		console.log('\n💡 Use checkDiscounts.js to see your available discounts');
+		console.log('💡 Use checkMintCost.js to preview costs with your holdings');
 
 		console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-		console.log('💡 Note: Average payment reflects actual costs paid after discounts');
 
 	}
 	catch (error) {

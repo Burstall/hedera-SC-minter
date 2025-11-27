@@ -67,16 +67,19 @@ const main = async () => {
 
 	try {
 		// Get whitelist slots
-		const wlSlotsCommand = minterIface.encodeFunctionData('whitelistSlots', [targetAddress]);
+		const wlSlotsCommand = minterIface.encodeFunctionData('getBatchWhitelistSlots', [[targetAddress]]);
 		const wlSlotsResult = await readOnlyEVMFromMirrorNode(env, contractId, wlSlotsCommand, operatorId, false);
-		const wlSlots = Number(minterIface.decodeFunctionResult('whitelistSlots', wlSlotsResult)[0]);
+		const slotsArray = minterIface.decodeFunctionResult('getBatchWhitelistSlots', wlSlotsResult)[0];
+		const wlSlots = Number(slotsArray[0]);
 
-		// Get WL slot cost
+		// Get WL slot cost and discount info
 		const economicsCommand = minterIface.encodeFunctionData('getMintEconomics');
 		const economicsResult = await readOnlyEVMFromMirrorNode(env, contractId, economicsCommand, operatorId, false);
 		const economics = minterIface.decodeFunctionResult('getMintEconomics', economicsResult)[0];
-		const wlSlotCost = Number(economics.buyWlWithLazy);
-		const slotsPerPurchase = Number(economics.buyWlSlotCount);
+		const wlSlotCost = Number(economics[6]); // buyWlWithLazy
+		const slotsPerPurchase = Number(economics[7]); // buyWlSlotCount
+		const wlDiscount = Number(economics[2]); // wlDiscount
+		const sacrificeDiscount = Number(economics[3]); // sacrificeDiscount
 
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 		console.log('🎟️  Whitelist Slot Status');
@@ -96,14 +99,16 @@ const main = async () => {
 		console.log('💡 What are Whitelist Slots?');
 		console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-		console.log('Whitelist slots allow you to mint at full price BEFORE');
+		console.log('Whitelist slots allow you to mint at a discount BEFORE');
 		console.log('the waterfall discount system applies holder discounts.');
 		console.log('');
-		console.log('Discount Waterfall Order:');
-		console.log('   1. Sacrifice (if NFT provided)');
-		console.log('   2. Holder Discounts (consume holder slots)');
-		console.log('   3. Whitelist (consume WL slots)');
-		console.log('   4. Full Price (no slots consumed)');
+		console.log('Discount Logic:');
+		console.log(`   • Sacrifice: ${sacrificeDiscount}% discount (STOPS HERE - mutually exclusive)`);
+		console.log('');
+		console.log('OR if no sacrifice, waterfall applies:');
+		console.log('   1. Holder Discounts (consume holder slots first)');
+		console.log(`   2. Whitelist: ${wlDiscount}% discount (consume WL slots)`);
+		console.log('   3. Full Price (no slots consumed)');
 		console.log('');
 		console.log(`Cost to purchase: ${wlSlotCost} LAZY per purchase`);
 		console.log(`Slots per purchase: ${slotsPerPurchase}`);

@@ -35,6 +35,9 @@ async function useSetter(contractId, iface, client, fcnName, gasLim, ...values) 
  * @returns {String} the error message
  */
 function parseError(iface, errorData) {
+	if (!errorData) {
+		return 'Unknown error - no error data provided';
+	}
 
 	if (errorData.startsWith('0x08c379a0')) {
 		// decode Error(string)
@@ -174,9 +177,17 @@ async function readOnlyEVMFromMirrorNode(env, contractId, data, from, estimate =
 
 	const url = `${baseUrl}/api/v1/contracts/call`;
 
-	const response = await axios.post(url, body);
-
-	return response.data?.result;
+	try {
+		const response = await axios.post(url, body);
+		return response.data?.result;
+	}
+	catch (error) {
+		if (error.response?.data?._status?.messages) {
+			const messages = error.response.data._status.messages;
+			throw new Error(`Mirror node error: ${messages.map(m => m.message).join(', ')}`);
+		}
+		throw error;
+	}
 }
 
 /**

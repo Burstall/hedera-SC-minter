@@ -77,7 +77,7 @@ const main = async () => {
 		const lazyCommand = minterIface.encodeFunctionData('getLazyDetails');
 		const lazyResult = await readOnlyEVMFromMirrorNode(env, contractId, lazyCommand, operatorId, false);
 		const lazyDetails = minterIface.decodeFunctionResult('getLazyDetails', lazyResult)[0];
-		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails.lazyToken);
+		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails[0]);
 
 		// Check LAZY token association
 		const balance = await checkMirrorBalance(env, operatorId, lazyTokenId);
@@ -93,8 +93,8 @@ const main = async () => {
 		const economicsCommand = minterIface.encodeFunctionData('getMintEconomics');
 		const economicsResult = await readOnlyEVMFromMirrorNode(env, contractId, economicsCommand, operatorId, false);
 		const economics = minterIface.decodeFunctionResult('getMintEconomics', economicsResult)[0];
-		const wlSlotCost = Number(economics.buyWlWithLazy);
-		const slotsPerPurchase = Number(economics.buyWlSlotCount);
+		const wlSlotCost = Number(economics[6]);
+		const slotsPerPurchase = Number(economics[7]);
 
 		// Get LAZY token info for decimal precision
 		const lazyTokenInfo = await getTokenDetails(env, lazyTokenId);

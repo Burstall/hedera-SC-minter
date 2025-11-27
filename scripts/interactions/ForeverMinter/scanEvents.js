@@ -11,11 +11,17 @@ const readlineSync = require('readline-sync');
 const {
 	parseContractEvents,
 	homebrewPopulateAccountNum,
+	getTokenDetails,
 } = require('../../../utils/hederaMirrorHelpers');
 
 const contractName = 'ForeverMinter';
 const contractId = ContractId.fromString(process.env.FOREVER_MINTER_CONTRACT_ID || '');
 const env = process.env.ENVIRONMENT ?? null;
+
+// Caches for performance
+const accountCache = new Map();
+let lazyTokenInfo = null;
+let lazyDecimals = null;
 
 // Event type definitions for filtering
 const EVENT_TYPES = {
@@ -33,9 +39,33 @@ const EVENT_TYPES = {
 };
 
 /**
+ * Cached account lookup to avoid repeated Mirror Node calls
+ */
+async function getCachedAccountId(environment, evmAddress) {
+	const key = evmAddress.toLowerCase();
+	if (!accountCache.has(key)) {
+		const accountId = await homebrewPopulateAccountNum(environment, evmAddress);
+		accountCache.set(key, accountId);
+	}
+	return accountCache.get(key);
+}
+
+/**
+ * Format LAZY amount with proper decimals
+ */
+function formatLazyAmount(amount) {
+	// Use cached decimals, or default to 1 if not loaded (LAZY has 1 decimal)
+	const decimals = lazyDecimals !== null ? lazyDecimals : 1;
+	const divisor = Math.pow(10, decimals);
+	const formatted = (Number(amount) / divisor).toFixed(decimals);
+	const symbol = lazyTokenInfo ? lazyTokenInfo.symbol : 'LAZY';
+	return `${formatted} ${symbol}`;
+}
+
+/**
  * Format event data for human-readable display
  */
-async function formatEvent(event) {
+async function formatEvent(event, environment) {
 	const formatted = {
 		timestamp: event.timestamp,
 		type: EVENT_TYPES[event.name] || event.name,
@@ -48,13 +78,13 @@ async function formatEvent(event) {
 		switch (event.name) {
 		case 'NFTMinted': {
 			const { minter, quantity, serials, hbarPaid, lazyPaid, totalDiscount } = event.args;
-			const minterId = await homebrewPopulateAccountNum(minter);
+			const minterId = await getCachedAccountId(environment, minter);
 			formatted.details = {
 				minter: minterId.toString(),
 				quantity: Number(quantity),
 				serials: serials.map(s => Number(s)),
 				hbarPaid: Hbar.fromTinybars(Number(hbarPaid)).toString(),
-				lazyPaid: Number(lazyPaid),
+				lazyPaid: formatLazyAmount(lazyPaid),
 				totalDiscount: `${Number(totalDiscount)}%`,
 			};
 			break;
@@ -62,19 +92,19 @@ async function formatEvent(event) {
 
 		case 'NFTRefunded': {
 			const { refunder, serials, hbarRefunded, lazyRefunded } = event.args;
-			const refunderId = await homebrewPopulateAccountNum(refunder);
+			const refunderId = await getCachedAccountId(environment, refunder);
 			formatted.details = {
 				refunder: refunderId.toString(),
 				serials: serials.map(s => Number(s)),
 				hbarRefunded: Hbar.fromTinybars(Number(hbarRefunded)).toString(),
-				lazyRefunded: Number(lazyRefunded),
+				lazyRefunded: formatLazyAmount(lazyRefunded),
 			};
 			break;
 		}
 
 		case 'NFTsAddedToPool': {
 			const { source, serials, newPoolSize } = event.args;
-			const sourceId = await homebrewPopulateAccountNum(source);
+			const sourceId = await getCachedAccountId(environment, source);
 			formatted.details = {
 				source: sourceId.toString(),
 				serialsAdded: serials.map(s => Number(s)),
@@ -111,7 +141,7 @@ async function formatEvent(event) {
 			const { mintPriceHbar, mintPriceLazy, wlDiscount, sacrificeDiscount } = event.args;
 			formatted.details = {
 				mintPriceHbar: Hbar.fromTinybars(Number(mintPriceHbar)).toString(),
-				mintPriceLazy: Number(mintPriceLazy),
+				mintPriceLazy: formatLazyAmount(mintPriceLazy),
 				wlDiscount: `${Number(wlDiscount)}%`,
 				sacrificeDiscount: `${Number(sacrificeDiscount)}%`,
 			};
@@ -133,7 +163,7 @@ async function formatEvent(event) {
 
 		case 'WhitelistUpdated': {
 			const { account, added } = event.args;
-			const accountId = await homebrewPopulateAccountNum(account);
+			const accountId = await getCachedAccountId(environment, account);
 			formatted.details = {
 				account: accountId.toString(),
 				action: added ? 'ADDED' : 'REMOVED',
@@ -143,7 +173,7 @@ async function formatEvent(event) {
 
 		case 'AdminUpdated': {
 			const { account, added } = event.args;
-			const accountId = await homebrewPopulateAccountNum(account);
+			const accountId = await getCachedAccountId(environment, account);
 			formatted.details = {
 				account: accountId.toString(),
 				action: added ? 'ADDED' : 'REMOVED',
@@ -153,22 +183,22 @@ async function formatEvent(event) {
 
 		case 'FundsWithdrawn': {
 			const { recipient, hbarAmount, lazyAmount } = event.args;
-			const recipientId = await homebrewPopulateAccountNum(recipient);
+			const recipientId = await getCachedAccountId(environment, recipient);
 			formatted.details = {
 				recipient: recipientId.toString(),
 				hbarAmount: Hbar.fromTinybars(Number(hbarAmount)).toString(),
-				lazyAmount: Number(lazyAmount),
+				lazyAmount: formatLazyAmount(lazyAmount),
 			};
 			break;
 		}
 
 		case 'LazyPaymentEvent': {
 			const { payer, amount, burnAmount } = event.args;
-			const payerId = await homebrewPopulateAccountNum(payer);
+			const payerId = await getCachedAccountId(environment, payer);
 			formatted.details = {
 				payer: payerId.toString(),
-				amount: Number(amount),
-				burnAmount: Number(burnAmount),
+				amount: formatLazyAmount(amount),
+				burnAmount: formatLazyAmount(burnAmount),
 				burnPercentage: amount > 0 ? `${(Number(burnAmount) * 100 / Number(amount)).toFixed(2)}%` : '0%',
 			};
 			break;
@@ -297,7 +327,22 @@ const main = async () => {
 	}
 
 	const contractJSON = JSON.parse(fs.readFileSync(abiPath));
-	const iface = new ethers.Interface(contractJSON);
+	const iface = new ethers.Interface(contractJSON.abi);
+
+	// Initialize LAZY token details for formatting
+	try {
+		const { readOnlyEVMFromMirrorNode } = require('../../../utils/solidityHelpers');
+		const lazyDetailsCommand = iface.encodeFunctionData('getLazyDetails');
+		const lazyDetailsResult = await readOnlyEVMFromMirrorNode(env, contractId, lazyDetailsCommand, null, false);
+		const lazyDetails = iface.decodeFunctionResult('getLazyDetails', lazyDetailsResult)[0];
+		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails[0]);
+		lazyTokenInfo = await getTokenDetails(env, lazyTokenId);
+		lazyDecimals = parseInt(lazyTokenInfo.decimals);
+		console.log(`💎 LAZY Token: ${lazyTokenId.toString()} (${lazyDecimals} decimals)\n`);
+	}
+	catch {
+		console.log('⚠️  Could not load LAZY token details, amounts will show as raw values\n');
+	}
 
 	// Check for command line arguments
 	const args = process.argv.slice(2);
@@ -400,7 +445,7 @@ const main = async () => {
 	console.log('📝 Formatting events...');
 	const formattedEvents = [];
 	for (const event of filteredEvents) {
-		const formatted = await formatEvent(event);
+		const formatted = await formatEvent(event, env);
 		formattedEvents.push(formatted);
 	}
 
