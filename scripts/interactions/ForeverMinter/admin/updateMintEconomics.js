@@ -75,13 +75,13 @@ const main = async () => {
 			return;
 		}
 
-		const currentEconomics = minterIface.decodeFunctionResult('getMintEconomics', queryResult);
+		const currentEconomics = minterIface.decodeFunctionResult('getMintEconomics', queryResult)[0];
 
 		// Get LAZY token details for decimal precision
 		const lazyCommand = minterIface.encodeFunctionData('getLazyDetails');
 		const lazyResult = await readOnlyEVMFromMirrorNode(env, contractId, lazyCommand, operatorId, false);
 		const lazyDetails = minterIface.decodeFunctionResult('getLazyDetails', lazyResult)[0];
-		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails.lazyToken);
+		const lazyTokenId = TokenId.fromSolidityAddress(lazyDetails[0]);
 		const lazyTokenInfo = await getTokenDetails(env, lazyTokenId);
 		if (!lazyTokenInfo) {
 			console.log('❌ Error: Could not fetch LAZY token details');
@@ -90,16 +90,16 @@ const main = async () => {
 		const lazyDecimals = parseInt(lazyTokenInfo.decimals);
 
 		// Extract current values
-		const currentHbarPrice = Number(currentEconomics[0][0]);
-		const currentLazyPrice = Number(currentEconomics[0][1]);
-		const currentWlDiscount = Number(currentEconomics[0][2]);
-		const currentSacrificeDiscount = Number(currentEconomics[0][3]);
-		const currentMaxMint = Number(currentEconomics[0][4]);
-		const currentMaxMintPerWallet = Number(currentEconomics[0][5]);
-		const currentBuyWlWithLazy = Number(currentEconomics[0][6]);
-		const currentBuyWlSlotCount = Number(currentEconomics[0][7]);
-		const currentMaxSacrifice = Number(currentEconomics[0][8]);
-		const currentLazyFromContract = currentEconomics[0][9];
+		const currentHbarPrice = Number(currentEconomics[0]);
+		const currentLazyPrice = Number(currentEconomics[1]);
+		const currentWlDiscount = Number(currentEconomics[2]);
+		const currentSacrificeDiscount = Number(currentEconomics[3]);
+		const currentMaxMint = Number(currentEconomics[4]);
+		const currentMaxMintPerWallet = Number(currentEconomics[5]);
+		const currentBuyWlWithLazy = Number(currentEconomics[6]);
+		const currentBuyWlSlotCount = Number(currentEconomics[7]);
+		const currentMaxSacrifice = Number(currentEconomics[8]);
+		const currentLazyFromContract = currentEconomics[9];
 
 		console.log('📊 Current Economics Configuration:');
 		console.log(`   HBAR Price: ${Hbar.fromTinybars(currentHbarPrice).toString()}`);

@@ -488,9 +488,10 @@
   - [x] Use safe transfer `call{value}()`
   - [x] Emit `FundsWithdrawn` event
 
-- [x] Create `withdrawLazy()`:
-  - [x] Similar to withdrawHbar but for LAZY
-  - [x] Use IERC20 transfer
+- [x] ~~Create `withdrawLazy()`~~ - NOT NEEDED
+  - LazyGasStation manages all LAZY operations
+  - ForeverMinter never holds LAZY tokens
+  - No withdrawal function required
 
 ---
 
@@ -693,7 +694,7 @@
 
 ### 25.5 Admin Financial Operations (2/2) ✅
 - [x] admin/withdrawHbar.js - Withdraw contract HBAR
-- [x] admin/withdrawLazy.js - Withdraw contract LAZY
+- [x] ~~admin/withdrawLazy.js~~ - NOT NEEDED (LazyGasStation handles LAZY)
 
 ### 25.6 Admin User Management (3/3) ✅
 - [x] admin/addAdmin.js - Add new admin
@@ -789,7 +790,7 @@
 - Discounts: addDiscountTier.js, updateDiscountTier.js, removeDiscountTier.js
 - Whitelist: addToWhitelist.js, batchAddToWhitelist.js, removeFromWhitelist.js
 - Pool: registerPoolNFTs.js, addToPool.js, emergencyWithdrawNFT.js
-- Finance: withdrawHbar.js, withdrawLazy.js
+- Finance: withdrawHbar.js (LAZY managed by LazyGasStation)
 - Users: addAdmin.js, removeAdmin.js, listAdmins.js
 - Advanced: setSacrificeDestination.js, setLazyBurnPercentage.js
 

@@ -59,7 +59,6 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -1472,24 +1471,6 @@ contract ForeverMinter is TokenStakerV2, Ownable, ReentrancyGuard {
         payable(_recipient).sendValue(_amount);
 
         emit FundsWithdrawn(_recipient, _amount, 0);
-    }
-
-    /// @notice Withdraw LAZY tokens from contract
-    /// @param _recipient Address to receive LAZY
-    /// @param _amount Amount of LAZY to withdraw
-    function withdrawLazy(
-        address _recipient,
-        uint256 _amount
-    ) external onlyAdmin {
-        _checkWithdrawalAllowed(_recipient);
-
-        bool success = IERC20(lazyDetails.lazyToken).transfer(
-            _recipient,
-            _amount
-        );
-        if (!success) revert TransferFailed();
-
-        emit FundsWithdrawn(_recipient, 0, _amount);
     }
 
     // ============ View Functions ============

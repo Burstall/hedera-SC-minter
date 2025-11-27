@@ -1207,10 +1207,9 @@ function withdrawHbar(
     emit HbarWithdrawn(_recipient, _amount);
 }
 
-function withdrawLazy(
-    address _recipient,
-    uint256 _amount
-) external onlyAdmin {
+// withdrawLazy() NOT IMPLEMENTED
+// Reason: LazyGasStation handles all LAZY token operations.
+// ForeverMinter never holds LAZY tokens directly. {
     require(
         block.timestamp >= lastWithdrawalTime[msg.sender] + withdrawalCooldown,
         "CooldownActive"
@@ -1326,7 +1325,7 @@ All functions marked `onlyOwner` in MinterContract become `onlyAdmin`:
 
 **Withdrawals:**
 - `withdrawHbar`
-- `withdrawLazy`
+- ~~`withdrawLazy`~~ (not implemented - LazyGasStation handles LAZY)
 
 ---
 

@@ -44,9 +44,9 @@ scripts/interactions/ForeverMinter/
     ├── addToPool.js                   # Add additional NFTs to pool
     ├── emergencyWithdrawNFT.js        # Emergency NFT withdrawal
     │
-    ├── Financial Operations (2)
+    ├── Financial Operations (1)
     ├── withdrawHbar.js                # Withdraw contract HBAR
-    ├── withdrawLazy.js                # Withdraw contract LAZY
+    │   └── Note: LAZY managed by LazyGasStation, not held by ForeverMinter
     │
     ├── User Management (3)
     ├── addAdmin.js                    # Add new admin
@@ -165,7 +165,7 @@ node scripts/interactions/ForeverMinter/admin/addToWhitelist.js 0.0.123456 5
 
 **Financial Operations (2 scripts):**
 - `withdrawHbar.js` - Withdraw all contract HBAR to owner
-- `withdrawLazy.js` - Withdraw all contract LAZY to owner
+- **Note:** LAZY tokens are managed by LazyGasStation contract, not held by ForeverMinter
 
 **User Management (3 scripts):**
 - `addAdmin.js` - Grant admin privileges to account

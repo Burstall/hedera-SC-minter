@@ -72,14 +72,14 @@ const main = async () => {
 			return;
 		}
 
-		const currentTiming = minterIface.decodeFunctionResult('getMintTiming', queryResult);
+		const currentTiming = minterIface.decodeFunctionResult('getMintTiming', queryResult)[0];
 
 		// Extract current values
-		const currentStartTime = Number(currentTiming[0][1]);
-		const currentMintPaused = currentTiming[0][2];
-		const currentRefundWindow = Number(currentTiming[0][3]);
-		const currentRefundPercentage = Number(currentTiming[0][4]);
-		const currentWlOnly = currentTiming[0][5];
+		const currentStartTime = Number(currentTiming[1]);
+		const currentMintPaused = currentTiming[2];
+		const currentRefundWindow = Number(currentTiming[3]);
+		const currentRefundPercentage = Number(currentTiming[4]);
+		const currentWlOnly = currentTiming[5];
 
 		console.log('📊 Current Timing Configuration:');
 		console.log(`   Start Time: ${currentStartTime === 0 ? 'Immediate' : new Date(currentStartTime * 1000).toLocaleString()} (${currentStartTime})`);

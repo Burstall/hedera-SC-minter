@@ -141,10 +141,10 @@
 
 #### 13. Withdrawals ✓
 - ✅ `withdrawHbar()` - Withdraw HBAR with cooldown
-- ✅ `withdrawLazy()` - Withdraw LAZY with cooldown
-- ✅ Per-admin cooldown tracking
+- ✅ Per-admin cooldown tracking (HBAR only)
 - ✅ Cooldown bypass prevention
 - ✅ Safe transfer implementation
+- ⚠️ **Note:** No `withdrawLazy()` - LazyGasStation manages all LAZY operations
 
 ### View Functions
 

@@ -113,7 +113,6 @@ node scripts/interactions/ForeverMinter/getContractInfo.js
 | Script | Description | Usage |
 |--------|-------------|-------|
 | `withdrawHbar.js` | Withdraw HBAR from contract | `node withdrawHbar.js <recipient> <amount>` |
-| `withdrawLazy.js` | Withdraw LAZY from contract | `node withdrawLazy.js <recipient> <amount>` |
 
 ### Admin Management
 
